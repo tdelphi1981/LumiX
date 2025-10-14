@@ -175,8 +175,8 @@ class LXModel(Generic[TModel]):
         """
         return (
             f"LXModel: {self.name}\n"
-            f"  Variables: {len(self.variables)}\n"
-            f"  Constraints: {len(self.constraints)}\n"
+            f"  Variable Families: {len(self.variables)}\n"
+            f"  Constraint Families: {len(self.constraints)}\n"
             f"  Objective: {self.objective_sense.value}\n"
         )
 

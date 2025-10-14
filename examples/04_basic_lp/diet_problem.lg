@@ -1,0 +1,155 @@
+! ========================================================================
+! LINGO Model: Diet Problem
+! ========================================================================
+!
+! Traditional optimization modeling approach for comparison with LumiX
+!
+! Problem: Minimize cost of food while meeting nutritional requirements
+!
+! Key Characteristics of Traditional Approach:
+! - Model-centric: Data embedded in the model file
+! - Manual set definitions and indexing
+! - Explicit summation loops (@SUM)
+! - Proprietary modeling language
+! - No type safety or IDE support
+! - Changes to data require model file edits
+!
+! Compare this with LumiX's data-driven, type-safe Python approach!
+! ========================================================================
+
+MODEL:
+
+! ==================== SETS ====================
+! Define the set of foods (manual enumeration)
+SETS:
+    FOODS / Oatmeal, Chicken, Eggs, Milk, 'Apple Pie', Pork /:
+        ! Decision variables: servings of each food
+        Servings,
+        ! Data: cost per serving ($)
+        Cost,
+        ! Data: nutritional content per serving
+        Calories,
+        Protein,   ! grams
+        Calcium;   ! mg
+ENDSETS
+
+! ==================== DATA SECTION ====================
+! Data must be manually entered in the model
+! (In LumiX, this comes from Python dataclasses or database)
+
+DATA:
+    ! Cost per serving ($)
+    Cost = 0.30   ! Oatmeal
+           2.40   ! Chicken
+           0.50   ! Eggs
+           0.60   ! Milk
+           1.60   ! Apple Pie
+           2.90;  ! Pork
+
+    ! Calories per serving
+    Calories = 110   ! Oatmeal
+               205   ! Chicken
+               160   ! Eggs
+               160   ! Milk
+               420   ! Apple Pie
+               260;  ! Pork
+
+    ! Protein per serving (grams)
+    Protein = 4    ! Oatmeal
+              32   ! Chicken
+              13   ! Eggs
+              8    ! Milk
+              4    ! Apple Pie
+              14;  ! Pork
+
+    ! Calcium per serving (mg)
+    Calcium = 2    ! Oatmeal
+              12   ! Chicken
+              60   ! Eggs
+              285  ! Milk
+              22   ! Apple Pie
+              10;  ! Pork
+ENDDATA
+
+! ==================== OBJECTIVE FUNCTION ====================
+! Minimize total cost
+! Note: Explicit @SUM syntax required, manual loop over FOODS set
+MIN = @SUM(FOODS(I): Cost(I) * Servings(I));
+
+! ==================== CONSTRAINTS ====================
+
+! Constraint 1: Minimum calories requirement (2000 calories)
+! Manual summation over all foods
+@SUM(FOODS(I): Calories(I) * Servings(I)) >= 2000;
+
+! Constraint 2: Minimum protein requirement (50 grams)
+@SUM(FOODS(I): Protein(I) * Servings(I)) >= 50;
+
+! Constraint 3: Minimum calcium requirement (800 mg)
+@SUM(FOODS(I): Calcium(I) * Servings(I)) >= 800;
+
+! Constraint 4: Non-negativity (all servings >= 0)
+! Note: Must explicitly bound each variable
+@FOR(FOODS(I): Servings(I) >= 0);
+
+! ==================== END OF MODEL ====================
+
+END
+
+! ========================================================================
+! KEY DIFFERENCES FROM LumiX:
+! ========================================================================
+!
+! 1. DATA MANAGEMENT:
+!    LINGO: Data hardcoded in model file, difficult to maintain
+!    LumiX: Data in Python dataclasses, can come from databases/APIs
+!
+! 2. TYPE SAFETY:
+!    LINGO: No type checking, errors caught at runtime
+!    LumiX: Full Python type hints, IDE autocomplete, compile-time checks
+!
+! 3. EXTENSIBILITY:
+!    LINGO: Adding food requires editing 3+ places (set, cost, nutrition)
+!    LumiX: Adding food = one line in FOODS list: Food("New", 1.0, 100, 5, 20)
+!
+! 4. SYNTAX:
+!    LINGO: Proprietary language, @SUM/@FOR macros, no modern features
+!    LumiX: Python with lambdas, comprehensions, full language features
+!
+! 5. MODULARITY:
+!    LINGO: Model = monolithic file with embedded data
+!    LumiX: Separation of data, model logic, and solving
+!
+! 6. INTEGRATION:
+!    LINGO: Standalone tool, limited integration options
+!    LumiX: Native Python, integrates with pandas, numpy, databases, etc.
+!
+! 7. LEARNING CURVE:
+!    LINGO: Learn proprietary syntax, limited resources
+!    LumiX: Python knowledge transfers, extensive documentation
+!
+! 8. DEBUGGING:
+!    LINGO: Limited debugging tools, cryptic error messages
+!    LumiX: Full Python debugging, clear error messages, IDE support
+!
+! 9. VERSION CONTROL:
+!    LINGO: Data changes = model file changes, hard to diff
+!    LumiX: Data separate from model, clean version control
+!
+! 10. COLLABORATION:
+!     LINGO: Requires LINGO license for all team members
+!     LumiX: Open-source Python, accessible to all developers
+!
+! ========================================================================
+! TO RUN THIS MODEL IN LINGO:
+! ========================================================================
+! 1. Install LINGO software (commercial license required)
+! 2. Open diet_problem.lg in LINGO
+! 3. Click LINGO > Solve
+! 4. View solution in LINGO's solution window
+!
+! Compare with LumiX:
+! 1. pip install lumix[ortools]  (free, open-source)
+! 2. python basic_lp.py
+! 3. Results printed to console with full context
+! ========================================================================

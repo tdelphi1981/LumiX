@@ -1,0 +1,36 @@
+============================================================
+LumiX Example: Basic Diet Problem
+============================================================
+
+Building optimization model...
+LXModel: diet_problem
+  Variable Families: 1
+  Constraint Families: 3
+  Objective: min
+
+
+Creating optimizer with OR-Tools solver...
+
+Solving...
+2025-10-09 16:47:31 - lumix.optimizer - INFO - Created model 'diet_problem' with 1 variables and 3 constraints
+2025-10-09 16:47:31 - lumix.optimizer - INFO - Starting solve with ortools...
+2025-10-09 16:47:31 - lumix.optimizer - INFO - Solve completed: optimal | Objective: 5.8975 | Time: 0.00s
+
+============================================================
+SOLUTION
+============================================================
+Status: optimal
+Optimal Cost: $5.90
+Solve Time: 0.000s
+
+Optimal Diet Plan:
+------------------------------------------------------------
+  Oatmeal     :  14.24 servings  (cost: $ 4.27)
+  Milk        :   2.71 servings  (cost: $ 1.62)
+
+Nutritional Totals:
+------------------------------------------------------------
+  Total Cost:    $5.90
+  Calories:      2000.0 (min: 2000)
+  Protein:         78.6g (min: 50g)
+  Calcium:        800.0mg (min: 800mg)

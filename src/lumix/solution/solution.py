@@ -17,7 +17,7 @@ class LXSolution(Generic[TModel]):
 
     Provides access to:
     - Variable values (by name or LXVariable object)
-    - Mapped values (variables mapped to model instances)
+    - Mapped values (variables mapped by index keys)
     - Shadow prices (dual values for constraints)
     - Reduced costs (for sensitivity analysis)
 
@@ -33,10 +33,10 @@ class LXSolution(Generic[TModel]):
         # Access multi-indexed variables
         duty_value = solution.variables["duty"][(driver_id, date)]
 
-        # Access mapped to models
-        for (driver, date), value in solution.get_mapped(duty).items():
+        # Access mapped values (indexed by keys)
+        for key, value in solution.get_mapped(duty).items():
             if value > 0.5:
-                print(f"{driver.name} works on {date}")
+                print(f"Variable {key} = {value}")
     """
 
     objective_value: float
@@ -46,8 +46,10 @@ class LXSolution(Generic[TModel]):
     # Type-safe variable values
     variables: Dict[str, Union[float, Dict[Any, float]]] = field(default_factory=dict)
 
-    # Mapped to original models
-    mapped: Dict[str, Dict[TModel, float]] = field(default_factory=dict)
+    # Mapped values by index keys (same structure as variables)
+    # Note: Uses index keys (e.g., product.id) not model instances
+    # to avoid hashability issues with non-frozen dataclasses
+    mapped: Dict[str, Dict[Any, float]] = field(default_factory=dict)
 
     # Sensitivity data
     shadow_prices: Dict[str, float] = field(default_factory=dict)
@@ -70,15 +72,26 @@ class LXSolution(Generic[TModel]):
         """
         return self.variables.get(var.name, 0)  # type: ignore
 
-    def get_mapped(self, var: LXVariable[TModel, TValue]) -> Dict[TModel, TValue]:
+    def get_mapped(self, var: LXVariable[TModel, TValue]) -> Dict[Any, TValue]:
         """
-        Get values mapped to model instances.
+        Get values mapped by index keys.
+
+        Returns the same structure as variables, indexed by the keys
+        extracted via the variable's index_func (e.g., product.id).
+
+        Note: This returns index keys, not model instances, to avoid
+        hashability issues with non-frozen dataclasses.
 
         Args:
             var: LXVariable to get mapped values for
 
         Returns:
-            Dictionary mapping model instances to values
+            Dictionary mapping index keys to values
+
+        Examples:
+            # For production indexed by product.id
+            for product_id, qty in solution.get_mapped(production).items():
+                print(f"Product {product_id}: {qty} units")
         """
         return self.mapped.get(var.name, {})  # type: ignore
 

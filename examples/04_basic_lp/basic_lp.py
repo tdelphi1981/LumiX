@@ -2,7 +2,7 @@
 Basic Linear Programming Example: Diet Problem
 ===============================================
 
-This is the SIMPLEST possible OptiXNG example.
+This is the SIMPLEST possible LumiX example.
 Learn the absolute basics of data-driven model building here.
 
 Problem: Minimize cost of food while meeting nutritional requirements.
@@ -12,11 +12,13 @@ Key Features Demonstrated:
 - Data-driven modeling with .from_data()
 - Automatic expression expansion (no manual loops)
 - Type-safe coefficients with lambda functions
+- OR-Tools solver integration
 """
 
 from dataclasses import dataclass
+from typing import Tuple
 
-from optixng import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
+from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
 
 
 # ==================== DATA DEFINITIONS ====================
@@ -52,9 +54,13 @@ MIN_CALCIUM = 800  # mg
 # ==================== MODEL BUILDING ====================
 
 
-def build_diet_model() -> LXModel:
-    """Build the diet optimization model using data-driven approach."""
+def build_diet_model() -> Tuple[LXModel, LXVariable[Food, float]]:
+    """
+    Build the diet optimization model using data-driven approach.
 
+    Returns:
+        Tuple of (model, servings variable) for type-safe solution access
+    """
     # Decision Variable: Servings of each food (variable family)
     # ONE LXVariable that expands to multiple solver variables automatically
     servings = (
@@ -74,7 +80,7 @@ def build_diet_model() -> LXModel:
         servings,
         coeff=lambda f: f.cost_per_serving
     )
-    model.minimize(cost_expr)
+    model.minimize(cost_expr) # TODO feels like optimization runs in this line, naming confusion
 
     # Constraint 1: Minimum calories
     # Expression automatically sums calories from all foods
@@ -107,7 +113,7 @@ def build_diet_model() -> LXModel:
         .rhs(MIN_CALCIUM)
     )
 
-    return model
+    return model, servings
 
 
 # ==================== MAIN ====================
@@ -117,38 +123,87 @@ def main():
     """Run the diet problem optimization."""
 
     print("=" * 60)
-    print("OptiXNG Example: Basic Diet Problem")
+    print("LumiX Example: Basic Diet Problem")
     print("=" * 60)
     print()
 
     # Build model
     print("Building optimization model...")
-    model = build_diet_model()
+    model, servings = build_diet_model()
     print(model.summary())
     print()
 
-    # Create optimizer
-    print("Creating optimizer...")
+    # Create optimizer with OR-Tools
+    print("Creating optimizer with OR-Tools solver...")
     optimizer = LXOptimizer()
-    print("NOTE: Solver implementations not yet complete.")
-    print("This example demonstrates the API for model building.")
+    optimizer.use_solver("cplex")
     print()
 
-    # Would solve like this with data-driven mapping:
-    # solution = optimizer.solve(model)
-    # print(f"Status: {solution.status}")
-    # print(f"Optimal Cost: ${solution.objective_value:.2f}")
-    # print("\nDiet Plan:")
-    # for food, servings_qty in solution.get_mapped(servings).items():
-    #     if servings_qty > 0.01:
-    #         print(f"  {food.name}: {servings_qty:.1f} servings")
-    #         # Note: food is Food type, IDE knows about food.name, food.cost_per_serving, etc.
+    # Solve the model
+    print("Solving...")
+    try:
+        solution = optimizer.solve(model)
+        print()
 
-    print("Model built successfully!")
-    print("Next steps:")
-    print("  1. Implement solver backend (OR-Tools/Gurobi/CPLEX)")
-    print("  2. Call optimizer.solve(model)")
-    print("  3. Access solution.variables to get results")
+        # Display results
+        print("=" * 60)
+        print("SOLUTION")
+        print("=" * 60)
+
+        if solution.is_optimal():
+            print(f"Status: {solution.status}")
+            print(f"Optimal Cost: ${solution.objective_value:.2f}")
+            print(f"Solve Time: {solution.solve_time:.3f}s")
+            print()
+
+            print("Optimal Diet Plan:")
+            print("-" * 60)
+
+            # Access solution using mapped values (indexed by food name)
+            total_cost = 0.0
+            total_calories = 0.0
+            total_protein = 0.0
+            total_calcium = 0.0
+
+            # Create lookup dict for Food instances by name
+            food_by_name = {f.name: f for f in FOODS}
+
+            for food_name, servings_qty in solution.get_mapped(servings).items():
+                if servings_qty > 0.01:  # Only show non-zero servings
+                    # Look up the Food instance by name
+                    food = food_by_name[food_name]
+
+                    cost = food.cost_per_serving * servings_qty
+                    total_cost += cost
+                    total_calories += food.calories * servings_qty
+                    total_protein += food.protein * servings_qty
+                    total_calcium += food.calcium * servings_qty
+
+                    print(
+                        f"  {food.name:12s}: {servings_qty:6.2f} servings  "
+                        f"(cost: ${cost:5.2f})"
+                    )
+                    # Note: We look up Food instance using the index key
+
+            print()
+            print("Nutritional Totals:")
+            print("-" * 60)
+            print(f"  Total Cost:    ${total_cost:.2f}")
+            print(f"  Calories:      {total_calories:6.1f} (min: {MIN_CALORIES})")
+            print(f"  Protein:       {total_protein:6.1f}g (min: {MIN_PROTEIN}g)")
+            print(f"  Calcium:       {total_calcium:6.1f}mg (min: {MIN_CALCIUM}mg)")
+
+        else:
+            print(f"No optimal solution found. Status: {solution.status}")
+
+    except ImportError as e:
+        print(f"ERROR: {e}")
+        print("\nPlease install OR-Tools:")
+        print("  pip install ortools")
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
