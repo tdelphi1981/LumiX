@@ -201,6 +201,26 @@ CPLEX_CAPABILITIES = LXSolverCapability(
     supports_callbacks=True,
 )
 
+CPSAT_CAPABILITIES = LXSolverCapability(
+    name="OR-Tools CP-SAT",
+    features=(
+        LXSolverFeature.INTEGER
+        | LXSolverFeature.BINARY
+        # Note: CP-SAT does NOT support continuous variables (no LINEAR flag)
+        # CP-SAT is designed for integer and boolean variables only
+        # TODO: Add CP-specific features when library supports them:
+        #   - AllDifferent constraints
+        #   - Circuit constraints (for routing/TSP)
+        #   - Table constraints
+        #   - Interval variables (for scheduling)
+        #   - NoOverlap constraints
+        #   - Cumulative constraints
+    ),
+    supports_warmstart=True,  # Via solution hints
+    supports_parallel=True,   # Multi-threaded search
+    supports_callbacks=False, # No callbacks in current implementation
+)
+
 
 __all__ = [
     "LXSolverFeature",
@@ -208,4 +228,5 @@ __all__ = [
     "ORTOOLS_CAPABILITIES",
     "GUROBI_CAPABILITIES",
     "CPLEX_CAPABILITIES",
+    "CPSAT_CAPABILITIES",
 ]

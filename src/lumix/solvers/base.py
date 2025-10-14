@@ -116,12 +116,12 @@ class LXOptimizer(Generic[TModel]):
         self.logger = LXModelLogger("lumix.optimizer")
         self._solver: Optional[LXSolverInterface[TModel]] = None
 
-    def use_solver(self, name: Literal["ortools", "gurobi", "cplex"]) -> Self:
+    def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat"]) -> Self:
         """
         Set solver with literal type checking.
 
         Args:
-            name: Solver name
+            name: Solver name ("ortools", "gurobi", "cplex", "cpsat")
 
         Returns:
             Self for chaining
@@ -168,8 +168,9 @@ class LXOptimizer(Generic[TModel]):
             ImportError: If solver not installed
             ValueError: If model is invalid
         """
-        # Create solver instance
-        self._solver = self._create_solver()
+        # Create solver instance (or reuse existing one if already set)
+        if self._solver is None:
+            self._solver = self._create_solver()
 
         # Log model info
         self.logger.log_model_creation(
@@ -205,6 +206,10 @@ class LXOptimizer(Generic[TModel]):
             from .cplex_solver import LXCPLEXSolver
 
             return LXCPLEXSolver()
+        elif self.solver_name == "cpsat":
+            from .cpsat_solver import LXCPSATSolver
+
+            return LXCPSATSolver()
         else:
             raise ValueError(f"Unknown solver: {self.solver_name}")
 

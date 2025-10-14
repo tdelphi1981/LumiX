@@ -133,10 +133,16 @@ def main():
     print(model.summary())
     print()
 
-    # Create optimizer with OR-Tools
-    print("Creating optimizer with CPLEX solver...")
+    # Create optimizer with CP-SAT (with auto-scaling for continuous variables)
+    print("Creating optimizer with CP-SAT solver (auto-scaling enabled)...")
+    from lumix.solvers.cpsat_solver import LXCPSATSolver
+
     optimizer = LXOptimizer()
-    optimizer.use_solver("cplex")
+    # Use CP-SAT with auto-scaling for continuous variables
+    optimizer.solver_name = "cpsat"
+    cpsat_solver = LXCPSATSolver(auto_scale_continuous=True, scaling_factor=1000)
+    optimizer._solver = cpsat_solver
+    print("  Note: Continuous variables will be automatically scaled to integers")
     print()
 
     # Solve the model
