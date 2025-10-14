@@ -134,7 +134,7 @@ def main():
     print()
 
     # Create optimizer with OR-Tools
-    print("Creating optimizer with OR-Tools solver...")
+    print("Creating optimizer with CPLEX solver...")
     optimizer = LXOptimizer()
     optimizer.use_solver("cplex")
     print()
