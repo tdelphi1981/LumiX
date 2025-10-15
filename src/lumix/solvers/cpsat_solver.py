@@ -58,18 +58,18 @@ class LXCPSATSolver(LXSolverInterface):
 
     def __init__(
         self,
+        enable_rational_conversion: bool = False,
         rational_max_denom: int = 10000,
         scale_objective: bool = True,
-        auto_scale_continuous: bool = False,
         scaling_factor: int = 1000,
     ) -> None:
         """
         Initialize CP-SAT solver.
 
         Args:
+            enable_rational_conversion: Enable rational conversion and auto-scaling for continuous variables
             rational_max_denom: Maximum denominator for float-to-rational conversion
             scale_objective: Whether to scale objective coefficients to integers
-            auto_scale_continuous: Automatically scale continuous variables to integers
             scaling_factor: Scaling factor for continuous variables (default: 1000)
                 Higher values = more precision but risk integer overflow
         """
@@ -89,8 +89,8 @@ class LXCPSATSolver(LXSolverInterface):
         self._scale_objective = scale_objective
         self._objective_scale: int = 1
 
-        # Auto-scaling for continuous variables
-        self.auto_scale_continuous = auto_scale_continuous
+        # Rational conversion enables auto-scaling for continuous variables
+        self._enable_rational_conversion = enable_rational_conversion
         self._scaling_factor = scaling_factor
         self._scaled_variables: set = set()  # Names of variables that were scaled
         self._variable_scales: Dict[str, int] = {}  # Variable name -> scale factor
@@ -116,18 +116,18 @@ class LXCPSATSolver(LXSolverInterface):
             if var.var_type == LXVarType.CONTINUOUS
         ]
         if continuous_vars:
-            if not self.auto_scale_continuous:
+            if not self._enable_rational_conversion:
                 raise ValueError(
                     f"CP-SAT does not support continuous variables. "
                     f"Found continuous variables: {', '.join(continuous_vars)}.\n"
                     f"Options:\n"
                     f"  1. Use integer/binary variables only\n"
                     f"  2. Switch to 'ortools', 'gurobi', or 'cplex' solvers\n"
-                    f"  3. Enable auto-scaling: LXCPSATSolver(auto_scale_continuous=True)\n"
+                    f"  3. Enable rational conversion: optimizer.enable_rational_conversion()\n"
                     f"     This will scale continuous variables to integers and de-scale solutions."
                 )
             else:
-                # Auto-scaling enabled: warn and proceed
+                # Rational conversion enabled: warn and proceed with auto-scaling
                 self._log_scaling_warning(continuous_vars)
                 # Track which variables will be scaled
                 self._scaled_variables = set(continuous_vars)
@@ -273,10 +273,10 @@ class LXCPSATSolver(LXSolverInterface):
     # ==================== PRIVATE HELPER METHODS ====================
 
     def _log_scaling_warning(self, continuous_vars: List[str]) -> None:
-        """Log warning about automatic continuous variable scaling."""
+        """Log warning about rational conversion auto-scaling."""
         self.logger.logger.warning("")
         self.logger.logger.warning("╔════════════════════════════════════════════════════════════╗")
-        self.logger.logger.warning("║     CP-SAT: AUTO-SCALING CONTINUOUS VARIABLES              ║")
+        self.logger.logger.warning("║     CP-SAT: RATIONAL CONVERSION (AUTO-SCALING ENABLED)     ║")
         self.logger.logger.warning("╠════════════════════════════════════════════════════════════╣")
         self.logger.logger.warning(f"║  Variables scaled: {len(continuous_vars):2d}                                        ║")
         self.logger.logger.warning(f"║  Scale factor: {self._scaling_factor:5d}                                      ║")
@@ -310,12 +310,12 @@ class LXCPSATSolver(LXSolverInterface):
             ub = int(ub)
             var = model.NewIntVar(lb, ub, lx_var.name)
         elif lx_var.var_type == LXVarType.CONTINUOUS:
-            if not self.auto_scale_continuous:
+            if not self._enable_rational_conversion:
                 raise ValueError(
                     f"CP-SAT does not support continuous variables. "
                     f"Variable '{lx_var.name}' is continuous."
                 )
-            # Auto-scale: convert continuous to integer
+            # Rational conversion enabled: auto-scale continuous to integer
             scale = self._variable_scales.get(lx_var.name, self._scaling_factor)
             lb_scaled = int(lb * scale) if lb != cp_model.INT32_MIN else cp_model.INT32_MIN
             ub_scaled = int(ub * scale) if ub != cp_model.INT32_MAX else cp_model.INT32_MAX
@@ -371,12 +371,12 @@ class LXCPSATSolver(LXSolverInterface):
                 ub = int(ub)
                 var = model.NewIntVar(lb, ub, var_name)
             elif lx_var.var_type == LXVarType.CONTINUOUS:
-                if not self.auto_scale_continuous:
+                if not self._enable_rational_conversion:
                     raise ValueError(
                         f"CP-SAT does not support continuous variables. "
                         f"Variable '{lx_var.name}' is continuous."
                     )
-                # Auto-scale: convert continuous to integer
+                # Rational conversion enabled: auto-scale continuous to integer
                 scale = self._variable_scales.get(lx_var.name, self._scaling_factor)
                 lb_scaled = int(lb * scale) if lb != cp_model.INT32_MIN else cp_model.INT32_MIN
                 ub_scaled = int(ub * scale) if ub != cp_model.INT32_MAX else cp_model.INT32_MAX

@@ -140,7 +140,7 @@ def main():
     # Create optimizer with CP-SAT
     print("Creating optimizer with CP-SAT solver...")
     optimizer = LXOptimizer()
-    optimizer.use_solver("cpsat")
+    optimizer.use_solver("cplex")
     print("  Solver: OR-Tools CP-SAT (constraint programming)")
     print("  Note: CP-SAT only supports integer and binary variables")
     print()

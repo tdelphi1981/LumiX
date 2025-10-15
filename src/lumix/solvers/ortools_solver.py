@@ -192,6 +192,28 @@ class LXORToolsSolver(LXSolverInterface):
 
     # ==================== PRIVATE HELPER METHODS ====================
 
+    def _get_index_key(self, lx_var: LXVariable, instance: Any) -> Any:
+        """
+        Get index key for a variable instance, handling cartesian products.
+
+        Args:
+            lx_var: Variable definition
+            instance: Variable instance (data element or tuple for cartesian products)
+
+        Returns:
+            Hashable index key
+        """
+        if lx_var.index_func is not None:
+            return lx_var.index_func(instance)
+        elif lx_var._cartesian is not None and isinstance(instance, tuple):
+            # For cartesian products, apply each dimension's key function
+            return tuple(
+                dim.key_func(inst)
+                for dim, inst in zip(lx_var._cartesian.dimensions, instance)
+            )
+        else:
+            return instance
+
     def _create_single_variable(self, lx_var: LXVariable) -> None:
         """Create single OR-Tools variable (not indexed)."""
         solver = self._solver
@@ -224,12 +246,8 @@ class LXORToolsSolver(LXSolverInterface):
         var_dict: Dict[Any, Any] = {}
 
         for instance in instances:
-            # Get index for this instance
-            if lx_var.index_func is not None:
-                index_key = lx_var.index_func(instance)
-            else:
-                # For multi-model (tuple instances), use the tuple as key
-                index_key = instance
+            # Get index key (handles cartesian products)
+            index_key = self._get_index_key(lx_var, instance)
 
             # Variable name: "varname[index]"
             var_name = f"{lx_var.name}[{index_key}]"
@@ -367,11 +385,8 @@ class LXORToolsSolver(LXSolverInterface):
                     if not where_func(instance):
                         continue
 
-                    # Get index key
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    else:
-                        index_key = instance
+                    # Get index key (handles cartesian products)
+                    index_key = self._get_index_key(lx_var, instance)
 
                     # Get coefficient
                     # For multi-model constraints, coefficient function may need both instances
@@ -424,11 +439,8 @@ class LXORToolsSolver(LXSolverInterface):
                     else:
                         coeff = coeff_func(instance)
 
-                    # Get index key
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    else:
-                        index_key = instance
+                    # Get index key (handles cartesian products)
+                    index_key = self._get_index_key(lx_var, instance)
 
                     if abs(coeff) > 1e-10:
                         terms.append((solver_vars[index_key], coeff))
@@ -514,11 +526,8 @@ class LXORToolsSolver(LXSolverInterface):
                 instances = lx_var.get_instances()
 
                 for instance in instances:
-                    # Get index key
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    else:
-                        index_key = instance
+                    # Get index key (handles cartesian products)
+                    index_key = self._get_index_key(lx_var, instance)
 
                     var = solver_vars[index_key]
                     value = var.solution_value()

@@ -116,7 +116,7 @@ class LXOptimizer(Generic[TModel]):
         self.logger = LXModelLogger("lumix.optimizer")
         self._solver: Optional[LXSolverInterface[TModel]] = None
 
-    def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat"]) -> Self:
+    def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat"], **kwargs) -> Self:
         """
         Set solver with literal type checking.
 
@@ -127,6 +127,7 @@ class LXOptimizer(Generic[TModel]):
             Self for chaining
         """
         self.solver_name = name
+        self._solver_params = kwargs
         return self
 
     def enable_rational_conversion(self, max_denom: int = 10000) -> Self:
@@ -209,7 +210,15 @@ class LXOptimizer(Generic[TModel]):
         elif self.solver_name == "cpsat":
             from .cpsat_solver import LXCPSATSolver
 
-            return LXCPSATSolver()
+            # Pass rational conversion settings to CP-SAT
+            rational_max_denom = 10000  # default
+            if self.rational_converter is not None:
+                rational_max_denom = self.rational_converter.max_denominator
+
+            return LXCPSATSolver(
+                enable_rational_conversion=self.use_rationals,
+                rational_max_denom=rational_max_denom
+            )
         else:
             raise ValueError(f"Unknown solver: {self.solver_name}")
 
