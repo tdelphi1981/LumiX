@@ -6,6 +6,7 @@ from typing import Any, Dict, Generic, Literal, Optional, TypeVar
 from typing_extensions import Self
 
 from ..core.model import LXModel
+from ..linearization.config import LXLinearizerConfig
 from ..solution.solution import LXSolution
 from ..utils.logger import LXModelLogger
 from ..utils.orm import LXORMContext
@@ -112,7 +113,9 @@ class LXOptimizer(Generic[TModel]):
         self.solver_name: str = "ortools"
         self.use_rationals: bool = False
         self.enable_sens: bool = False
+        self.use_linearization: bool = False
         self.rational_converter: Optional[LXRationalConverter] = None
+        self.linearizer_config: Optional[LXLinearizerConfig] = None
         self.logger = LXModelLogger("lumix.optimizer")
         self._solver: Optional[LXSolverInterface[TModel]] = None
 
@@ -142,6 +145,67 @@ class LXOptimizer(Generic[TModel]):
         """
         self.use_rationals = True
         self.rational_converter = LXRationalConverter(max_denom)
+        return self
+
+    def enable_linearization(
+        self,
+        big_m: float = 1e6,
+        pwl_segments: int = 20,
+        pwl_method: Literal["sos2", "incremental", "logarithmic"] = "sos2",
+        prefer_sos2: bool = True,
+        adaptive_breakpoints: bool = True,
+        mccormick_tighten_bounds: bool = True,
+        **kwargs: Any,
+    ) -> Self:
+        """
+        Enable automatic linearization for nonlinear terms.
+
+        Mirrors enable_rational_conversion() API pattern for consistency.
+
+        When enabled, the optimizer will automatically:
+        - Detect nonlinear terms in the model
+        - Check if solver lacks native support
+        - Apply appropriate linearization techniques:
+          * Binary × Binary: AND logic
+          * Binary × Continuous: Big-M method
+          * Continuous × Continuous: McCormick envelopes
+          * Piecewise-linear approximations for exp, log, sin, cos, etc.
+
+        Args:
+            big_m: Big-M constant for conditional constraints (default: 1e6)
+            pwl_segments: Number of segments for piecewise-linear approximations (default: 20)
+            pwl_method: Method for PWL ("sos2", "incremental", "logarithmic")
+            prefer_sos2: Use SOS2 formulation when solver supports it (default: True)
+            adaptive_breakpoints: Use adaptive breakpoint generation for PWL (default: True)
+            mccormick_tighten_bounds: Apply bound tightening for McCormick envelopes (default: True)
+            **kwargs: Additional linearization configuration options
+
+        Returns:
+            Self for chaining
+
+        Example:
+            optimizer = (
+                LXOptimizer[Product]()
+                .use_solver("ortools")
+                .enable_linearization(
+                    big_m=1e5,
+                    pwl_segments=30,
+                    adaptive_breakpoints=True
+                )
+            )
+
+            solution = optimizer.solve(model)
+        """
+        self.use_linearization = True
+        self.linearizer_config = LXLinearizerConfig(
+            big_m_value=big_m,
+            pwl_num_segments=pwl_segments,
+            pwl_method=pwl_method,
+            prefer_sos2=prefer_sos2,
+            adaptive_breakpoints=adaptive_breakpoints,
+            mccormick_tighten_bounds=mccormick_tighten_bounds,
+            **kwargs,
+        )
         return self
 
     def enable_sensitivity(self) -> Self:

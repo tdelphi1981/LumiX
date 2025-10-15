@@ -73,6 +73,23 @@ from .core import (
 # Indexing
 from .indexing import LXCartesianProduct, LXIndexDimension
 
+# Linearization
+from .linearization import (
+    LXLinearizer,
+    LXLinearizerConfig,
+    LXLinearizationMethod,
+    LXNonLinearFunctions,
+)
+
+# Nonlinear terms
+from .nonlinear import (
+    LXAbsoluteTerm,
+    LXBilinearTerm,
+    LXIndicatorTerm,
+    LXMinMaxTerm,
+    LXPiecewiseLinearTerm,
+)
+
 # Solution
 from .solution import LXSolution, LXSolutionMapper
 
@@ -107,6 +124,17 @@ __all__ = [
     # Indexing
     "LXIndexDimension",
     "LXCartesianProduct",
+    # Linearization
+    "LXLinearizer",
+    "LXLinearizerConfig",
+    "LXLinearizationMethod",
+    "LXNonLinearFunctions",
+    # Nonlinear terms
+    "LXAbsoluteTerm",
+    "LXBilinearTerm",
+    "LXIndicatorTerm",
+    "LXMinMaxTerm",
+    "LXPiecewiseLinearTerm",
     # Solution
     "LXSolution",
     "LXSolutionMapper",

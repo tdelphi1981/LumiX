@@ -120,6 +120,48 @@ class LXSolverCapability:
         """Check if solver has native indicator constraint support."""
         return self.has_feature(LXSolverFeature.INDICATOR)
 
+    def needs_linearization_for_bilinear(self) -> bool:
+        """
+        Check if solver needs linearization for bilinear products (x * y).
+
+        Returns:
+            True if solver lacks native quadratic support
+        """
+        return not (
+            self.has_feature(LXSolverFeature.QUADRATIC_CONVEX)
+            or self.has_feature(LXSolverFeature.QUADRATIC_NONCONVEX)
+        )
+
+    def needs_linearization_for_abs(self) -> bool:
+        """
+        Check if solver needs linearization for absolute value |x|.
+
+        Returns:
+            True if solver lacks native piecewise-linear support
+        """
+        return not self.has_feature(LXSolverFeature.PWL)
+
+    def needs_linearization_for_minmax(self) -> bool:
+        """
+        Check if solver needs linearization for min/max functions.
+
+        Returns:
+            True if solver lacks native piecewise-linear support
+        """
+        return not self.has_feature(LXSolverFeature.PWL)
+
+    def needs_linearization_for_nonlinear(self) -> bool:
+        """
+        Check if solver needs linearization for general nonlinear functions.
+
+        Returns:
+            True if solver lacks native exponential cone or PWL support
+        """
+        return not (
+            self.has_feature(LXSolverFeature.EXPONENTIAL_CONE)
+            or self.has_feature(LXSolverFeature.PWL)
+        )
+
     def description(self) -> str:
         """Get human-readable capability description."""
         capabilities = []

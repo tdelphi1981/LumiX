@@ -179,6 +179,19 @@ class LXLinearExpression(Generic[TModel]):
         self.constant *= scalar
         return self
 
+    def copy(self) -> Self:
+        """
+        Create a deep copy of this expression.
+
+        Returns:
+            New expression with same terms and constant
+        """
+        new_expr = LXLinearExpression[TModel]()
+        new_expr.terms = self.terms.copy()
+        new_expr.constant = self.constant
+        new_expr._multi_terms = self._multi_terms.copy()
+        return new_expr
+
 
 @dataclass
 class LXQuadraticTerm:
@@ -269,15 +282,30 @@ class LXNonLinearExpression:
 
     Supports:
     - Bilinear terms (x * y)
+    - Absolute value (|x|)
+    - Min/max functions
     - Piecewise-linear approximations
     - Conditional expressions
     - Custom non-linear functions
 
     These will be automatically linearized by the Linearizer engine.
+
+    Example:
+        # Create nonlinear expression
+        expr = LXNonLinearExpression()
+
+        # Add bilinear product
+        expr.add_product(length, width)
+
+        # Add absolute value
+        expr.add_abs(deviation)
+
+        # Add piecewise function
+        expr.add_piecewise(time, lambda t: math.exp(t), num_segments=30)
     """
 
     linear_terms: LXLinearExpression = field(default_factory=LXLinearExpression)
-    nonlinear_terms: List[Any] = field(default_factory=list)  # Will be specialized later
+    nonlinear_terms: List[Any] = field(default_factory=list)
     constant: float = 0.0
 
     def add_linear(self, expr: LXLinearExpression) -> Self:
@@ -293,12 +321,173 @@ class LXNonLinearExpression:
         self.linear_terms = self.linear_terms + expr
         return self
 
-    def add_nonlinear_term(self, term: Any) -> Self:
+    def add_abs(self, var: LXVariable, coeff: float = 1.0) -> Self:
         """
-        Add non-linear term (BilinearTerm, PiecewiseLinearFunction, etc.).
+        Add absolute value term: coeff * |var|
 
         Args:
-            term: Non-linear term
+            var: Variable to take absolute value of
+            coeff: Coefficient (default: 1.0)
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # Minimize absolute deviation
+            expr.add_abs(actual - target)
+        """
+        from ..nonlinear.terms import LXAbsoluteTerm
+
+        self.nonlinear_terms.append(LXAbsoluteTerm(var, coeff))
+        return self
+
+    def add_min(self, *vars: LXVariable, coefficients: Optional[List[float]] = None) -> Self:
+        """
+        Add minimum function: min(vars)
+
+        Args:
+            *vars: Variables to take minimum of
+            coefficients: Optional coefficients for each variable
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # Minimum of three costs
+            expr.add_min(cost_a, cost_b, cost_c)
+        """
+        from ..nonlinear.terms import LXMinMaxTerm
+
+        coeffs = coefficients or [1.0] * len(vars)
+        self.nonlinear_terms.append(LXMinMaxTerm(list(vars), "min", coeffs))
+        return self
+
+    def add_max(self, *vars: LXVariable, coefficients: Optional[List[float]] = None) -> Self:
+        """
+        Add maximum function: max(vars)
+
+        Args:
+            *vars: Variables to take maximum of
+            coefficients: Optional coefficients for each variable
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # Maximum capacity
+            expr.add_max(capacity_1, capacity_2, capacity_3)
+        """
+        from ..nonlinear.terms import LXMinMaxTerm
+
+        coeffs = coefficients or [1.0] * len(vars)
+        self.nonlinear_terms.append(LXMinMaxTerm(list(vars), "max", coeffs))
+        return self
+
+    def add_product(self, var1: LXVariable, var2: LXVariable, coeff: float = 1.0) -> Self:
+        """
+        Add bilinear product: coeff * var1 * var2
+
+        Automatically linearized based on variable types:
+        - Binary × Binary: AND logic
+        - Binary × Continuous: Big-M method
+        - Continuous × Continuous: McCormick envelopes
+
+        Args:
+            var1: First variable
+            var2: Second variable
+            coeff: Coefficient (default: 1.0)
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # Rectangle area
+            expr.add_product(length, width)
+
+            # Facility open × flow amount
+            expr.add_product(is_open, flow_amount)
+        """
+        from ..nonlinear.terms import LXBilinearTerm
+
+        self.nonlinear_terms.append(LXBilinearTerm(var1, var2, coeff))
+        return self
+
+    def add_indicator(
+        self, binary_var: LXVariable, condition: bool, linear_expr: LXLinearExpression
+    ) -> Self:
+        """
+        Add conditional constraint: if binary_var == condition then linear_expr
+
+        Args:
+            binary_var: Binary variable
+            condition: Condition value (True or False)
+            linear_expr: Expression to apply when condition is met
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # If warehouse is open, then demand must be met
+            expr.add_indicator(
+                is_open,
+                True,
+                LXLinearExpression().add_term(supply, 1.0)
+            )
+        """
+        from ..nonlinear.terms import LXIndicatorTerm
+
+        self.nonlinear_terms.append(LXIndicatorTerm(binary_var, condition, linear_expr))
+        return self
+
+    def add_piecewise(
+        self,
+        var: LXVariable,
+        func: Callable[[float], float],
+        num_segments: int = 20,
+        x_min: Optional[float] = None,
+        x_max: Optional[float] = None,
+        adaptive: bool = True,
+        method: Literal["sos2", "incremental", "logarithmic"] = "sos2",
+    ) -> Self:
+        """
+        Add piecewise-linear approximation of arbitrary function.
+
+        Args:
+            var: Input variable
+            func: Function to approximate (e.g., lambda x: math.exp(x))
+            num_segments: Number of linear segments
+            x_min: Minimum domain value (default: var.lower_bound)
+            x_max: Maximum domain value (default: var.upper_bound)
+            adaptive: Use adaptive breakpoint generation
+            method: Linearization method ("sos2", "incremental", "logarithmic")
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # Exponential growth
+            expr.add_piecewise(time, lambda t: math.exp(t), num_segments=30)
+
+            # Custom discount curve
+            expr.add_piecewise(
+                quantity,
+                lambda q: 1.0 if q < 100 else 0.9 if q < 1000 else 0.8,
+                num_segments=50
+            )
+        """
+        from ..nonlinear.terms import LXPiecewiseLinearTerm
+
+        self.nonlinear_terms.append(
+            LXPiecewiseLinearTerm(var, func, num_segments, x_min, x_max, adaptive, method)
+        )
+        return self
+
+    def add_nonlinear_term(self, term: Any) -> Self:
+        """
+        Add pre-constructed non-linear term.
+
+        Args:
+            term: Non-linear term object
 
         Returns:
             Self for chaining

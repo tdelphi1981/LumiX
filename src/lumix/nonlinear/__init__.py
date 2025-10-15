@@ -1,3 +1,17 @@
-"""Nonlinear modeling components (stubs for future implementation)."""
+"""Nonlinear modeling components for LumiX."""
 
-__all__ = []
+from .terms import (
+    LXAbsoluteTerm,
+    LXBilinearTerm,
+    LXIndicatorTerm,
+    LXMinMaxTerm,
+    LXPiecewiseLinearTerm,
+)
+
+__all__ = [
+    "LXAbsoluteTerm",
+    "LXBilinearTerm",
+    "LXIndicatorTerm",
+    "LXMinMaxTerm",
+    "LXPiecewiseLinearTerm",
+]

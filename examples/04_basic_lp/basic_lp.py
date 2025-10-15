@@ -137,6 +137,8 @@ def main():
     print("Creating optimizer with CPLEX solver...")
     optimizer = LXOptimizer()
     optimizer.use_solver("cplex")
+
+
     print()
 
     # Solve the model
