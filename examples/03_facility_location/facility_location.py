@@ -34,6 +34,8 @@ from sample_data import (
 )
 
 
+solver_to_use = "ortools"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -144,7 +146,7 @@ def display_solution(model: LXModel):
 
     # Note: This problem uses irrational shipping costs (haversine formula), which are
     # problematic for CP-SAT. Use CPLEX, Gurobi, or OR-Tools LP instead for best results.
-    optimizer = LXOptimizer().use_solver("cplex")  # or "gurobi" or "ortools"
+    optimizer = LXOptimizer().use_solver(solver_to_use)
     solution = optimizer.solve(model)
 
     if solution.is_optimal():

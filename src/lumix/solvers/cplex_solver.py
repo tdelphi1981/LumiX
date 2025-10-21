@@ -65,8 +65,10 @@ class LXCPLEXSolver(LXSolverInterface):
         # Internal state
         self._model: Optional[Cplex] = None
         self._variable_map: Dict[str, Union[int, Dict[Any, int]]] = {}
+        self._constraint_map: Dict[str, Union[int, Dict[Any, int]]] = {}
         self._constraint_list: List[int] = []
         self._variable_counter: int = 0
+        self._constraint_counter: int = 0
 
     def build_model(self, model: LXModel) -> Cplex:
         """
@@ -87,8 +89,10 @@ class LXCPLEXSolver(LXSolverInterface):
 
         # Reset internal state
         self._variable_map = {}
+        self._constraint_map = {}
         self._constraint_list = []
         self._variable_counter = 0
+        self._constraint_counter = 0
 
         # Build variables
         for lx_var in model.variables:
@@ -122,6 +126,7 @@ class LXCPLEXSolver(LXSolverInterface):
         model: LXModel,
         time_limit: Optional[float] = None,
         gap_tolerance: Optional[float] = None,
+        enable_sensitivity: bool = False,
         **solver_params: Any,
     ) -> LXSolution:
         """
@@ -189,6 +194,17 @@ class LXCPLEXSolver(LXSolverInterface):
                     f"Failed to set CPLEX parameter '{param_name}': {e}"
                 )
 
+        # If sensitivity analysis is enabled and all variables are continuous,
+        # change problem type to LP to enable dual value extraction
+        if enable_sensitivity:
+            var_types = cplex_model.variables.get_types()
+            if all(vtype == 'C' for vtype in var_types):
+                try:
+                    # Force LP problem type (CPLEX defaults to MILP even with continuous vars)
+                    cplex_model.set_problem_type(cplex_model.problem_type.LP)
+                except Exception as e:
+                    self.logger.logger.debug(f"Could not set problem type to LP: {e}")
+
         # Solve
         start_time = time.time()
         try:
@@ -199,7 +215,7 @@ class LXCPLEXSolver(LXSolverInterface):
         solve_time = time.time() - start_time
 
         # Parse and return solution
-        solution = self._parse_solution(model, cplex_model, solve_time)
+        solution = self._parse_solution(model, cplex_model, solve_time, enable_sensitivity)
 
         return solution
 
@@ -376,14 +392,18 @@ class LXCPLEXSolver(LXSolverInterface):
 
         # Create constraint using CPLEX SparsePair format
         linear_expr = cplex.SparsePair(ind=var_indices, val=coeffs)
+        constraint_idx = self._constraint_counter
         model.linear_constraints.add(
             lin_expr=[linear_expr],
             senses=[sense],
             rhs=[rhs],
             names=[lx_constraint.name]
         )
+        self._constraint_counter += 1
 
-        self._constraint_list.append(len(self._constraint_list))
+        # Store in constraint map
+        self._constraint_map[lx_constraint.name] = constraint_idx
+        self._constraint_list.append(constraint_idx)
 
     def _create_indexed_constraints(
         self, lx_constraint: LXConstraint, instances: List[Any]
@@ -400,6 +420,7 @@ class LXCPLEXSolver(LXSolverInterface):
         senses: List[str] = []
         rhs_values: List[float] = []
         names: List[str] = []
+        index_keys: List[Any] = []
 
         for instance in instances:
             # Get index for naming
@@ -440,8 +461,10 @@ class LXCPLEXSolver(LXSolverInterface):
             senses.append(sense)
             rhs_values.append(rhs)
             names.append(ct_name)
+            index_keys.append(index_key)
 
         # Create all constraints in batch
+        start_idx = self._constraint_counter
         model.linear_constraints.add(
             lin_expr=lin_exprs,
             senses=senses,
@@ -449,7 +472,16 @@ class LXCPLEXSolver(LXSolverInterface):
             names=names
         )
 
-        self._constraint_list.extend(range(len(self._constraint_list), len(self._constraint_list) + len(instances)))
+        # Map index keys to constraint indices
+        constraint_dict: Dict[Any, int] = {}
+        for i, index_key in enumerate(index_keys):
+            constraint_dict[index_key] = start_idx + i
+
+        self._constraint_counter += len(instances)
+
+        # Store dictionary in constraint map
+        self._constraint_map[lx_constraint.name] = constraint_dict
+        self._constraint_list.extend(range(start_idx, start_idx + len(instances)))
 
     def _build_expression(
         self,
@@ -476,6 +508,12 @@ class LXCPLEXSolver(LXSolverInterface):
             if isinstance(solver_vars, dict):
                 # Indexed variable family
                 instances = lx_var.get_instances()
+
+                # If constraint instance is provided and matches variable type,
+                # filter to only include the matching instance
+                if constraint_instance is not None and constraint_instance in instances:
+                    # Same-type constraint: only use matching instance
+                    instances = [constraint_instance]
 
                 for instance in instances:
                     # Check where clause
@@ -579,11 +617,95 @@ class LXCPLEXSolver(LXSolverInterface):
         else:
             cplex_model.objective.set_sense(cplex_model.objective.sense.minimize)
 
+    def _extract_sensitivity_data(
+        self,
+        model: LXModel,
+        cplex_model: Cplex,
+        status: int,
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Extract sensitivity data (shadow prices and reduced costs) from CPLEX solution.
+
+        Args:
+            model: Original LumiX model
+            cplex_model: CPLEX model with solution
+            status: CPLEX status code
+
+        Returns:
+            Tuple of (shadow_prices, reduced_costs) dictionaries
+        """
+        shadow_prices: Dict[str, float] = {}
+        reduced_costs: Dict[str, float] = {}
+
+        # Sensitivity analysis only available for LP problems with optimal solutions
+        # Status 1 = optimal, 6 = optimal (numerical best)
+        if status not in [1, 6]:
+            return shadow_prices, reduced_costs
+
+        try:
+            # Extract dual values (shadow prices) for constraints
+            # Note: We don't check variable types here because if sensitivity was enabled,
+            # the solve() method already verified all vars are continuous and set LP mode
+            try:
+                dual_values = cplex_model.solution.get_dual_values()
+
+                # Map dual values to constraint names
+                for lx_constraint in model.constraints:
+                    solver_constraints = self._constraint_map.get(lx_constraint.name)
+
+                    if solver_constraints is None:
+                        continue
+
+                    if isinstance(solver_constraints, dict):
+                        # Indexed constraint family
+                        for index_key, constraint_idx in solver_constraints.items():
+                            ct_name = f"{lx_constraint.name}[{index_key}]"
+                            if constraint_idx < len(dual_values):
+                                shadow_prices[ct_name] = dual_values[constraint_idx]
+                    else:
+                        # Single constraint
+                        if solver_constraints < len(dual_values):
+                            shadow_prices[lx_constraint.name] = dual_values[solver_constraints]
+
+            except CplexError as e:
+                self.logger.logger.debug(f"Failed to extract dual values: {e}")
+
+            # Extract reduced costs for variables
+            try:
+                reduced_cost_values = cplex_model.solution.get_reduced_costs()
+
+                # Map reduced costs to variable names
+                for lx_var in model.variables:
+                    solver_vars = self._variable_map.get(lx_var.name)
+
+                    if solver_vars is None:
+                        continue
+
+                    if isinstance(solver_vars, dict):
+                        # Indexed variable family
+                        for index_key, var_idx in solver_vars.items():
+                            var_name = f"{lx_var.name}[{index_key}]"
+                            if var_idx < len(reduced_cost_values):
+                                reduced_costs[var_name] = reduced_cost_values[var_idx]
+                    else:
+                        # Single variable
+                        if solver_vars < len(reduced_cost_values):
+                            reduced_costs[lx_var.name] = reduced_cost_values[solver_vars]
+
+            except CplexError as e:
+                self.logger.logger.debug(f"Failed to extract reduced costs: {e}")
+
+        except CplexError as e:
+            self.logger.logger.debug(f"Failed to check problem type: {e}")
+
+        return shadow_prices, reduced_costs
+
     def _parse_solution(
         self,
         model: LXModel,
         cplex_model: Cplex,
         solve_time: float,
+        enable_sensitivity: bool = False,
     ) -> LXSolution:
         """
         Parse CPLEX solution to LXSolution.
@@ -689,11 +811,13 @@ class LXCPLEXSolver(LXSolverInterface):
             except CplexError as e:
                 self.logger.logger.warning(f"Failed to extract variable values: {e}")
 
-        # TODO: Extract sensitivity data (shadow prices, reduced costs)
-        # Requires checking if model is LP (not MIP) and solution is optimal
-        # Access via solution.get_dual_values() and solution.get_reduced_costs()
+        # Extract sensitivity data if enabled
         shadow_prices: Dict[str, float] = {}
         reduced_costs: Dict[str, float] = {}
+        if enable_sensitivity:
+            shadow_prices, reduced_costs = self._extract_sensitivity_data(
+                model, cplex_model, status
+            )
 
         # Extract solver statistics
         gap: Optional[float] = None

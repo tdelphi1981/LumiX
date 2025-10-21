@@ -244,7 +244,7 @@ class LXOptimizer(Generic[TModel]):
 
         # Solve
         self.logger.log_solve_start(self.solver_name)
-        solution = self._solver.solve(model, **solver_params)
+        solution = self._solver.solve(model, enable_sensitivity=self.enable_sens, **solver_params)
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
 
         return solution

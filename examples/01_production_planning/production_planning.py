@@ -19,6 +19,8 @@ from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVari
 from sample_data import PRODUCTS, RESOURCES, Product, Resource, get_resource_usage
 
 
+solver_to_use = "cplex"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -96,7 +98,7 @@ def display_solution(model: LXModel):
     print("SOLUTION")
     print("=" * 60)
 
-    optimizer = LXOptimizer().use_solver("cplex")
+    optimizer = LXOptimizer().use_solver(solver_to_use)
     solution = optimizer.solve(model)
 
     if solution.is_optimal():

@@ -58,6 +58,8 @@ WIDTH_MIN = 2.0  # Minimum width (meters)
 WIDTH_MAX = 10.0  # Maximum width (meters)
 
 
+solver_to_use = "cplex"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -181,7 +183,7 @@ def main():
     # Solve
     print("Solving with OR-Tools...")
     try:
-        optimizer = LXOptimizer().use_solver("cpsat").enable_rational_conversion()
+        optimizer = LXOptimizer().use_solver(solver_to_use)
         solution = optimizer.solve(model_to_solve)
         print()
 

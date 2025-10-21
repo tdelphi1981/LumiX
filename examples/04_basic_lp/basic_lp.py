@@ -51,6 +51,8 @@ MIN_PROTEIN = 50  # grams
 MIN_CALCIUM = 800  # mg
 
 
+solver_to_use = "cplex"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -136,7 +138,7 @@ def main():
     # Create optimizer with OR-Tools
     print("Creating optimizer with CPLEX solver...")
     optimizer = LXOptimizer()
-    optimizer.use_solver("cplex")
+    optimizer.use_solver(solver_to_use)
 
 
     print()

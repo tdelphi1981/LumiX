@@ -60,6 +60,7 @@ class LXGurobiSolver(LXSolverInterface):
         # Internal state
         self._model: Optional[gp.Model] = None
         self._variable_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
+        self._constraint_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
         self._constraint_list: List[Any] = []
 
     def build_model(self, model: LXModel) -> gp.Model:
@@ -80,6 +81,7 @@ class LXGurobiSolver(LXSolverInterface):
 
         # Reset internal state
         self._variable_map = {}
+        self._constraint_map = {}
         self._constraint_list = []
 
         # Build variables
@@ -120,6 +122,7 @@ class LXGurobiSolver(LXSolverInterface):
         model: LXModel,
         time_limit: Optional[float] = None,
         gap_tolerance: Optional[float] = None,
+        enable_sensitivity: bool = False,
         **solver_params: Any,
     ) -> LXSolution:
         """
@@ -171,7 +174,7 @@ class LXGurobiSolver(LXSolverInterface):
         solve_time = time.time() - start_time
 
         # Parse and return solution
-        solution = self._parse_solution(model, gurobi_model, solve_time)
+        solution = self._parse_solution(model, gurobi_model, solve_time, enable_sensitivity)
 
         return solution
 
@@ -326,6 +329,8 @@ class LXGurobiSolver(LXSolverInterface):
         else:
             raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
 
+        # Store in constraint map
+        self._constraint_map[lx_constraint.name] = constr
         self._constraint_list.append(constr)
 
     def _create_indexed_constraints(
@@ -337,6 +342,9 @@ class LXGurobiSolver(LXSolverInterface):
 
         if lx_constraint.lhs is None:
             raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
+
+        # Dictionary to store indexed constraints
+        constraint_dict: Dict[Any, Any] = {}
 
         for instance in instances:
             # Get index for naming
@@ -370,7 +378,12 @@ class LXGurobiSolver(LXSolverInterface):
             else:
                 raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
 
+            # Store in constraint dictionary
+            constraint_dict[index_key] = constr
             self._constraint_list.append(constr)
+
+        # Store dictionary in constraint map
+        self._constraint_map[lx_constraint.name] = constraint_dict
 
     def _build_expression(
         self,
@@ -396,6 +409,12 @@ class LXGurobiSolver(LXSolverInterface):
             if isinstance(solver_vars, dict):
                 # Indexed variable family
                 instances = lx_var.get_instances()
+
+                # If constraint instance is provided and matches variable type,
+                # filter to only include the matching instance
+                if constraint_instance is not None and constraint_instance in instances:
+                    # Same-type constraint: only use matching instance
+                    instances = [constraint_instance]
 
                 for instance in instances:
                     # Check where clause
@@ -488,11 +507,106 @@ class LXGurobiSolver(LXSolverInterface):
         # Set objective
         gurobi_model.setObjective(expr, sense)
 
+    def _extract_sensitivity_data(
+        self,
+        model: LXModel,
+        gurobi_model: gp.Model,
+        status: int,
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Extract sensitivity data (shadow prices and reduced costs) from Gurobi solution.
+
+        Args:
+            model: Original LumiX model
+            gurobi_model: Gurobi model with solution
+            status: Gurobi status code
+
+        Returns:
+            Tuple of (shadow_prices, reduced_costs) dictionaries
+        """
+        shadow_prices: Dict[str, float] = {}
+        reduced_costs: Dict[str, float] = {}
+
+        # Sensitivity analysis only available for LP problems with optimal solutions
+        # Status 2 = OPTIMAL
+        if status != GRB.OPTIMAL:
+            return shadow_prices, reduced_costs
+
+        try:
+            # Check if problem is LP (not MIP)
+            if gurobi_model.getAttr('IsMIP') == 1:
+                # MIP problems don't have dual values
+                return shadow_prices, reduced_costs
+
+            # Extract dual values (shadow prices) for constraints
+            try:
+                # Map dual values to constraint names
+                for lx_constraint in model.constraints:
+                    solver_constraints = self._constraint_map.get(lx_constraint.name)
+
+                    if solver_constraints is None:
+                        continue
+
+                    if isinstance(solver_constraints, dict):
+                        # Indexed constraint family
+                        for index_key, constr in solver_constraints.items():
+                            ct_name = f"{lx_constraint.name}[{index_key}]"
+                            try:
+                                shadow_price = constr.getAttr('Pi')
+                                shadow_prices[ct_name] = shadow_price
+                            except Exception:
+                                pass
+                    else:
+                        # Single constraint
+                        try:
+                            shadow_price = solver_constraints.getAttr('Pi')
+                            shadow_prices[lx_constraint.name] = shadow_price
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                self.logger.logger.debug(f"Failed to extract dual values: {e}")
+
+            # Extract reduced costs for variables
+            try:
+                # Map reduced costs to variable names
+                for lx_var in model.variables:
+                    solver_vars = self._variable_map.get(lx_var.name)
+
+                    if solver_vars is None:
+                        continue
+
+                    if isinstance(solver_vars, dict):
+                        # Indexed variable family
+                        for index_key, var in solver_vars.items():
+                            var_name = f"{lx_var.name}[{index_key}]"
+                            try:
+                                reduced_cost = var.getAttr('RC')
+                                reduced_costs[var_name] = reduced_cost
+                            except Exception:
+                                pass
+                    else:
+                        # Single variable
+                        try:
+                            reduced_cost = solver_vars.getAttr('RC')
+                            reduced_costs[lx_var.name] = reduced_cost
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                self.logger.logger.debug(f"Failed to extract reduced costs: {e}")
+
+        except Exception as e:
+            self.logger.logger.debug(f"Failed to check problem type: {e}")
+
+        return shadow_prices, reduced_costs
+
     def _parse_solution(
         self,
         model: LXModel,
         gurobi_model: gp.Model,
         solve_time: float,
+        enable_sensitivity: bool = False,
     ) -> LXSolution:
         """
         Parse Gurobi solution to LXSolution.
@@ -571,11 +685,13 @@ class LXGurobiSolver(LXSolverInterface):
                         value = 0.0
                     variables[lx_var.name] = value
 
-        # TODO: Extract sensitivity data (shadow prices, reduced costs)
-        # Requires checking if model is LP (not MIP) and solution is optimal
-        # Access via constraint.Pi (dual value) and variable.RC (reduced cost)
+        # Extract sensitivity data if enabled
         shadow_prices: Dict[str, float] = {}
         reduced_costs: Dict[str, float] = {}
+        if enable_sensitivity:
+            shadow_prices, reduced_costs = self._extract_sensitivity_data(
+                model, gurobi_model, status
+            )
 
         # Extract solver statistics
         gap: Optional[float] = None

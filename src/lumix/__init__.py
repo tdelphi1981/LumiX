@@ -9,7 +9,8 @@ that centralizes data-driven modeling with:
 - Multi-model indexing (Driver x Date x Shift)
 - Automatic solution mapping to ORM models
 - Automatic linearization of non-linear constraints
-- Scenario and sensitivity analysis
+- Comprehensive scenario and sensitivity analysis
+- What-if analysis for decision support
 - Solver capability detection
 - Float-to-rational conversion for integer solvers
 
@@ -52,6 +53,18 @@ Quick Start
     print(f"Objective: {solution.objective_value}")
     for product, value in solution.get_mapped(production).items():
         print(f"Produce {value} units of {product.name}")
+
+    # Analysis
+    from lumix import LXSensitivityAnalyzer, LXWhatIfAnalyzer
+
+    # Sensitivity analysis
+    sens = LXSensitivityAnalyzer(model, solution)
+    print(sens.generate_report())
+
+    # What-if analysis
+    whatif = LXWhatIfAnalyzer(model, optimizer)
+    result = whatif.increase_constraint_rhs("capacity", by=100)
+    print(f"Impact: ${result.delta_objective:,.2f}")
 """
 
 __version__ = "0.1.0"
@@ -104,6 +117,19 @@ from .solvers import (
     LXSolverInterface,
 )
 
+# Analysis
+from .analysis import (
+    LXConstraintSensitivity,
+    LXScenario,
+    LXScenarioAnalyzer,
+    LXScenarioModification,
+    LXSensitivityAnalyzer,
+    LXVariableSensitivity,
+    LXWhatIfAnalyzer,
+    LXWhatIfChange,
+    LXWhatIfResult,
+)
+
 # Utils
 from .utils import LXModelLogger, LXORMContext, LXORMModel, LXRationalConverter, LXTypedQuery
 
@@ -146,6 +172,16 @@ __all__ = [
     "ORTOOLS_CAPABILITIES",
     "GUROBI_CAPABILITIES",
     "CPLEX_CAPABILITIES",
+    # Analysis
+    "LXScenario",
+    "LXScenarioAnalyzer",
+    "LXScenarioModification",
+    "LXSensitivityAnalyzer",
+    "LXVariableSensitivity",
+    "LXConstraintSensitivity",
+    "LXWhatIfAnalyzer",
+    "LXWhatIfResult",
+    "LXWhatIfChange",
     # Utils
     "LXORMModel",
     "LXORMContext",

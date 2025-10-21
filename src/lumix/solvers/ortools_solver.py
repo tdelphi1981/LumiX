@@ -58,6 +58,7 @@ class LXORToolsSolver(LXSolverInterface):
         # Internal state
         self._solver: Optional[pywraplp.Solver] = None
         self._variable_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
+        self._constraint_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
         self._constraint_list: List[Any] = []
 
     def build_model(self, model: LXModel) -> pywraplp.Solver:
@@ -90,6 +91,7 @@ class LXORToolsSolver(LXSolverInterface):
 
         # Reset internal state
         self._variable_map = {}
+        self._constraint_map = {}
         self._constraint_list = []
 
         # Build variables
@@ -124,6 +126,7 @@ class LXORToolsSolver(LXSolverInterface):
         model: LXModel,
         time_limit: Optional[float] = None,
         gap_tolerance: Optional[float] = None,
+        enable_sensitivity: bool = False,
         **solver_params: Any,
     ) -> LXSolution:
         """
@@ -164,7 +167,7 @@ class LXORToolsSolver(LXSolverInterface):
         solve_time = time.time() - start_time
 
         # Parse and return solution
-        solution = self._parse_solution(model, solver, status, solve_time)
+        solution = self._parse_solution(model, solver, status, solve_time, enable_sensitivity)
 
         return solution
 
@@ -306,6 +309,8 @@ class LXORToolsSolver(LXSolverInterface):
         for var, coeff in terms:
             ct.SetCoefficient(var, coeff)
 
+        # Store in constraint map
+        self._constraint_map[lx_constraint.name] = ct
         self._constraint_list.append(ct)
 
     def _create_indexed_constraints(
@@ -317,6 +322,9 @@ class LXORToolsSolver(LXSolverInterface):
 
         if lx_constraint.lhs is None:
             raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
+
+        # Dictionary to store indexed constraints
+        constraint_dict: Dict[Any, Any] = {}
 
         for instance in instances:
             # Get index for naming
@@ -353,7 +361,12 @@ class LXORToolsSolver(LXSolverInterface):
             for var, coeff in terms:
                 ct.SetCoefficient(var, coeff)
 
+            # Store in constraint dictionary
+            constraint_dict[index_key] = ct
             self._constraint_list.append(ct)
+
+        # Store dictionary in constraint map
+        self._constraint_map[lx_constraint.name] = constraint_dict
 
     def _build_expression(
         self,
@@ -379,6 +392,12 @@ class LXORToolsSolver(LXSolverInterface):
             if isinstance(solver_vars, dict):
                 # Indexed variable family
                 instances = lx_var.get_instances()
+
+                # If constraint instance is provided and matches variable type,
+                # filter to only include the matching instance
+                if constraint_instance is not None and constraint_instance in instances:
+                    # Same-type constraint: only use matching instance
+                    instances = [constraint_instance]
 
                 for instance in instances:
                     # Check where clause
@@ -475,12 +494,105 @@ class LXORToolsSolver(LXSolverInterface):
         else:
             objective.SetMinimization()
 
+    def _extract_sensitivity_data(
+        self,
+        model: LXModel,
+        solver: pywraplp.Solver,
+        status: int,
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """
+        Extract sensitivity data (shadow prices and reduced costs) from OR-Tools solution.
+
+        Args:
+            model: Original LumiX model
+            solver: OR-Tools solver with solution
+            status: OR-Tools status code
+
+        Returns:
+            Tuple of (shadow_prices, reduced_costs) dictionaries
+        """
+        shadow_prices: Dict[str, float] = {}
+        reduced_costs: Dict[str, float] = {}
+
+        # Sensitivity analysis only available for LP problems with optimal solutions
+        # Status 0 = OPTIMAL
+        if status != pywraplp.Solver.OPTIMAL:
+            return shadow_prices, reduced_costs
+
+        try:
+            # OR-Tools provides dual values for linear solvers (GLOP)
+            # SCIP (MIP solver) does not provide dual values
+
+            # Extract dual values (shadow prices) for constraints
+            try:
+                # Map dual values to constraint names
+                for lx_constraint in model.constraints:
+                    solver_constraints = self._constraint_map.get(lx_constraint.name)
+
+                    if solver_constraints is None:
+                        continue
+
+                    if isinstance(solver_constraints, dict):
+                        # Indexed constraint family
+                        for index_key, constr in solver_constraints.items():
+                            ct_name = f"{lx_constraint.name}[{index_key}]"
+                            try:
+                                shadow_price = constr.dual_value()
+                                shadow_prices[ct_name] = shadow_price
+                            except Exception:
+                                pass
+                    else:
+                        # Single constraint
+                        try:
+                            shadow_price = solver_constraints.dual_value()
+                            shadow_prices[lx_constraint.name] = shadow_price
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                self.logger.logger.debug(f"Failed to extract dual values: {e}")
+
+            # Extract reduced costs for variables
+            try:
+                # Map reduced costs to variable names
+                for lx_var in model.variables:
+                    solver_vars = self._variable_map.get(lx_var.name)
+
+                    if solver_vars is None:
+                        continue
+
+                    if isinstance(solver_vars, dict):
+                        # Indexed variable family
+                        for index_key, var in solver_vars.items():
+                            var_name = f"{lx_var.name}[{index_key}]"
+                            try:
+                                reduced_cost = var.reduced_cost()
+                                reduced_costs[var_name] = reduced_cost
+                            except Exception:
+                                pass
+                    else:
+                        # Single variable
+                        try:
+                            reduced_cost = solver_vars.reduced_cost()
+                            reduced_costs[lx_var.name] = reduced_cost
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                self.logger.logger.debug(f"Failed to extract reduced costs: {e}")
+
+        except Exception as e:
+            self.logger.logger.debug(f"Failed to extract sensitivity data: {e}")
+
+        return shadow_prices, reduced_costs
+
     def _parse_solution(
         self,
         model: LXModel,
         solver: pywraplp.Solver,
         status: int,
         solve_time: float,
+        enable_sensitivity: bool = False,
     ) -> LXSolution:
         """
         Parse OR-Tools solution to LXSolution.
@@ -544,11 +656,13 @@ class LXORToolsSolver(LXSolverInterface):
                 value = solver_vars.solution_value()
                 variables[lx_var.name] = value
 
-        # TODO: Extract sensitivity data (shadow prices, reduced costs)
-        # OR-Tools doesn't expose dual values as easily as Gurobi/CPLEX
-        # May need to use basis status: solver.ComputeConstraintActivities()
+        # Extract sensitivity data if enabled
         shadow_prices: Dict[str, float] = {}
         reduced_costs: Dict[str, float] = {}
+        if enable_sensitivity:
+            shadow_prices, reduced_costs = self._extract_sensitivity_data(
+                model, solver, status
+            )
 
         # Extract solver statistics
         iterations: Optional[int] = None

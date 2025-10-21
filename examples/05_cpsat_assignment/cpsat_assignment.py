@@ -34,6 +34,8 @@ from lumix.indexing import LXCartesianProduct, LXIndexDimension
 from sample_data import TASKS, WORKERS, Task, Worker, get_assignment_cost
 
 
+solver_to_use = "cpsat"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -140,7 +142,7 @@ def main():
     # Create optimizer with CP-SAT
     print("Creating optimizer with CP-SAT solver...")
     optimizer = LXOptimizer()
-    optimizer.use_solver("cplex")
+    optimizer.use_solver(solver_to_use)
     print("  Solver: OR-Tools CP-SAT (constraint programming)")
     print("  Note: CP-SAT only supports integer and binary variables")
     print()

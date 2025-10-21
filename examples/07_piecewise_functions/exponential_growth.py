@@ -56,6 +56,8 @@ INVESTMENTS = [
 ]
 
 
+solver_to_use = "ortools"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -234,7 +236,7 @@ def main():
 
     print("Solving...")
     try:
-        optimizer = LXOptimizer().use_solver("ortools")
+        optimizer = LXOptimizer().use_solver(solver_to_use)
         solution = optimizer.solve(model)
         print()
 

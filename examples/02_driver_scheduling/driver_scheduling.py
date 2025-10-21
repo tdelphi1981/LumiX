@@ -31,6 +31,8 @@ from lumix import (
 from sample_data import DATES, DRIVERS, Date, Driver, calculate_cost, is_driver_available
 
 
+solver_to_use = "ortools"
+
 # ==================== MODEL BUILDING ====================
 
 
@@ -137,7 +139,7 @@ def display_solution(model: LXModel):
     print("SOLUTION")
     print("=" * 70)
 
-    optimizer = LXOptimizer().use_solver("cplex")
+    optimizer = LXOptimizer().use_solver(solver_to_use)
     solution = optimizer.solve(model)
 
     if solution.is_optimal():
