@@ -2,10 +2,10 @@
 Driver Scheduling Example: Multi-Model Indexing ⭐⭐⭐
 ====================================================
 
-THIS IS THE MOST IMPORTANT OPTIXNG EXAMPLE!
+THIS IS THE MOST IMPORTANT LUMIX EXAMPLE!
 
 Demonstrates multi-model indexing - variables indexed by (Driver, Date) tuples.
-This is OptiXNG's killer feature that sets it apart from other optimization libraries.
+This is LumiX's killer feature that sets it apart from other optimization libraries.
 
 Problem: Schedule drivers over a week, minimizing cost while meeting coverage requirements.
 
@@ -19,7 +19,14 @@ Key Features:
 
 from typing import Tuple
 
-from optixng import Constraint, IndexDimension, LinearExpression, Model, Optimizer, Variable
+from lumix import (
+    LXConstraint,
+    LXIndexDimension,
+    LXLinearExpression,
+    LXModel,
+    LXOptimizer,
+    LXVariable,
+)
 
 from sample_data import DATES, DRIVERS, Date, Driver, calculate_cost, is_driver_available
 
@@ -27,11 +34,11 @@ from sample_data import DATES, DRIVERS, Date, Driver, calculate_cost, is_driver_
 # ==================== MODEL BUILDING ====================
 
 
-def build_scheduling_model() -> Model:
+def build_scheduling_model() -> LXModel:
     """
     Build the driver scheduling model.
 
-    This demonstrates THE KEY FEATURE of OptiXNG:
+    This demonstrates THE KEY FEATURE of LumiX:
     Variables indexed by multiple models (Driver × Date).
     """
 
@@ -42,15 +49,15 @@ def build_scheduling_model() -> Model:
     # duty[driver, date] = 1 if driver works on date, 0 otherwise
 
     duty = (
-        Variable[Tuple[Driver, Date], int]("duty")
+        LXVariable[Tuple[Driver, Date], int]("duty")
         .binary()  # Binary decision: work or not
         .indexed_by_product(
             # First dimension: Driver
-            IndexDimension(Driver, lambda d: d.id).where(
-                lambda d: d.is_active  # Only active drivers
-            ),
+            LXIndexDimension(Driver, lambda d: d.id)
+            .where(lambda d: d.is_active)  # Only active drivers
+            .from_data(DRIVERS),
             # Second dimension: Date
-            IndexDimension(Date, lambda dt: dt.date),
+            LXIndexDimension(Date, lambda dt: dt.date).from_data(DATES),
         )
         # Cost function receives BOTH driver and date!
         .cost_multi(lambda driver, date: calculate_cost(driver, date))
@@ -59,22 +66,16 @@ def build_scheduling_model() -> Model:
     )
 
     # Create model
-    model = Model("driver_scheduling").add_variable(duty)
+    model = LXModel("driver_scheduling").add_variable(duty)
 
     # ========================================
     # OBJECTIVE: Minimize Total Cost
     # ========================================
-    # Cost expression is built from the cost_multi function above
-    cost_expr = LinearExpression()
-    for driver in DRIVERS:
-        if not driver.is_active:
-            continue
-        for date in DATES:
-            if is_driver_available(driver, date):
-                cost = calculate_cost(driver, date)
-                # Note: In a real implementation, this would use the
-                # multi-indexed variable's coefficient directly
-                cost_expr.add_term(duty, lambda d, c=cost: c)
+    # Cost expression using multi-indexed variable
+    # The cost function was already defined in cost_multi() above
+    cost_expr = LXLinearExpression().add_multi_term(
+        duty, coeff=lambda driver, date: calculate_cost(driver, date)
+    )
 
     model.minimize(cost_expr)
 
@@ -88,14 +89,15 @@ def build_scheduling_model() -> Model:
         if not driver.is_active:
             continue
 
-        # Sum duty[driver, date] over all dates
-        driver_days_expr = LinearExpression()
-        for date in DATES:
-            if is_driver_available(driver, date):
-                driver_days_expr.add_term(duty, 1.0)
+        # Sum duty[driver, date] over all dates for this specific driver
+        driver_days_expr = LXLinearExpression().add_multi_term(
+            duty,
+            coeff=lambda d, dt: 1.0,
+            where=lambda d, dt, drv=driver: d.id == drv.id,  # Filter for this driver (capture by value)
+        )
 
         model.add_constraint(
-            Constraint(f"max_days_{driver.name}")
+            LXConstraint(f"max_days_{driver.name}")
             .expression(driver_days_expr)
             .le()
             .rhs(float(driver.max_days_per_week))
@@ -108,14 +110,15 @@ def build_scheduling_model() -> Model:
     # This sums over ALL drivers for EACH date
 
     for date in DATES:
-        # Sum duty[driver, date] over all drivers
-        coverage_expr = LinearExpression()
-        for driver in DRIVERS:
-            if driver.is_active and is_driver_available(driver, date):
-                coverage_expr.add_term(duty, 1.0)
+        # Sum duty[driver, date] over all drivers for this specific date
+        coverage_expr = LXLinearExpression().add_multi_term(
+            duty,
+            coeff=lambda d, dt: 1.0,
+            where=lambda d, dt, current_date=date: dt.date == current_date.date,  # Filter for this date (capture by value)
+        )
 
         model.add_constraint(
-            Constraint(f"coverage_{date.date}")
+            LXConstraint(f"coverage_{date.date}")
             .expression(coverage_expr)
             .ge()
             .rhs(float(date.min_drivers_required))
@@ -127,16 +130,14 @@ def build_scheduling_model() -> Model:
 # ==================== SOLUTION DISPLAY ====================
 
 
-def display_solution(model: Model):
-    """Display the optimization results (when solver is implemented)."""
+def display_solution(model: LXModel):
+    """Display the optimization results."""
 
     print("\n" + "=" * 70)
-    print("SOLUTION (How it would look with solvers implemented)")
+    print("SOLUTION")
     print("=" * 70)
 
-    # This is what you'll do when solvers are implemented:
-    """
-    optimizer = Optimizer()
+    optimizer = LXOptimizer().use_solver("cplex")
     solution = optimizer.solve(model)
 
     if solution.is_optimal():
@@ -161,7 +162,7 @@ def display_solution(model: Model):
 
                 # Access multi-indexed solution!
                 # KEY: solution automatically maps to (driver, date) tuples
-                value = solution.get_mapped(duty).get((driver, date), 0)
+                value = solution.variables["duty"].get((driver.id, date.date), 0)
 
                 if value > 0.5:  # Binary variable
                     cost = calculate_cost(driver, date)
@@ -185,7 +186,7 @@ def display_solution(model: Model):
                 if not is_driver_available(driver, date):
                     continue
 
-                value = solution.get_mapped(duty).get((driver, date), 0)
+                value = solution.variables["duty"].get((driver.id, date.date), 0)
 
                 if value > 0.5:
                     days_worked.append(date.date.strftime("%a %m/%d"))
@@ -199,13 +200,6 @@ def display_solution(model: Model):
                 print(f"  {driver.name:10s}: Not scheduled")
     else:
         print(f"No optimal solution found. Status: {solution.status}")
-    """
-
-    print("\nNOTE: Solver implementations not yet complete.")
-    print("Above shows how multi-indexed solution mapping would work:")
-    print("  solution.get_mapped(duty) returns Dict[(Driver, Date), float]")
-    print("  Each key is a (driver, date) tuple - fully type-safe!")
-    print("  IDE knows driver is Driver type, date is Date type")
 
 
 # ==================== MAIN ====================
@@ -215,14 +209,14 @@ def main():
     """Run the driver scheduling optimization."""
 
     print("=" * 70)
-    print("OptiXNG Example: Driver Scheduling (Multi-Model Indexing)")
+    print("LumiX Example: Driver Scheduling (Multi-Model Indexing)")
     print("=" * 70)
     print()
-    print("⭐⭐⭐ THIS IS THE KEY OPTIXNG FEATURE! ⭐⭐⭐")
+    print("⭐⭐⭐ THIS IS THE KEY LUMIX FEATURE! ⭐⭐⭐")
     print()
     print("This example demonstrates:")
-    print("  ✓ Multi-model indexing: Variable[Tuple[Driver, Date]]")
-    print("  ✓ IndexDimension with filters")
+    print("  ✓ Multi-model indexing: LXVariable[Tuple[Driver, Date]]")
+    print("  ✓ LXIndexDimension with filters")
     print("  ✓ CartesianProduct (Driver × Date)")
     print("  ✓ cost_multi() - cost function receives both models")
     print("  ✓ where_multi() - filter based on both models")
@@ -260,7 +254,7 @@ def main():
     model = build_scheduling_model()
     print(model.summary())
 
-    # Display would-be solution
+    # Solve and display solution
     display_solution(model)
 
     print()
@@ -271,11 +265,11 @@ def main():
     print("Traditional libraries force numerical indices:")
     print("  duty[0][1] = 1  # Which driver? Which date? IDE doesn't know!")
     print()
-    print("OptiXNG preserves model relationships:")
-    print("  for (driver, date), value in solution.get_mapped(duty).items():")
-    print("      # driver is type Driver, date is type Date")
-    print("      # IDE autocompletes driver.name, date.date, etc.")
-    print("      print(f'{driver.name} works on {date.date}')")
+    print("LumiX preserves model relationships:")
+    print("  solution.variables['duty'][(driver.id, date.date)]")
+    print("      # Indexed by actual data model keys")
+    print("      # IDE knows the structure and types")
+    print("      # Type-safe access to solution values")
     print()
     print("This is optimization that feels like normal programming!")
 

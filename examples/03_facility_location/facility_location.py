@@ -15,7 +15,14 @@ to minimize total cost (fixed opening costs + variable shipping costs).
 
 from typing import Dict, Tuple
 
-from optixng import Constraint, LinearExpression, Model, Optimizer, Variable
+from lumix import (
+    LXConstraint,
+    LXIndexDimension,
+    LXLinearExpression,
+    LXModel,
+    LXOptimizer,
+    LXVariable,
+)
 
 from sample_data import (
     BIG_M,
@@ -30,71 +37,50 @@ from sample_data import (
 # ==================== MODEL BUILDING ====================
 
 
-def build_facility_location_model() -> Model:
+def build_facility_location_model() -> LXModel:
     """Build the facility location optimization model."""
 
     # Decision Variable 1: Binary - Open warehouse or not
-    open_warehouse = {}
-    for warehouse in WAREHOUSES:
-        var = (
-            Variable[Warehouse, int](f"open_{warehouse.name}")
-            .binary()
-            .cost(warehouse.fixed_cost)  # Fixed cost if opened
-        )
-        open_warehouse[warehouse.id] = var
+    open_warehouse = (
+        LXVariable[Warehouse, int]("open_warehouse")
+        .binary()
+        .indexed_by(lambda w: w.id)
+        .from_data(WAREHOUSES)
+    )
 
     # Decision Variable 2: Continuous - Shipping quantities
-    # This could be multi-indexed by (Warehouse, Customer)
-    # For simplicity, using dict of dicts here
-    ship = {}
-    for warehouse in WAREHOUSES:
-        for customer in CUSTOMERS:
-            cost = shipping_cost(warehouse, customer)
-            var = (
-                Variable[Tuple[Warehouse, Customer], float](
-                    f"ship_{warehouse.name}_to_{customer.name}"
-                )
-                .continuous()
-                .bounds(lower=0, upper=customer.demand)
-            )
-            ship[(warehouse.id, customer.id)] = var
+    # Multi-indexed by (Warehouse, Customer) using cartesian product
+    ship = (
+        LXVariable[Tuple[Warehouse, Customer], float]("ship")
+        .continuous()
+        .indexed_by_product(
+            LXIndexDimension(Warehouse, lambda w: w.id).from_data(WAREHOUSES),
+            LXIndexDimension(Customer, lambda c: c.id).from_data(CUSTOMERS),
+        )
+        .bounds(lower=0, upper=max(c.demand for c in CUSTOMERS))  # Upper bound needed for CP-SAT
+    )
 
     # Create model
-    model = Model("facility_location")
-
-    # Add variables
-    for var in open_warehouse.values():
-        model.add_variable(var)
-    for var in ship.values():
-        model.add_variable(var)
+    model = LXModel("facility_location").add_variables(open_warehouse, ship)
 
     # Objective: Minimize total cost (fixed + shipping)
-    cost_expr = LinearExpression()
-
-    # Fixed costs
-    for warehouse in WAREHOUSES:
-        var = open_warehouse[warehouse.id]
-        cost_expr.add_term(var, warehouse.fixed_cost)
-
-    # Shipping costs
-    for warehouse in WAREHOUSES:
-        for customer in CUSTOMERS:
-            var = ship[(warehouse.id, customer.id)]
-            cost = shipping_cost(warehouse, customer)
-            cost_expr.add_term(var, cost)
-
+    cost_expr = (
+        LXLinearExpression()
+        .add_term(open_warehouse, coeff=lambda w: w.fixed_cost)  # Fixed costs
+        .add_multi_term(ship, coeff=lambda w, c: shipping_cost(w, c))  # Shipping costs
+    )
     model.minimize(cost_expr)
 
     # Constraint 1: Satisfy customer demand
     # For each customer: sum(ship[w, c] over all w) >= demand[c]
     for customer in CUSTOMERS:
-        demand_expr = LinearExpression()
-        for warehouse in WAREHOUSES:
-            var = ship[(warehouse.id, customer.id)]
-            demand_expr.add_term(var, 1.0)
-
+        demand_expr = LXLinearExpression().add_multi_term(
+            ship,
+            coeff=lambda w, c: 1.0,
+            where=lambda w, c, cust=customer: c.id == cust.id,
+        )
         model.add_constraint(
-            Constraint(f"demand_{customer.name}")
+            LXConstraint(f"demand_{customer.name}")
             .expression(demand_expr)
             .ge()
             .rhs(customer.demand)
@@ -104,32 +90,40 @@ def build_facility_location_model() -> Model:
     # For each warehouse: sum(ship[w, c] over all c) <= capacity[w] * open[w]
     # This is a conditional constraint: can't ship if not open
     for warehouse in WAREHOUSES:
-        capacity_expr = LinearExpression()
-        for customer in CUSTOMERS:
-            var = ship[(warehouse.id, customer.id)]
-            capacity_expr.add_term(var, 1.0)
-
-        # Add term: -capacity * open
-        open_var = open_warehouse[warehouse.id]
-        capacity_expr.add_term(open_var, -warehouse.capacity)
-
+        capacity_expr = (
+            LXLinearExpression()
+            .add_multi_term(
+                ship,
+                coeff=lambda w, c: 1.0,
+                where=lambda w, c, wh=warehouse: w.id == wh.id,
+            )
+            .add_term(
+                open_warehouse,
+                coeff=lambda w, wh=warehouse: -wh.capacity if w.id == wh.id else 0,
+            )
+        )
         model.add_constraint(
-            Constraint(f"capacity_{warehouse.name}").expression(capacity_expr).le().rhs(0)
+            LXConstraint(f"capacity_{warehouse.name}").expression(capacity_expr).le().rhs(0)
         )
 
     # Constraint 3: Big-M - Can only ship from open warehouses
     # ship[w, c] <= M * open[w]
     for warehouse in WAREHOUSES:
         for customer in CUSTOMERS:
-            bigm_expr = LinearExpression()
-            ship_var = ship[(warehouse.id, customer.id)]
-            open_var = open_warehouse[warehouse.id]
-
-            bigm_expr.add_term(ship_var, 1.0)
-            bigm_expr.add_term(open_var, -BIG_M)
-
+            bigm_expr = (
+                LXLinearExpression()
+                .add_multi_term(
+                    ship,
+                    coeff=lambda w, c: 1.0,
+                    where=lambda w, c, wh=warehouse, cu=customer: w.id == wh.id and c.id == cu.id,
+                )
+                .add_term(
+                    open_warehouse,
+                    coeff=lambda w, wh=warehouse: -BIG_M if w.id == wh.id else 0,
+                )
+            )
             model.add_constraint(
-                Constraint(f"bigm_{warehouse.name}_{customer.name}")
+                LXConstraint(f"bigm_{warehouse.name}_{customer.name}")
                 .expression(bigm_expr)
                 .le()
                 .rhs(0)
@@ -141,16 +135,16 @@ def build_facility_location_model() -> Model:
 # ==================== SOLUTION DISPLAY ====================
 
 
-def display_solution(model: Model):
-    """Display the optimization results (when solver is implemented)."""
+def display_solution(model: LXModel):
+    """Display the optimization results."""
 
     print("\n" + "=" * 70)
     print("SOLUTION")
     print("=" * 70)
 
-    # This is what you'll do when solvers are implemented:
-    """
-    optimizer = Optimizer()
+    # Note: This problem uses irrational shipping costs (haversine formula), which are
+    # problematic for CP-SAT. Use CPLEX, Gurobi, or OR-Tools LP instead for best results.
+    optimizer = LXOptimizer().use_solver("cplex")  # or "gurobi" or "ortools"
     solution = optimizer.solve(model)
 
     if solution.is_optimal():
@@ -159,7 +153,7 @@ def display_solution(model: Model):
 
         # Calculate cost breakdown
         fixed_cost = sum(
-            solution.variables[f"open_{w.name}"] * w.fixed_cost
+            solution.variables["open_warehouse"][w.id] * w.fixed_cost
             for w in WAREHOUSES
         )
         shipping_cost_total = solution.objective_value - fixed_cost
@@ -172,12 +166,12 @@ def display_solution(model: Model):
         print("Open Warehouses:")
         print("-" * 70)
         for warehouse in WAREHOUSES:
-            is_open = solution.variables[f"open_{warehouse.name}"]
+            is_open = solution.variables["open_warehouse"][warehouse.id]
             if is_open > 0.5:  # Binary variable
                 # Count customers served
                 customers_served = sum(
                     1 for c in CUSTOMERS
-                    if solution.variables[f"ship_{warehouse.name}_to_{c.name}"] > 0.01
+                    if solution.variables["ship"].get((warehouse.id, c.id), 0) > 0.01
                 )
                 print(f"  {warehouse.name}: Serving {customers_served} customers "
                       f"(fixed cost: ${warehouse.fixed_cost:,.2f})")
@@ -186,22 +180,18 @@ def display_solution(model: Model):
         print("\nShipping Plan:")
         print("-" * 70)
         for warehouse in WAREHOUSES:
-            is_open = solution.variables[f"open_{warehouse.name}"]
+            is_open = solution.variables["open_warehouse"][warehouse.id]
             if is_open < 0.5:
                 continue
 
             for customer in CUSTOMERS:
-                qty = solution.variables[f"ship_{warehouse.name}_to_{customer.name}"]
+                qty = solution.variables["ship"].get((warehouse.id, customer.id), 0)
                 if qty > 0.01:
                     cost = shipping_cost(warehouse, customer) * qty
                     print(f"  {warehouse.name} → {customer.name}: {qty:.1f} units "
                           f"(${cost:.2f})")
     else:
         print(f"No optimal solution found. Status: {solution.status}")
-    """
-
-    print("\nNOTE: Solver implementations not yet complete.")
-    print("Above shows how binary variables and fixed costs work.")
 
 
 # ==================== MAIN ====================
@@ -211,7 +201,7 @@ def main():
     """Run the facility location optimization."""
 
     print("=" * 70)
-    print("OptiXNG Example: Facility Location Problem")
+    print("LumiX Example: Facility Location Problem")
     print("=" * 70)
     print()
     print("This example demonstrates:")

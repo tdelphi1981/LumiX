@@ -181,7 +181,7 @@ def main():
     # Solve
     print("Solving with OR-Tools...")
     try:
-        optimizer = LXOptimizer().use_solver("cpsat")
+        optimizer = LXOptimizer().use_solver("cpsat").enable_rational_conversion()
         solution = optimizer.solve(model_to_solve)
         print()
 

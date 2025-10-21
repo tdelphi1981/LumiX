@@ -14,7 +14,7 @@ Key Features:
 - Type-safe solution mapping
 """
 
-from optixng import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
+from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
 
 from sample_data import PRODUCTS, RESOURCES, Product, Resource, get_resource_usage
 
@@ -90,15 +90,13 @@ def build_production_model() -> LXModel:
 
 
 def display_solution(model: LXModel):
-    """Display the optimization results (when solver is implemented)."""
+    """Display the optimization results."""
 
     print("\n" + "=" * 60)
     print("SOLUTION")
     print("=" * 60)
 
-    # This is what you'll do when solvers are implemented:
-    """
-    optimizer = LXOptimizer()
+    optimizer = LXOptimizer().use_solver("cplex")
     solution = optimizer.solve(model)
 
     if solution.is_optimal():
@@ -131,10 +129,6 @@ def display_solution(model: LXModel):
                   f"({pct:.1f}%)")
     else:
         print(f"No optimal solution found. Status: {solution.status}")
-    """
-
-    print("\nNOTE: Solver implementations not yet complete.")
-    print("Above code shows how you would access the solution.")
 
 
 # ==================== MAIN ====================
@@ -174,15 +168,8 @@ def main():
     model = build_production_model()
     print(model.summary())
 
-    # Display would-be solution
+    # Solve and display solution
     display_solution(model)
-
-    print()
-    print("Next steps:")
-    print("  1. Implement solver backend")
-    print("  2. optimizer.solve(model) returns Solution")
-    print("  3. Access solution.variables['production'][product.id]")
-    print("  4. Or use solution.get_mapped(production) for type-safe access")
 
 
 if __name__ == "__main__":

@@ -63,7 +63,7 @@ DRIVERS = [
         daily_rate=140.0,
         max_days_per_week=5,
         is_active=True,
-        days_off=[0, 6],  # Mon, Sun off
+        days_off=[0],  # Mon off
     ),
     Driver(
         id=5,
