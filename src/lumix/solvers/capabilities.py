@@ -263,6 +263,19 @@ CPSAT_CAPABILITIES = LXSolverCapability(
     supports_callbacks=False, # No callbacks in current implementation
 )
 
+GLPK_CAPABILITIES = LXSolverCapability(
+    name="GLPK",
+    features=(
+        LXSolverFeature.LINEAR
+        | LXSolverFeature.INTEGER
+        | LXSolverFeature.BINARY
+        | LXSolverFeature.SENSITIVITY_ANALYSIS
+    ),
+    supports_warmstart=False,
+    supports_parallel=False,  # GLPK is single-threaded
+    supports_callbacks=False,
+)
+
 
 __all__ = [
     "LXSolverFeature",
@@ -271,4 +284,5 @@ __all__ = [
     "GUROBI_CAPABILITIES",
     "CPLEX_CAPABILITIES",
     "CPSAT_CAPABILITIES",
+    "GLPK_CAPABILITIES",
 ]

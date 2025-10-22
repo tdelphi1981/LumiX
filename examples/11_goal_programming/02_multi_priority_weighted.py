@@ -71,6 +71,8 @@ WAREHOUSES = [
 TRANSPORT_COST_PER_UNIT = 5.0
 TARGET_TOTAL_TRANSPORT_COST = 1000.0
 
+solver_to_use = "gurobi"
+
 
 def main():
     """Run multi-priority weighted goal programming example."""
@@ -196,7 +198,7 @@ def main():
 
     # Solve
     print("\nSolving...")
-    optimizer = LXOptimizer().use_solver("ortools")
+    optimizer = LXOptimizer().use_solver(solver_to_use)
     solution = optimizer.solve(model)
 
     # Display results

@@ -119,12 +119,12 @@ class LXOptimizer(Generic[TModel]):
         self.logger = LXModelLogger("lumix.optimizer")
         self._solver: Optional[LXSolverInterface[TModel]] = None
 
-    def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat"], **kwargs) -> Self:
+    def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat", "glpk"], **kwargs) -> Self:
         """
         Set solver with literal type checking.
 
         Args:
-            name: Solver name ("ortools", "gurobi", "cplex", "cpsat")
+            name: Solver name ("ortools", "gurobi", "cplex", "cpsat", "glpk")
 
         Returns:
             Self for chaining
@@ -289,6 +289,10 @@ class LXOptimizer(Generic[TModel]):
                 enable_rational_conversion=self.use_rationals,
                 rational_max_denom=rational_max_denom
             )
+        elif self.solver_name == "glpk":
+            from .glpk_solver import LXGLPKSolver
+
+            return LXGLPKSolver()
         else:
             raise ValueError(f"Unknown solver: {self.solver_name}")
 

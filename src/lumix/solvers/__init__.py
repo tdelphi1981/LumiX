@@ -4,6 +4,7 @@ from .base import LXOptimizer, LXSolverInterface
 from .capabilities import (
     CPLEX_CAPABILITIES,
     CPSAT_CAPABILITIES,
+    GLPK_CAPABILITIES,
     GUROBI_CAPABILITIES,
     ORTOOLS_CAPABILITIES,
     LXSolverCapability,
@@ -19,4 +20,5 @@ __all__ = [
     "GUROBI_CAPABILITIES",
     "CPLEX_CAPABILITIES",
     "CPSAT_CAPABILITIES",
+    "GLPK_CAPABILITIES",
 ]

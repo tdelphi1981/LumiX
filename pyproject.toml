@@ -31,7 +31,8 @@ dependencies = [
 ortools = ["ortools>=9.8.0"]
 gurobi = ["gurobipy>=11.0.0"]
 cplex = ["cplex>=22.1.0"]
-all-solvers = ["ortools>=9.8.0", "gurobipy>=11.0.0", "cplex>=22.1.0"]
+glpk = ["swiglpk>=5.0.0"]
+all-solvers = ["ortools>=9.8.0", "gurobipy>=11.0.0", "cplex>=22.1.0", "swiglpk>=5.0.0"]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",

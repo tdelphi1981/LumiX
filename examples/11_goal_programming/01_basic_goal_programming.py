@@ -54,6 +54,8 @@ MAX_HOURS = 400  # Hard capacity limit
 TARGET_PROFIT = 1800  # Profit goal
 MAX_OVERTIME = 50  # Overtime hour limit goal
 
+solver_to_use = "ortools"
+
 
 def main():
     """Run basic goal programming example."""
@@ -145,7 +147,7 @@ def main():
 
     # Solve
     print("\nSolving...")
-    optimizer = LXOptimizer().use_solver("ortools")
+    optimizer = LXOptimizer().use_solver(solver_to_use)
     solution = optimizer.solve(model)
 
     # Display results
