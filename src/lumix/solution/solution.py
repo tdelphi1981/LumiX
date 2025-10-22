@@ -60,6 +60,11 @@ class LXSolution(Generic[TModel]):
     iterations: Optional[int] = None
     nodes: Optional[int] = None
 
+    # Goal programming information
+    goal_deviations: Dict[str, Dict[str, Union[float, Dict[Any, float]]]] = field(
+        default_factory=dict
+    )
+
     def get_variable(self, var: LXVariable[TModel, TValue]) -> Union[TValue, Dict[Any, TValue]]:
         """
         Get variable value with full type inference.
@@ -119,6 +124,99 @@ class LXSolution(Generic[TModel]):
         """
         return self.reduced_costs.get(var_name)
 
+    def get_goal_deviations(
+        self, goal_name: str
+    ) -> Optional[Dict[str, Union[float, Dict[Any, float]]]]:
+        """
+        Get deviation values for a goal constraint.
+
+        Returns both positive and negative deviations for the specified goal.
+
+        Args:
+            goal_name: Name of the goal constraint
+
+        Returns:
+            Dictionary with keys 'pos' and 'neg' containing deviation values,
+            or None if goal not found
+
+        Example:
+            >>> deviations = solution.get_goal_deviations("production_target")
+            >>> pos_dev = deviations["pos"]  # Over-production
+            >>> neg_dev = deviations["neg"]  # Under-production
+        """
+        return self.goal_deviations.get(goal_name)
+
+    def is_goal_satisfied(
+        self, goal_name: str, tolerance: float = 1e-6
+    ) -> Optional[bool]:
+        """
+        Check if a goal is satisfied within tolerance.
+
+        A goal is satisfied if both positive and negative deviations are
+        within the specified tolerance.
+
+        Args:
+            goal_name: Name of the goal constraint
+            tolerance: Tolerance for deviation (default: 1e-6)
+
+        Returns:
+            True if goal is satisfied, False if not, None if goal not found
+
+        Example:
+            >>> if solution.is_goal_satisfied("demand_goal", tolerance=0.01):
+            ...     print("Demand goal achieved!")
+        """
+        deviations = self.get_goal_deviations(goal_name)
+        if deviations is None:
+            return None
+
+        pos_dev = deviations.get("pos", 0)
+        neg_dev = deviations.get("neg", 0)
+
+        # Handle both scalar and dict values
+        if isinstance(pos_dev, dict):
+            pos_satisfied = all(abs(v) <= tolerance for v in pos_dev.values())
+        else:
+            pos_satisfied = abs(pos_dev) <= tolerance
+
+        if isinstance(neg_dev, dict):
+            neg_satisfied = all(abs(v) <= tolerance for v in neg_dev.values())
+        else:
+            neg_satisfied = abs(neg_dev) <= tolerance
+
+        return pos_satisfied and neg_satisfied
+
+    def get_total_deviation(self, goal_name: str) -> Optional[float]:
+        """
+        Get total absolute deviation for a goal.
+
+        Sum of absolute values of all positive and negative deviations.
+
+        Args:
+            goal_name: Name of the goal constraint
+
+        Returns:
+            Total deviation, or None if goal not found
+
+        Example:
+            >>> total_dev = solution.get_total_deviation("production_target")
+            >>> print(f"Total deviation: {total_dev}")
+        """
+        deviations = self.get_goal_deviations(goal_name)
+        if deviations is None:
+            return None
+
+        total = 0.0
+
+        for dev_type in ["pos", "neg"]:
+            dev = deviations.get(dev_type, 0)
+            if isinstance(dev, dict):
+                total += sum(abs(v) for v in dev.values())
+            else:
+                total += abs(dev)
+
+        return total
+
     def is_optimal(self) -> bool:
         """Check if solution is optimal."""
         return self.status.lower() in ["optimal", "opt_optimal"]
@@ -154,6 +252,18 @@ class LXSolution(Generic[TModel]):
             summary_lines.append(f"Iterations: {self.iterations}")
         if self.nodes is not None:
             summary_lines.append(f"Nodes: {self.nodes}")
+
+        # Add goal programming summary
+        if self.goal_deviations:
+            summary_lines.append(f"\nGoal Constraints: {len(self.goal_deviations)}")
+            satisfied = sum(
+                1
+                for goal_name in self.goal_deviations.keys()
+                if self.is_goal_satisfied(goal_name, tolerance=1e-6)
+            )
+            summary_lines.append(
+                f"Goals Satisfied: {satisfied}/{len(self.goal_deviations)}"
+            )
 
         return "\n".join(summary_lines)
 

@@ -1,6 +1,6 @@
 """Model builder class for LumiX optimization models."""
 
-from typing import Generic, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Generic, List, Optional, TypeVar
 
 from typing_extensions import Self
 
@@ -8,6 +8,10 @@ from .constraints import LXConstraint
 from .enums import LXObjectiveSense
 from .expressions import LXLinearExpression, LXQuadraticExpression
 from .variables import LXVariable
+
+if TYPE_CHECKING:
+    from ..goal_programming.goal import LXGoalMode
+    from ..goal_programming.relaxation import RelaxedConstraint
 
 TModel = TypeVar("TModel")
 
@@ -55,6 +59,11 @@ class LXModel(Generic[TModel]):
         self.constraints: List[LXConstraint] = []
         self.objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
         self.objective_sense: LXObjectiveSense = LXObjectiveSense.MAXIMIZE
+
+        # Goal programming support
+        self.goal_mode: Optional[str] = None  # "weighted" or "sequential"
+        self._relaxed_constraints: List["RelaxedConstraint"] = []
+        self._goal_programming_prepared: bool = False
 
     def add_variable(self, var: LXVariable) -> Self:
         """
@@ -166,6 +175,165 @@ class LXModel(Generic[TModel]):
                 return const
         return None
 
+    def set_goal_mode(self, mode: str) -> Self:
+        """
+        Set goal programming mode.
+
+        Args:
+            mode: Goal programming mode ("weighted" or "sequential")
+
+        Returns:
+            Self for chaining
+
+        Raises:
+            ValueError: If mode is not "weighted" or "sequential"
+
+        Example:
+            >>> model.set_goal_mode("weighted")
+            >>> # Solve with weighted objectives (single solve)
+
+            >>> model.set_goal_mode("sequential")
+            >>> # Solve lexicographically (multiple solves)
+        """
+        if mode not in ("weighted", "sequential"):
+            raise ValueError(
+                f"Invalid goal mode: {mode}. Must be 'weighted' or 'sequential'"
+            )
+        self.goal_mode = mode
+        return self
+
+    def prepare_goal_programming(self) -> Self:
+        """
+        Prepare model for goal programming by relaxing goal constraints.
+
+        This method:
+        1. Identifies constraints marked as goals (via .as_goal())
+        2. Relaxes them by adding deviation variables
+        3. Builds the appropriate objective function based on mode
+        4. Adds deviation variables to the model
+        5. Replaces goal constraints with relaxed versions
+
+        This is automatically called by the solver, but can be called
+        manually for inspection or debugging.
+
+        Returns:
+            Self for chaining
+
+        Example:
+            >>> model.set_goal_mode("weighted")
+            >>> model.prepare_goal_programming()
+            >>> # Model now has deviation variables and goal objective
+        """
+        if self._goal_programming_prepared:
+            # Already prepared, skip
+            return self
+
+        # Import here to avoid circular dependencies
+        from ..goal_programming.goal import LXGoalMode
+        from ..goal_programming.objective_builder import build_weighted_objective
+        from ..goal_programming.relaxation import relax_constraint
+
+        # Collect goal constraints
+        goal_constraints = [c for c in self.constraints if c.is_goal()]
+
+        if not goal_constraints:
+            # No goals, nothing to do
+            return self
+
+        # Determine mode (default to weighted if not set)
+        if self.goal_mode is None:
+            self.goal_mode = "weighted"
+
+        # Relax each goal constraint
+        self._relaxed_constraints = []
+        regular_constraints = []
+
+        for constraint in self.constraints:
+            if constraint.is_goal():
+                # Relax this constraint
+                relaxed = relax_constraint(constraint, constraint.goal_metadata)
+                self._relaxed_constraints.append(relaxed)
+
+                # Add deviation variables to model
+                self.add_variable(relaxed.pos_deviation)
+                self.add_variable(relaxed.neg_deviation)
+
+                # Add relaxed constraint (equality with deviations)
+                regular_constraints.append(relaxed.constraint)
+            else:
+                # Keep regular constraint as-is
+                regular_constraints.append(constraint)
+
+        # Replace constraints with relaxed versions
+        self.constraints = regular_constraints
+
+        # Build objective based on mode
+        if self.goal_mode == "weighted":
+            # Build weighted objective
+            goal_objective = build_weighted_objective(self._relaxed_constraints)
+
+            # Set as objective (or combine with existing if present)
+            if self.objective_expr is None:
+                # No existing objective, use goal objective
+                self.minimize(goal_objective)
+            else:
+                # Combine with existing objective
+                # For now, we'll just replace it (user can handle this manually)
+                # Future enhancement: provide combine_objectives helper
+                self.minimize(goal_objective)
+
+        # For sequential mode, objective will be set during solving
+        # (handled by LXGoalProgrammingSolver)
+
+        self._goal_programming_prepared = True
+        return self
+
+    def has_goals(self) -> bool:
+        """
+        Check if model has any goal constraints.
+
+        Returns:
+            True if at least one constraint is marked as a goal
+        """
+        return any(c.is_goal() for c in self.constraints)
+
+    def populate_goal_deviations(self, solution: "LXSolution") -> "LXSolution":
+        """
+        Populate goal deviation values in the solution.
+
+        Extracts deviation variable values from the solution and organizes
+        them by goal name for easy access via solution.get_goal_deviations().
+
+        This method is automatically called after solving if the model has goals.
+
+        Args:
+            solution: Solution object to populate
+
+        Returns:
+            The solution object with goal_deviations populated
+        """
+        if not self._goal_programming_prepared or not self._relaxed_constraints:
+            return solution
+
+        # Import here to avoid circular dependency
+        from ..solution.solution import LXSolution
+
+        # Extract deviation values for each relaxed constraint
+        for relaxed in self._relaxed_constraints:
+            constraint_name = relaxed.constraint.name
+
+            # Get positive and negative deviation values
+            pos_dev_values = solution.get_variable(relaxed.pos_deviation)
+            neg_dev_values = solution.get_variable(relaxed.neg_deviation)
+
+            # Store in solution's goal_deviations
+            solution.goal_deviations[constraint_name] = {
+                "pos": pos_dev_values,
+                "neg": neg_dev_values,
+            }
+
+        return solution
+
     def summary(self) -> str:
         """
         Get model summary.
@@ -173,12 +341,21 @@ class LXModel(Generic[TModel]):
         Returns:
             String summary of model
         """
-        return (
+        summary_str = (
             f"LXModel: {self.name}\n"
             f"  Variable Families: {len(self.variables)}\n"
             f"  Constraint Families: {len(self.constraints)}\n"
             f"  Objective: {self.objective_sense.value}\n"
         )
+
+        # Add goal programming info if applicable
+        if self.has_goals():
+            goal_count = sum(1 for c in self.constraints if c.is_goal())
+            summary_str += f"  Goal Constraints: {goal_count}\n"
+            if self.goal_mode:
+                summary_str += f"  Goal Mode: {self.goal_mode}\n"
+
+        return summary_str
 
 
 __all__ = ["LXModel"]

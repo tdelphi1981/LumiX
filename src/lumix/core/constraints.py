@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, List, Optional, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, List, Optional, Type, TypeVar
 
 from typing_extensions import Self
 
 from .enums import LXConstraintSense
 from .expressions import LXLinearExpression
+
+if TYPE_CHECKING:
+    from ..goal_programming.goal import LXGoalMetadata
 
 TModel = TypeVar("TModel")
 TIndex = TypeVar("TIndex")
@@ -55,6 +58,9 @@ class LXConstraint(Generic[TModel]):
     # Data sources
     _data: Optional[List[TModel]] = None
     _session: Optional[Any] = None
+
+    # Goal programming metadata
+    goal_metadata: Optional["LXGoalMetadata"] = None
 
     def expression(self, expr: LXLinearExpression[TModel]) -> Self:
         """
@@ -162,6 +168,57 @@ class LXConstraint(Generic[TModel]):
         """
         self.index_func = func
         return self
+
+    def as_goal(self, priority: int, weight: float = 1.0) -> Self:
+        """
+        Mark this constraint as a goal for goal programming.
+
+        Automatically relaxes the constraint by adding deviation variables
+        and includes it in the goal programming objective function.
+
+        Constraint types are handled as follows:
+        - LE (expr <= rhs): expr + neg_dev - pos_dev == rhs
+            - Positive deviation (exceeding target) is undesired
+        - GE (expr >= rhs): expr + neg_dev - pos_dev == rhs
+            - Negative deviation (falling short) is undesired
+        - EQ (expr == rhs): expr + neg_dev - pos_dev == rhs
+            - Both deviations are undesired
+
+        Args:
+            priority: Priority level (1=highest, 2=second, etc.)
+                      Priority 0 is reserved for custom objective terms
+            weight: Relative weight within the same priority level (default: 1.0)
+
+        Returns:
+            Self for chaining
+
+        Example:
+            # High priority production goal
+            .as_goal(priority=1, weight=1.0)
+
+            # Lower priority overtime limit
+            .as_goal(priority=2, weight=0.5)
+
+            # Custom objective term (maximize profit)
+            .as_goal(priority=0, weight=1.0)
+        """
+        from ..goal_programming.goal import LXGoalMetadata
+
+        self.goal_metadata = LXGoalMetadata(
+            priority=priority,
+            weight=weight,
+            constraint_sense=self.sense,
+        )
+        return self
+
+    def is_goal(self) -> bool:
+        """
+        Check if this constraint is marked as a goal.
+
+        Returns:
+            True if this is a goal constraint, False otherwise
+        """
+        return self.goal_metadata is not None
 
     def get_instances(self) -> List[TModel]:
         """

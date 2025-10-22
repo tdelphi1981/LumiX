@@ -133,6 +133,24 @@ from .analysis import (
 # Utils
 from .utils import LXModelLogger, LXORMContext, LXORMModel, LXRationalConverter, LXTypedQuery
 
+# Goal Programming
+from .goal_programming import (
+    LXGoal,
+    LXGoalMetadata,
+    LXGoalMode,
+    LXGoalProgrammingSolver,
+    RelaxedConstraint,
+    build_sequential_objectives,
+    build_weighted_objective,
+    combine_objectives,
+    extract_custom_objectives,
+    get_deviation_var_name,
+    priority_to_weight,
+    relax_constraint,
+    relax_constraints,
+    solve_goal_programming,
+)
+
 __all__ = [
     # Version
     "__version__",
@@ -188,4 +206,19 @@ __all__ = [
     "LXTypedQuery",
     "LXRationalConverter",
     "LXModelLogger",
+    # Goal Programming
+    "LXGoal",
+    "LXGoalMetadata",
+    "LXGoalMode",
+    "LXGoalProgrammingSolver",
+    "RelaxedConstraint",
+    "build_sequential_objectives",
+    "build_weighted_objective",
+    "combine_objectives",
+    "extract_custom_objectives",
+    "get_deviation_var_name",
+    "priority_to_weight",
+    "relax_constraint",
+    "relax_constraints",
+    "solve_goal_programming",
 ]

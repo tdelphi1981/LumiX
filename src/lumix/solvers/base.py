@@ -247,6 +247,12 @@ class LXOptimizer(Generic[TModel]):
         solution = self._solver.solve(model, enable_sensitivity=self.enable_sens, **solver_params)
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
 
+        # Populate goal deviations if model has prepared goal programming
+        if (hasattr(model, 'populate_goal_deviations') and
+            hasattr(model, '_goal_programming_prepared') and
+            model._goal_programming_prepared):
+            model.populate_goal_deviations(solution)
+
         return solution
 
     def _create_solver(self) -> LXSolverInterface[TModel]:
