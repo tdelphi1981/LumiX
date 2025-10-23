@@ -8,6 +8,7 @@ Complete API documentation for all LumiX modules with auto-generated documentati
    :caption: API Modules
 
    core/index
+   nonlinear/index
    linearization/index
    utils/index
 
@@ -24,6 +25,17 @@ The :doc:`core/index` module provides the fundamental building blocks for optimi
 - :class:`~lumix.core.enums.LXVarType` - Variable type enumeration
 - :class:`~lumix.core.enums.LXConstraintSense` - Constraint sense enumeration
 - :class:`~lumix.core.enums.LXObjectiveSense` - Objective sense enumeration
+
+Nonlinear Module
+----------------
+
+The :doc:`nonlinear/index` module provides nonlinear term definitions:
+
+- :class:`~lumix.nonlinear.terms.LXAbsoluteTerm` - Absolute value operations |x|
+- :class:`~lumix.nonlinear.terms.LXMinMaxTerm` - Min/max over multiple variables
+- :class:`~lumix.nonlinear.terms.LXBilinearTerm` - Products of two variables x*y
+- :class:`~lumix.nonlinear.terms.LXIndicatorTerm` - Conditional (if-then) constraints
+- :class:`~lumix.nonlinear.terms.LXPiecewiseLinearTerm` - Piecewise-linear function approximations
 
 Linearization Module
 --------------------
@@ -58,6 +70,11 @@ Core:
   - :class:`lumix.core.constraints.LXConstraint` - Add constraints
   - :class:`lumix.core.expressions.LXLinearExpression` - Build expressions
 
+Nonlinear:
+  - :class:`lumix.nonlinear.terms.LXAbsoluteTerm` - Absolute value terms
+  - :class:`lumix.nonlinear.terms.LXBilinearTerm` - Bilinear products
+  - :class:`lumix.nonlinear.terms.LXPiecewiseLinearTerm` - Piecewise-linear approximations
+
 Linearization:
   - :class:`lumix.linearization.engine.LXLinearizer` - Automatic linearization engine
   - :class:`lumix.linearization.config.LXLinearizerConfig` - Linearization configuration
@@ -89,15 +106,6 @@ Analysis Module
 - ``LXWhatIfAnalyzer`` - What-if analysis
 - ``LXVariableSensitivity`` - Variable sensitivity results
 - ``LXConstraintSensitivity`` - Constraint sensitivity results
-
-Nonlinear Module
-~~~~~~~~~~~~~~~~
-
-- ``LXBilinearTerm`` - Bilinear products
-- ``LXAbsoluteTerm`` - Absolute value
-- ``LXMinMaxTerm`` - Min/max functions
-- ``LXPiecewiseLinearTerm`` - Piecewise-linear functions
-- ``LXIndicatorTerm`` - Indicator constraints
 
 Goal Programming Module
 ~~~~~~~~~~~~~~~~~~~~~~~~

@@ -12,6 +12,8 @@ and extend its functionality.
    extending-core
    indexing-architecture
    extending-indexing
+   nonlinear-architecture
+   extending-nonlinear
    linearization-architecture
    extending-linearization
    utils-architecture
@@ -96,15 +98,15 @@ Module Overview
 
 **Core Modules:**
 
-- ``core``: Model building (variables, constraints, expressions, models)
-- ``indexing``: Multi-dimensional indexing utilities
+- ``core``: Model building (variables, constraints, expressions, models) (documented)
+- ``indexing``: Multi-dimensional indexing utilities (documented)
+- ``nonlinear``: Non-linear term definitions (documented)
+- ``linearization``: Automatic linearization engine (documented)
+- ``utils``: Logging, ORM, rational conversion (documented)
 - ``solvers``: Solver interfaces (OR-Tools, Gurobi, CPLEX, GLPK, CP-SAT)
 - ``analysis``: Sensitivity, scenario, what-if analysis
-- ``linearization``: Automatic linearization engine (documented)
 - ``goal_programming``: Multi-objective optimization
-- ``nonlinear``: Non-linear term definitions
 - ``solution``: Solution handling and mapping
-- ``utils``: Logging, ORM, rational conversion (documented)
 
 Core Module Documentation
 -------------------------
@@ -122,6 +124,14 @@ Understand indexing architecture and customization:
 
 - :doc:`indexing-architecture` - Indexing module design patterns and architecture
 - :doc:`extending-indexing` - How to create custom dimensions and products
+
+Nonlinear Module Documentation
+-------------------------------
+
+Learn about nonlinear term definitions and how to extend them:
+
+- :doc:`nonlinear-architecture` - Nonlinear module design patterns and architecture
+- :doc:`extending-nonlinear` - How to create custom nonlinear term types
 
 Utils Module Documentation
 ---------------------------
@@ -152,6 +162,11 @@ Next Steps
 
 - :doc:`indexing-architecture` - Indexing module architecture and patterns
 - :doc:`extending-indexing` - Custom dimensions, products, and filters
+
+**For Nonlinear Module Development:**
+
+- :doc:`nonlinear-architecture` - Nonlinear module architecture and patterns
+- :doc:`extending-nonlinear` - Custom nonlinear term types and linearization
 
 **For Utils Module Development:**
 

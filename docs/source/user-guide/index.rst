@@ -9,6 +9,7 @@ Comprehensive guides for using LumiX effectively in your optimization projects.
 
    core/index
    indexing/index
+   nonlinear/index
    linearization/index
    utils/index
 
@@ -37,6 +38,20 @@ The :doc:`indexing/index` section covers multi-dimensional indexing capabilities
 - Filtering strategies (per-dimension and cross-dimension)
 - Type-safe multi-dimensional variables
 - Sparse indexing patterns
+
+Nonlinear Module
+----------------
+
+The :doc:`nonlinear/index` section covers nonlinear term definitions and modeling.
+
+**Topics Covered:**
+
+- Absolute value terms for deviation minimization
+- Min/max operations over alternatives
+- Bilinear products (x * y) with automatic linearization
+- Indicator (conditional) constraints
+- Piecewise-linear approximations of nonlinear functions
+- Integration with automatic linearization
 
 Linearization Module
 --------------------
