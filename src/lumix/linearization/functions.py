@@ -341,7 +341,8 @@ class LXNonLinearFunctions:
         Returns:
             Output variable representing func(var)
 
-        Example:
+        Example::
+
             # Custom discount curve
             def discount_curve(q):
                 if q < 100:

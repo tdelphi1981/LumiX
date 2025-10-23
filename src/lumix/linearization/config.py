@@ -42,7 +42,8 @@ class LXLinearizerConfig:
         tolerance: Numerical tolerance for comparisons
         verbose_logging: Enable detailed linearization logging
 
-    Example:
+    Example::
+
         config = LXLinearizerConfig(
             big_m_value=1e5,
             pwl_num_segments=30,

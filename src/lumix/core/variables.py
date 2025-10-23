@@ -24,21 +24,25 @@ class LXVariable(Generic[TModel, TValue]):
     IMPORTANT: LXVariable is NOT a single variable, but a FAMILY/TEMPLATE that
     automatically expands to multiple solver variables based on data.
 
-    When you write:
+    When you write::
+
         production = LXVariable[Product, float]("production").from_data(products)
 
-    This creates ONE LXVariable object that represents MANY solver variables:
+    This creates ONE LXVariable object that represents MANY solver variables::
+
         production[product1], production[product2], production[product3], ...
 
     The expansion happens automatically during model building - you don't loop manually.
 
     Supports:
+
     - Single-model indexing: LXVariable[Product, float]
     - Multi-model indexing: LXVariable[Tuple[Driver, Date], int]
     - Join-based sparse indexing
     - Cartesian product indexing
 
-    Examples:
+    Examples::
+
         # Single model - data-driven
         production = (
             LXVariable[Product, float]("production")
@@ -230,7 +234,8 @@ class LXVariable(Generic[TModel, TValue]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             duty = LXVariable[Tuple[Driver, Date], int]("duty")
                 .indexed_by_product(
                     LXIndexDimension(Driver, lambda d: d.id)
@@ -264,7 +269,8 @@ class LXVariable(Generic[TModel, TValue]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             # Only create variables for valid driver-route assignments
             assignment = LXVariable[Tuple[Driver, Route], int]("assign")
                 .indexed_by_join(
@@ -341,7 +347,8 @@ class LXVariable(Generic[TModel, TValue]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             .where_multi(lambda driver, date, shift:
                 driver.can_work_shift(shift) and
                 date.weekday() not in driver.days_off

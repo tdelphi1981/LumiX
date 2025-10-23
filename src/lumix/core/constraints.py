@@ -27,7 +27,8 @@ class LXConstraint(Generic[TModel]):
 
     Represents: LHS {<=, >=, ==} RHS
 
-    Examples:
+    Examples::
+
         # Simple single constraint
         LXConstraint("total_capacity")
             .expression(LXLinearExpression().add_term(production, 1.0))
@@ -177,12 +178,18 @@ class LXConstraint(Generic[TModel]):
         and includes it in the goal programming objective function.
 
         Constraint types are handled as follows:
+
         - LE (expr <= rhs): expr + neg_dev - pos_dev == rhs
-            - Positive deviation (exceeding target) is undesired
+
+          - Positive deviation (exceeding target) is undesired
+
         - GE (expr >= rhs): expr + neg_dev - pos_dev == rhs
-            - Negative deviation (falling short) is undesired
+
+          - Negative deviation (falling short) is undesired
+
         - EQ (expr == rhs): expr + neg_dev - pos_dev == rhs
-            - Both deviations are undesired
+
+          - Both deviations are undesired
 
         Args:
             priority: Priority level (1=highest, 2=second, etc.)
@@ -192,7 +199,8 @@ class LXConstraint(Generic[TModel]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             # High priority production goal
             .as_goal(priority=1, weight=1.0)
 

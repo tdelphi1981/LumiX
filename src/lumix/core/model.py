@@ -103,6 +103,7 @@ from .variables import LXVariable
 if TYPE_CHECKING:
     from ..goal_programming.goal import LXGoalMode
     from ..goal_programming.relaxation import RelaxedConstraint
+    from ..solution.solution import LXSolution
 
 TModel = TypeVar("TModel")
 
@@ -112,11 +113,13 @@ class LXModel(Generic[TModel]):
     Main model builder with full type safety and IDE support.
 
     Creates and manages optimization models with:
+
     - Variables (single or multi-indexed)
     - Constraints (linear, indexed, multi-model)
     - Objective function (linear or quadratic)
 
-    Examples:
+    Examples::
+
         # Simple model
         model = LXModel("production_plan")
         model.add_variable(production)

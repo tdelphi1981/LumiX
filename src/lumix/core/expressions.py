@@ -19,7 +19,8 @@ class LXLinearExpression(Generic[TModel]):
 
     Represents: sum(coeff[i] * var[i]) + constant
 
-    Examples:
+    Examples::
+
         expr = LXLinearExpression()
         expr.add_term(production, 1.0)
         expr.add_term(inventory, -1.0)
@@ -76,7 +77,8 @@ class LXLinearExpression(Generic[TModel]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             expr.add_multi_term(
                 duty,
                 coeff=lambda driver, date: driver.cost * date.multiplier,
@@ -101,7 +103,8 @@ class LXLinearExpression(Generic[TModel]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             # Sum all driver duties (over all drivers and dates)
             expr.sum_over(duty)
 
@@ -426,7 +429,8 @@ class LXNonLinearExpression:
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             # If warehouse is open, then demand must be met
             expr.add_indicator(
                 is_open,
@@ -464,7 +468,8 @@ class LXNonLinearExpression:
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             # Exponential growth
             expr.add_piecewise(time, lambda t: math.exp(t), num_segments=30)
 

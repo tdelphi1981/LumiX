@@ -139,6 +139,8 @@ Example: Getting Help
    # In Python, use help() to see docstrings
    help(LXModel)
 
+.. code-block:: text
+
    # Or in IPython/Jupyter
    LXModel?
 

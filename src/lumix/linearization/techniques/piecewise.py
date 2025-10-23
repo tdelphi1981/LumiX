@@ -69,7 +69,8 @@ class LXPiecewiseLinearizer:
         Raises:
             ValueError: If domain bounds cannot be determined
 
-        Example:
+        Example::
+
             # Exponential growth
             exp_y = linearizer.approximate_function(
                 lambda x: math.exp(x),

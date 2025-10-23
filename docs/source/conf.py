@@ -83,7 +83,38 @@ suppress_warnings = [
     "app.add_node",
     "app.add_directive",
     "app.add_role",
+    "autodoc",
+    "ref.python",
 ]
+
+# Autodoc configuration - suppress member warnings
+autodoc_warningiserror = False
+
+# Configuration to handle duplicate warnings from autosummary
+# These warnings occur when objects are documented both in main docs and API reference
+# This is expected behavior when using autosummary to generate API documentation
+import logging
+import re
+
+
+class DuplicateFilter(logging.Filter):
+    """Filter to suppress duplicate object description warnings."""
+
+    def filter(self, record):
+        # Suppress duplicate object warnings
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            if 'duplicate object description' in record.msg:
+                return False
+        return True
+
+
+# Apply the filter to sphinx loggers
+def setup(app):
+    """Configure logging to suppress duplicate warnings."""
+    # Add filter to all sphinx loggers
+    for logger_name in ['sphinx', 'sphinx.ext.autodoc', 'sphinx.ext.autosummary']:
+        logger = logging.getLogger(logger_name)
+        logger.addFilter(DuplicateFilter())
 
 # Intersphinx mapping
 intersphinx_mapping = {

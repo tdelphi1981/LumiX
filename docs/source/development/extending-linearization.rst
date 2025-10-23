@@ -16,8 +16,8 @@ The linearization module is designed to be extensible. You can:
 Adding a New Linearization Technique
 -------------------------------------
 
-Example: Linearizing Absolute Value Squared (|x|²)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Example: Linearizing Absolute Value Squared (abs(x)²)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Let's create a new linearizer for absolute value squared terms.
 
