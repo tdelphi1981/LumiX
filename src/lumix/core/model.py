@@ -1,4 +1,95 @@
-"""Model builder class for LumiX optimization models."""
+"""Model builder class for LumiX optimization models.
+
+This module provides the LXModel class, which is the central component for building
+optimization models in LumiX. It implements the Builder pattern with fluent API for
+creating type-safe, data-driven optimization models.
+
+The model serves as a container for:
+    - Variable families (decision variables indexed by data)
+    - Constraint families (constraints indexed by data)
+    - Objective function (linear or quadratic expression)
+    - Goal programming metadata (for multi-objective optimization)
+
+Key Features:
+    - **Fluent API**: Method chaining for concise model building
+    - **Type Safety**: Generic type parameter for compile-time type checking
+    - **Goal Programming**: Native support for multi-objective optimization
+    - **Auto-expansion**: Variable and constraint families expand automatically
+
+Architecture:
+    LXModel uses the Builder pattern where each method returns `self` to enable
+    method chaining. The model doesn't create solver variables directly - instead,
+    it stores variable and constraint *families* that are expanded during solving.
+
+Examples:
+    Simple production planning model::
+
+        from lumix import LXModel, LXVariable, LXConstraint, LXLinearExpression
+
+        # Create model
+        model = LXModel("production_plan")
+
+        # Add variables
+        production = LXVariable[Product, float]("production")\\
+            .continuous()\\
+            .bounds(lower=0)\\
+            .from_data(products)
+
+        model.add_variable(production)
+
+        # Add constraints
+        capacity = LXConstraint("capacity")\\
+            .expression(
+                LXLinearExpression().add_term(production, lambda p: p.usage)
+            )\\
+            .le()\\
+            .rhs(max_capacity)
+
+        model.add_constraint(capacity)
+
+        # Set objective
+        model.maximize(
+            LXLinearExpression().add_term(production, lambda p: p.profit)
+        )
+
+    Fluent API with method chaining::
+
+        model = (
+            LXModel[Product]("production")
+            .add_variable(production)
+            .add_constraint(capacity)
+            .maximize(profit_expr)
+        )
+
+    Goal programming for multi-objective optimization::
+
+        model = LXModel("multi_objective")\\
+            .set_goal_mode("weighted")
+
+        # Mark constraints as goals with priorities
+        model.add_constraint(
+            profit_constraint.as_goal(priority=1, weight=1.0)
+        )
+        model.add_constraint(
+            quality_constraint.as_goal(priority=2, weight=0.8)
+        )
+
+        # Solve with goal programming solver
+        solution = optimizer.solve(model)
+
+Note:
+    The model is solver-agnostic. The same model can be solved with different
+    solvers (OR-Tools, Gurobi, CPLEX, GLPK) by simply changing the optimizer
+    configuration.
+
+See Also:
+    - :class:`~lumix.core.variables.LXVariable`: Variable family builder
+    - :class:`~lumix.core.constraints.LXConstraint`: Constraint family builder
+    - :class:`~lumix.core.expressions.LXLinearExpression`: Linear expression builder
+    - :class:`~lumix.solvers.base.LXOptimizer`: Solver interface
+"""
+
+from __future__ import annotations
 
 from typing import TYPE_CHECKING, Generic, List, Optional, TypeVar
 

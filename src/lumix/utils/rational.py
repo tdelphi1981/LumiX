@@ -1,4 +1,54 @@
-"""Float-to-rational conversion utilities for integer-only solvers."""
+"""Float-to-rational conversion utilities for integer-only solvers.
+
+This module provides utilities for converting floating-point coefficients to rational
+numbers, which is essential when using integer-only solvers like GLPK's integer
+programming mode or other solvers that require exact rational arithmetic.
+
+The module implements three different rational approximation algorithms, each with
+different performance characteristics and accuracy trade-offs.
+
+Key Features:
+    - **Multiple Algorithms**: Farey sequence, continued fractions, Stern-Brocot tree
+    - **Configurable Precision**: Control maximum denominator for approximations
+    - **Batch Conversion**: Convert entire coefficient dictionaries at once
+    - **Error Tracking**: Optional error reporting for approximation quality
+
+Algorithms:
+    - **Farey**: Fastest method using Farey sequence with floor/ceil optimization (recommended)
+    - **Continued Fraction**: Classic continued fraction algorithm
+    - **Stern-Brocot**: Binary search through Stern-Brocot tree (equivalent to Farey)
+
+Use Cases:
+    - Converting LP models for integer-only solvers (GLPK)
+    - Exact rational arithmetic requirements
+    - Avoiding floating-point precision issues
+    - Symbolic computation integration
+
+Examples:
+    Basic rational conversion::
+
+        from lumix.utils import LXRationalConverter
+
+        converter = LXRationalConverter(max_denominator=10000)
+        frac = converter.to_rational(3.14159)  # Fraction(355, 113)
+        print(f"{frac} ≈ {float(frac):.5f}")
+
+    Convert coefficients for integer solver::
+
+        coeffs = {"x1": 3.5, "x2": 2.333, "x3": 1.25}
+        int_coeffs, denom = converter.convert_coefficients(coeffs)
+        # int_coeffs: {"x1": 42, "x2": 28, "x3": 15}, denom: 12
+
+    Compare approximation methods::
+
+        results = converter.compare_methods(3.14159)
+        for method, (frac, error, time) in results.items():
+            print(f"{method}: {frac} (error={error:.2e}, time={time:.6f}s)")
+
+See Also:
+    - Python fractions module: https://docs.python.org/3/library/fractions.html
+    - GLPK documentation: https://www.gnu.org/software/glpk/
+"""
 
 import math
 from fractions import Fraction

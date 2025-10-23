@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Literal, Optional, Tuple, TypeVar
 
 from typing_extensions import Self
 
