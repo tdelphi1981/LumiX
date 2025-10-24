@@ -15,6 +15,7 @@ Comprehensive guides for using LumiX effectively in your optimization projects.
    utils/index
    solution/index
    analysis/index
+   goal_programming/index
 
 Core Module
 -----------
@@ -121,6 +122,20 @@ The :doc:`analysis/index` section covers post-optimization analysis and decision
 - Bottleneck identification and resource allocation
 - Multi-parameter analysis and trade-off exploration
 
+Goal Programming Module
+------------------------
+
+The :doc:`goal_programming/index` section covers multi-objective optimization using goal programming.
+
+**Topics Covered:**
+
+- Converting hard constraints to soft constraints (goals)
+- Weighted goal programming (single solve with priority weights)
+- Sequential goal programming (lexicographic optimization)
+- Constraint relaxation and deviation variables
+- Building and combining goal programming objectives
+- Working with goal programming solutions
+
 Quick Start
 -----------
 
@@ -135,13 +150,6 @@ Coming Soon
 -----------
 
 The following sections will be added in future updates:
-
-Goal Programming
-~~~~~~~~~~~~~~~~
-
-- Weighted goal programming
-- Sequential (lexicographic) goal programming
-- Constraint relaxation
 
 Advanced Topics
 ~~~~~~~~~~~~~~~

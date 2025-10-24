@@ -21,9 +21,10 @@ class LXGoalMetadata:
 
     A goal constraint is a soft constraint that can be violated with a penalty.
     The goal is transformed by adding deviation variables:
-        - For LE: expr + neg_dev - pos_dev == rhs (minimize pos_dev)
-        - For GE: expr + neg_dev - pos_dev == rhs (minimize neg_dev)
-        - For EQ: expr + neg_dev - pos_dev == rhs (minimize both)
+
+    - For LE: expr + neg_dev - pos_dev == rhs (minimize pos_dev)
+    - For GE: expr + neg_dev - pos_dev == rhs (minimize neg_dev)
+    - For EQ: expr + neg_dev - pos_dev == rhs (minimize both)
 
     Attributes:
         priority: Priority level (1=highest, 2=second highest, etc.)

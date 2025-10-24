@@ -24,6 +24,8 @@ and extend its functionality.
    extending-solution
    analysis-architecture
    extending-analysis
+   goal-programming-architecture
+   extending-goal-programming
    design-decisions
 
 Overview
@@ -179,6 +181,14 @@ Learn about analysis tools architecture and customization:
 - :doc:`analysis-architecture` - Analysis module design patterns and architecture
 - :doc:`extending-analysis` - How to create custom analyzers and analysis types
 
+Goal Programming Module Documentation
+--------------------------------------
+
+Learn about goal programming architecture and customization:
+
+- :doc:`goal-programming-architecture` - Goal programming module design patterns and architecture
+- :doc:`extending-goal-programming` - How to create custom goal types, relaxation strategies, and objective builders
+
 Next Steps
 ----------
 
@@ -222,3 +232,8 @@ Next Steps
 
 - :doc:`analysis-architecture` - Analysis module architecture and patterns
 - :doc:`extending-analysis` - Custom analyzers and analysis workflows
+
+**For Goal Programming Module Development:**
+
+- :doc:`goal-programming-architecture` - Goal programming module architecture and patterns
+- :doc:`extending-goal-programming` - Custom goal types, relaxation strategies, and objective builders

@@ -15,6 +15,7 @@ Complete API documentation for all LumiX modules with auto-generated documentati
    utils/index
    solution/index
    analysis/index
+   goal_programming/index
 
 Core Module
 -----------
@@ -104,6 +105,20 @@ The :doc:`analysis/index` module provides comprehensive post-optimization analys
 - :class:`~lumix.analysis.scenario.LXScenario` - Scenario definition
 - :class:`~lumix.analysis.whatif.LXWhatIfResult` - What-if analysis results
 
+Goal Programming Module
+------------------------
+
+The :doc:`goal_programming/index` module provides automatic LP-to-Goal Programming conversion:
+
+- :class:`~lumix.goal_programming.goal.LXGoal` - Goal instance with metadata
+- :class:`~lumix.goal_programming.goal.LXGoalMetadata` - Goal configuration (priority, weight, sense)
+- :class:`~lumix.goal_programming.goal.LXGoalMode` - Solving modes (WEIGHTED, SEQUENTIAL)
+- :class:`~lumix.goal_programming.relaxation.RelaxedConstraint` - Relaxed constraint with deviations
+- :class:`~lumix.goal_programming.solver.LXGoalProgrammingSolver` - Sequential goal programming solver
+- :func:`~lumix.goal_programming.relaxation.relax_constraint` - Constraint relaxation function
+- :func:`~lumix.goal_programming.objective_builder.build_weighted_objective` - Build weighted objectives
+- :func:`~lumix.goal_programming.objective_builder.build_sequential_objectives` - Build sequential objectives
+
 Quick Links
 -----------
 
@@ -146,6 +161,12 @@ Analysis:
   - :class:`lumix.analysis.sensitivity.LXSensitivityAnalyzer` - Sensitivity analysis
   - :class:`lumix.analysis.scenario.LXScenarioAnalyzer` - Scenario comparison
   - :class:`lumix.analysis.whatif.LXWhatIfAnalyzer` - What-if exploration
+
+Goal Programming:
+  - :class:`lumix.goal_programming.goal.LXGoal` - Goal instances
+  - :class:`lumix.goal_programming.goal.LXGoalMetadata` - Goal metadata
+  - :class:`lumix.goal_programming.solver.LXGoalProgrammingSolver` - Sequential solver
+  - :func:`lumix.goal_programming.relaxation.relax_constraint` - Constraint relaxation
 
 Quick Reference
 ---------------
