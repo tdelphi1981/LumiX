@@ -22,6 +22,8 @@ and extend its functionality.
    extending-utils
    solution-architecture
    extending-solution
+   analysis-architecture
+   extending-analysis
    design-decisions
 
 Overview
@@ -109,7 +111,7 @@ Module Overview
 - ``linearization``: Automatic linearization engine (documented)
 - ``utils``: Logging, ORM, rational conversion (documented)
 - ``solution``: Solution handling and mapping (documented)
-- ``analysis``: Sensitivity, scenario, what-if analysis
+- ``analysis``: Sensitivity, scenario, what-if analysis (documented)
 - ``goal_programming``: Multi-objective optimization
 
 Core Module Documentation
@@ -169,6 +171,14 @@ Learn about solution handling architecture and customization:
 - :doc:`solution-architecture` - Solution module design patterns and architecture
 - :doc:`extending-solution` - How to create custom solution classes and mappers
 
+Analysis Module Documentation
+------------------------------
+
+Learn about analysis tools architecture and customization:
+
+- :doc:`analysis-architecture` - Analysis module design patterns and architecture
+- :doc:`extending-analysis` - How to create custom analyzers and analysis types
+
 Next Steps
 ----------
 
@@ -207,3 +217,8 @@ Next Steps
 
 - :doc:`solution-architecture` - Solution module architecture and patterns
 - :doc:`extending-solution` - Custom solution classes, mappers, and validators
+
+**For Analysis Module Development:**
+
+- :doc:`analysis-architecture` - Analysis module architecture and patterns
+- :doc:`extending-analysis` - Custom analyzers and analysis workflows

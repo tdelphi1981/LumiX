@@ -14,6 +14,7 @@ Complete API documentation for all LumiX modules with auto-generated documentati
    linearization/index
    utils/index
    solution/index
+   analysis/index
 
 Core Module
 -----------
@@ -90,6 +91,19 @@ The :doc:`solution/index` module provides solution handling and mapping utilitie
 - :class:`~lumix.solution.solution.LXSolution` - Solution container with variable values and metadata
 - :class:`~lumix.solution.mapping.LXSolutionMapper` - Utilities for mapping solutions to model instances
 
+Analysis Module
+---------------
+
+The :doc:`analysis/index` module provides comprehensive post-optimization analysis tools:
+
+- :class:`~lumix.analysis.sensitivity.LXSensitivityAnalyzer` - Sensitivity analysis with shadow prices and reduced costs
+- :class:`~lumix.analysis.scenario.LXScenarioAnalyzer` - Systematic scenario comparison
+- :class:`~lumix.analysis.whatif.LXWhatIfAnalyzer` - Interactive what-if exploration
+- :class:`~lumix.analysis.sensitivity.LXVariableSensitivity` - Variable sensitivity results
+- :class:`~lumix.analysis.sensitivity.LXConstraintSensitivity` - Constraint sensitivity results
+- :class:`~lumix.analysis.scenario.LXScenario` - Scenario definition
+- :class:`~lumix.analysis.whatif.LXWhatIfResult` - What-if analysis results
+
 Quick Links
 -----------
 
@@ -128,32 +142,15 @@ Solution:
   - :class:`lumix.solution.solution.LXSolution` - Solution container and access
   - :class:`lumix.solution.mapping.LXSolutionMapper` - Solution mapping utilities
 
-Planned Sections
-----------------
-
-The following sections will be added in future updates:
-
-Analysis Module
-~~~~~~~~~~~~~~~
-
-- ``LXSensitivityAnalyzer`` - Sensitivity analysis
-- ``LXScenarioAnalyzer`` - Scenario analysis
-- ``LXWhatIfAnalyzer`` - What-if analysis
-- ``LXVariableSensitivity`` - Variable sensitivity results
-- ``LXConstraintSensitivity`` - Constraint sensitivity results
-
-Goal Programming Module
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-- ``LXGoalProgrammingSolver`` - Goal programming solver
-- ``LXGoal`` - Goal definition
-- ``LXGoalMode`` - Weighted vs. sequential
-- ``LXGoalMetadata`` - Goal metadata
+Analysis:
+  - :class:`lumix.analysis.sensitivity.LXSensitivityAnalyzer` - Sensitivity analysis
+  - :class:`lumix.analysis.scenario.LXScenarioAnalyzer` - Scenario comparison
+  - :class:`lumix.analysis.whatif.LXWhatIfAnalyzer` - What-if exploration
 
 Quick Reference
 ---------------
 
-While we build the full API documentation, you can:
+For quick help with any class:
 
 1. **Use IDE Autocomplete**: LumiX is fully type-annotated
 2. **Check Docstrings**: All classes and methods have comprehensive docstrings
@@ -177,15 +174,3 @@ Example: Getting Help
 
    # For method signatures
    LXModel.add_variable?
-
-Coming Soon
------------
-
-Full auto-generated API documentation with:
-
-- Complete class hierarchies
-- Method signatures with types
-- Comprehensive parameter descriptions
-- Return value documentation
-- Usage examples
-- Cross-references

@@ -21,13 +21,14 @@ class LXWhatIfChange:
     Represents a single what-if change to explore.
 
     Examples:
-        # Relax capacity constraint by 100 units
-        LXWhatIfChange(
-            change_type="constraint_rhs",
-            target_name="capacity",
-            description="Relax capacity by 100",
-            new_value=1100.0
-        )
+        Relax capacity constraint by 100 units::
+
+            LXWhatIfChange(
+                change_type="constraint_rhs",
+                target_name="capacity",
+                description="Relax capacity by 100",
+                new_value=1100.0
+            )
     """
 
     change_type: str  # "constraint_rhs", "variable_bound", "objective_coeff"
@@ -73,31 +74,32 @@ class LXWhatIfAnalyzer(Generic[TModel]):
     identifying opportunities for improvement.
 
     Examples:
-        # Create analyzer
-        analyzer = LXWhatIfAnalyzer(model, optimizer)
+        Create analyzer and explore changes::
 
-        # Get baseline solution
-        baseline = analyzer.get_baseline_solution()
+            analyzer = LXWhatIfAnalyzer(model, optimizer)
 
-        # What if we increase capacity?
-        result = analyzer.increase_constraint_rhs("capacity", by=200.0)
-        print(f"Increasing capacity by 200 would improve profit by ${result.delta_objective:,.2f}")
+            # Get baseline solution
+            baseline = analyzer.get_baseline_solution()
 
-        # What if we relax minimum production?
-        result = analyzer.relax_constraint("min_production", by_percent=0.5)
-        print(f"Relaxing min production by 50% would change objective by {result.delta_percentage:.1f}%")
+            # What if we increase capacity?
+            result = analyzer.increase_constraint_rhs("capacity", by=200.0)
+            print(f"Increasing capacity by 200 would improve profit by ${result.delta_objective:,.2f}")
 
-        # Compare multiple changes
-        results = analyzer.compare_changes([
-            ("capacity", "increase", 100),
-            ("capacity", "increase", 200),
-            ("capacity", "increase", 300),
-        ])
+            # What if we relax minimum production?
+            result = analyzer.relax_constraint("min_production", by_percent=0.5)
+            print(f"Relaxing min production by 50% would change objective by {result.delta_percentage:.1f}%")
 
-        # Find bottlenecks
-        bottlenecks = analyzer.find_bottlenecks(top_n=5)
-        for name, improvement in bottlenecks:
-            print(f"{name}: relaxing by 1 unit would improve objective by ${improvement:.2f}")
+            # Compare multiple changes
+            results = analyzer.compare_changes([
+                ("capacity", "increase", 100),
+                ("capacity", "increase", 200),
+                ("capacity", "increase", 300),
+            ])
+
+            # Find bottlenecks
+            bottlenecks = analyzer.find_bottlenecks(top_n=5)
+            for name, improvement in bottlenecks:
+                print(f"{name}: relaxing by 1 unit would improve objective by ${improvement:.2f}")
     """
 
     def __init__(
@@ -363,15 +365,16 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             List of what-if results
 
         Examples:
-            # Compare different capacity increases
-            results = analyzer.compare_changes([
-                ("capacity", "increase", 100),
-                ("capacity", "increase", 200),
-                ("capacity", "increase", 300),
-            ])
+            Compare different capacity increases::
 
-            for result in results:
-                print(f"{result.description}: Δ = ${result.delta_objective:,.2f}")
+                results = analyzer.compare_changes([
+                    ("capacity", "increase", 100),
+                    ("capacity", "increase", 200),
+                    ("capacity", "increase", 300),
+                ])
+
+                for result in results:
+                    print(f"{result.description}: Δ = ${result.delta_objective:,.2f}")
         """
         results = []
 
@@ -412,10 +415,12 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             List of (constraint_name, improvement) tuples sorted by improvement
 
         Examples:
-            bottlenecks = analyzer.find_bottlenecks(test_amount=1.0, top_n=5)
-            print("Top 5 bottlenecks:")
-            for name, improvement in bottlenecks:
-                print(f"  {name}: +${improvement:.2f} per unit relaxation")
+            Find top bottlenecks::
+
+                bottlenecks = analyzer.find_bottlenecks(test_amount=1.0, top_n=5)
+                print("Top 5 bottlenecks:")
+                for name, improvement in bottlenecks:
+                    print(f"  {name}: +${improvement:.2f} per unit relaxation")
         """
         baseline = self.get_baseline_solution()
         improvements = []

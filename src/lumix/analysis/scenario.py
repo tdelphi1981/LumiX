@@ -23,21 +23,23 @@ class LXScenarioModification:
     Represents a single modification to a model parameter.
 
     Examples:
-        # Increase capacity by 20%
-        LXScenarioModification(
-            target_type="constraint",
-            target_name="capacity",
-            modification_type="rhs_multiply",
-            value=1.2
-        )
+        Increase capacity by 20%::
 
-        # Set minimum production to 100
-        LXScenarioModification(
-            target_type="constraint",
-            target_name="min_production",
-            modification_type="rhs_set",
-            value=100.0
-        )
+            LXScenarioModification(
+                target_type="constraint",
+                target_name="capacity",
+                modification_type="rhs_multiply",
+                value=1.2
+            )
+
+        Set minimum production to 100::
+
+            LXScenarioModification(
+                target_type="constraint",
+                target_name="min_production",
+                modification_type="rhs_set",
+                value=100.0
+            )
     """
 
     target_type: str  # "constraint", "variable", "objective"
@@ -56,28 +58,31 @@ class LXScenario(Generic[TModel]):
     you to explore different business conditions or assumptions.
 
     Examples:
-        # Create a high-capacity scenario
-        high_capacity = (
-            LXScenario[Product]("high_capacity")
-            .modify_constraint_rhs("capacity", multiply=1.5)
-            .describe("Increase capacity by 50%")
-        )
+        Create a high-capacity scenario::
 
-        # Create a low-cost scenario
-        low_cost = (
-            LXScenario[Product]("low_cost")
-            .modify_constraint_rhs("min_production", set_value=50.0)
-            .modify_variable_bound("production", lower=10.0)
-            .describe("Lower minimum production requirements")
-        )
+            high_capacity = (
+                LXScenario[Product]("high_capacity")
+                .modify_constraint_rhs("capacity", multiply=1.5)
+                .describe("Increase capacity by 50%")
+            )
 
-        # Create a combined scenario
-        optimistic = (
-            LXScenario[Product]("optimistic")
-            .modify_constraint_rhs("capacity", multiply=1.3)
-            .modify_constraint_rhs("budget", add=10000.0)
-            .describe("Optimistic market conditions")
-        )
+        Create a low-cost scenario::
+
+            low_cost = (
+                LXScenario[Product]("low_cost")
+                .modify_constraint_rhs("min_production", set_value=50.0)
+                .modify_variable_bound("production", lower=10.0)
+                .describe("Lower minimum production requirements")
+            )
+
+        Create a combined scenario::
+
+            optimistic = (
+                LXScenario[Product]("optimistic")
+                .modify_constraint_rhs("capacity", multiply=1.3)
+                .modify_constraint_rhs("budget", add=10000.0)
+                .describe("Optimistic market conditions")
+            )
     """
 
     name: str
@@ -228,28 +233,29 @@ class LXScenarioAnalyzer(Generic[TModel]):
     the results to understand how different assumptions affect outcomes.
 
     Examples:
-        # Create analyzer
-        analyzer = LXScenarioAnalyzer(base_model, optimizer)
+        Create analyzer and add scenarios::
 
-        # Add scenarios
-        analyzer.add_scenario(
-            LXScenario[Product]("high_capacity")
-            .modify_constraint_rhs("capacity", multiply=1.5)
-        )
+            analyzer = LXScenarioAnalyzer(base_model, optimizer)
 
-        analyzer.add_scenario(
-            LXScenario[Product]("low_capacity")
-            .modify_constraint_rhs("capacity", multiply=0.8)
-        )
+            # Add scenarios
+            analyzer.add_scenario(
+                LXScenario[Product]("high_capacity")
+                .modify_constraint_rhs("capacity", multiply=1.5)
+            )
 
-        # Run all scenarios
-        results = analyzer.run_all_scenarios()
+            analyzer.add_scenario(
+                LXScenario[Product]("low_capacity")
+                .modify_constraint_rhs("capacity", multiply=0.8)
+            )
 
-        # Compare results
-        print(analyzer.compare_scenarios())
+            # Run all scenarios
+            results = analyzer.run_all_scenarios()
 
-        # Get specific result
-        high_cap_solution = analyzer.get_result("high_capacity")
+            # Compare results
+            print(analyzer.compare_scenarios())
+
+            # Get specific result
+            high_cap_solution = analyzer.get_result("high_capacity")
     """
 
     def __init__(
@@ -479,15 +485,16 @@ class LXScenarioAnalyzer(Generic[TModel]):
             Dictionary mapping parameter values to solutions
 
         Examples:
-            # Analyze sensitivity to capacity multiplier
-            results = analyzer.sensitivity_to_parameter(
-                "capacity",
-                values=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
-                modification_type="rhs_multiply"
-            )
+            Analyze sensitivity to capacity multiplier::
 
-            for multiplier, solution in results.items():
-                print(f"Capacity × {multiplier}: ${solution.objective_value:,.2f}")
+                results = analyzer.sensitivity_to_parameter(
+                    "capacity",
+                    values=[0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
+                    modification_type="rhs_multiply"
+                )
+
+                for multiplier, solution in results.items():
+                    print(f"Capacity × {multiplier}: ${solution.objective_value:,.2f}")
         """
         sensitivity_results: Dict[float, LXSolution[TModel]] = {}
 

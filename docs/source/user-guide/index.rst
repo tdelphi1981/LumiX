@@ -14,6 +14,7 @@ Comprehensive guides for using LumiX effectively in your optimization projects.
    linearization/index
    utils/index
    solution/index
+   analysis/index
 
 Core Module
 -----------
@@ -103,10 +104,22 @@ The :doc:`solution/index` section covers working with optimization solutions.
 **Topics Covered:**
 
 - Accessing variable values and solution metadata
-- Sensitivity analysis (shadow prices and reduced costs)
 - Goal programming solution handling
 - Mapping solution values to ORM models
 - Solution validation and export
+
+Analysis Module
+---------------
+
+The :doc:`analysis/index` section covers post-optimization analysis and decision support tools.
+
+**Topics Covered:**
+
+- Sensitivity analysis with shadow prices and reduced costs
+- Scenario analysis for systematic comparison of alternatives
+- What-if analysis for interactive parameter exploration
+- Bottleneck identification and resource allocation
+- Multi-parameter analysis and trade-off exploration
 
 Quick Start
 -----------
@@ -122,18 +135,6 @@ Coming Soon
 -----------
 
 The following sections will be added in future updates:
-
-Coming Soon
------------
-
-This section will include detailed guides on:
-
-Analysis Tools
-~~~~~~~~~~~~~~
-
-- Sensitivity analysis workflows
-- Scenario comparison
-- What-if analysis for decision support
 
 Goal Programming
 ~~~~~~~~~~~~~~~~
@@ -156,5 +157,5 @@ Stay Tuned
 We're actively working on expanding this documentation. Check back soon or:
 
 - Browse the examples in the repository
-- Read the API documentation (coming soon)
+- Read the API documentation
 - Open an issue if you need specific guidance

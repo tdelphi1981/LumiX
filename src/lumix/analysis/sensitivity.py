@@ -64,33 +64,35 @@ class LXSensitivityAnalyzer(Generic[TModel]):
     Sensitivity analysis for optimization models.
 
     Analyzes how changes in parameters affect the optimal solution, including:
+
     - Shadow prices (dual values) for constraints
     - Reduced costs for variables
     - Binding constraints identification
     - Sensitivity ranges (when available from solver)
 
     Examples:
-        # Create analyzer
-        analyzer = LXSensitivityAnalyzer(model, solution)
+        Create analyzer and analyze sensitivity::
 
-        # Analyze variable sensitivity
-        var_sensitivity = analyzer.analyze_variable("production")
-        print(f"Reduced cost: {var_sensitivity.reduced_cost}")
+            analyzer = LXSensitivityAnalyzer(model, solution)
 
-        # Analyze constraint sensitivity
-        const_sensitivity = analyzer.analyze_constraint("capacity")
-        print(f"Shadow price: {const_sensitivity.shadow_price}")
+            # Analyze variable sensitivity
+            var_sensitivity = analyzer.analyze_variable("production")
+            print(f"Reduced cost: {var_sensitivity.reduced_cost}")
 
-        # Get binding constraints
-        binding = analyzer.get_binding_constraints()
-        for name, sensitivity in binding.items():
-            print(f"{name}: shadow price = {sensitivity.shadow_price}")
+            # Analyze constraint sensitivity
+            const_sensitivity = analyzer.analyze_constraint("capacity")
+            print(f"Shadow price: {const_sensitivity.shadow_price}")
 
-        # Generate full report
-        print(analyzer.generate_report())
+            # Get binding constraints
+            binding = analyzer.get_binding_constraints()
+            for name, sensitivity in binding.items():
+                print(f"{name}: shadow price = {sensitivity.shadow_price}")
 
-        # Get most sensitive parameters
-        sensitive_constraints = analyzer.get_most_sensitive_constraints(top_n=5)
+            # Generate full report
+            print(analyzer.generate_report())
+
+            # Get most sensitive parameters
+            sensitive_constraints = analyzer.get_most_sensitive_constraints(top_n=5)
     """
 
     def __init__(self, model: LXModel[TModel], solution: LXSolution[TModel]):
@@ -243,9 +245,11 @@ class LXSensitivityAnalyzer(Generic[TModel]):
             Dictionary of binding constraints
 
         Examples:
-            binding = analyzer.get_binding_constraints()
-            for name, sens in binding.items():
-                print(f"{name} is binding with shadow price {sens.shadow_price}")
+            Get all binding constraints::
+
+                binding = analyzer.get_binding_constraints()
+                for name, sens in binding.items():
+                    print(f"{name} is binding with shadow price {sens.shadow_price}")
         """
         all_constraints = self.analyze_all_constraints()
         return {
@@ -288,9 +292,11 @@ class LXSensitivityAnalyzer(Generic[TModel]):
             List of (name, sensitivity) tuples sorted by shadow price magnitude
 
         Examples:
-            top_constraints = analyzer.get_most_sensitive_constraints(top_n=5)
-            for name, sens in top_constraints:
-                print(f"{name}: ${sens.shadow_price:.2f} per unit relaxation")
+            Get most sensitive constraints::
+
+                top_constraints = analyzer.get_most_sensitive_constraints(top_n=5)
+                for name, sens in top_constraints:
+                    print(f"{name}: ${sens.shadow_price:.2f} per unit relaxation")
         """
         all_constraints = self.analyze_all_constraints()
 
@@ -355,10 +361,12 @@ class LXSensitivityAnalyzer(Generic[TModel]):
             List of bottleneck constraint names
 
         Examples:
-            bottlenecks = analyzer.identify_bottlenecks()
-            print(f"Found {len(bottlenecks)} bottlenecks:")
-            for name in bottlenecks:
-                print(f"  - {name}")
+            Identify bottlenecks::
+
+                bottlenecks = analyzer.identify_bottlenecks()
+                print(f"Found {len(bottlenecks)} bottlenecks:")
+                for name in bottlenecks:
+                    print(f"  - {name}")
         """
         binding = self.get_binding_constraints()
         bottlenecks = [
@@ -389,17 +397,20 @@ class LXSensitivityAnalyzer(Generic[TModel]):
             Formatted sensitivity report
 
         Examples:
-            # Full report
-            print(analyzer.generate_report())
+            Full report::
 
-            # Only binding constraints
-            print(analyzer.generate_report(
-                include_variables=False,
-                include_binding_only=True
-            ))
+                print(analyzer.generate_report())
 
-            # Top 10 most sensitive
-            print(analyzer.generate_report(top_n=10))
+            Only binding constraints::
+
+                print(analyzer.generate_report(
+                    include_variables=False,
+                    include_binding_only=True
+                ))
+
+            Top 10 most sensitive::
+
+                print(analyzer.generate_report(top_n=10))
         """
         lines = ["Sensitivity Analysis Report", "=" * 80]
 
