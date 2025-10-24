@@ -10,6 +10,8 @@ and extend its functionality.
 
    core-architecture
    extending-core
+   solvers-architecture
+   extending-solvers
    indexing-architecture
    extending-indexing
    nonlinear-architecture
@@ -18,6 +20,8 @@ and extend its functionality.
    extending-linearization
    utils-architecture
    extending-utils
+   solution-architecture
+   extending-solution
    design-decisions
 
 Overview
@@ -99,14 +103,14 @@ Module Overview
 **Core Modules:**
 
 - ``core``: Model building (variables, constraints, expressions, models) (documented)
+- ``solvers``: Solver interfaces (OR-Tools, Gurobi, CPLEX, GLPK, CP-SAT) (documented)
 - ``indexing``: Multi-dimensional indexing utilities (documented)
 - ``nonlinear``: Non-linear term definitions (documented)
 - ``linearization``: Automatic linearization engine (documented)
 - ``utils``: Logging, ORM, rational conversion (documented)
-- ``solvers``: Solver interfaces (OR-Tools, Gurobi, CPLEX, GLPK, CP-SAT)
+- ``solution``: Solution handling and mapping (documented)
 - ``analysis``: Sensitivity, scenario, what-if analysis
 - ``goal_programming``: Multi-objective optimization
-- ``solution``: Solution handling and mapping
 
 Core Module Documentation
 -------------------------
@@ -116,6 +120,14 @@ Deep dive into the core module's architecture and extensibility:
 - :doc:`core-architecture` - Core module design patterns and architecture
 - :doc:`extending-core` - How to extend core components
 - :doc:`design-decisions` - Design decisions and trade-offs
+
+Solvers Module Documentation
+-----------------------------
+
+Understand solvers architecture and how to add new solver implementations:
+
+- :doc:`solvers-architecture` - Solvers module design patterns and architecture
+- :doc:`extending-solvers` - How to implement custom solvers
 
 Indexing Module Documentation
 ------------------------------
@@ -149,6 +161,14 @@ Understand linearization architecture and customization:
 - :doc:`linearization-architecture` - Linearization module design patterns and architecture
 - :doc:`extending-linearization` - How to create custom linearization techniques
 
+Solution Module Documentation
+------------------------------
+
+Learn about solution handling architecture and customization:
+
+- :doc:`solution-architecture` - Solution module design patterns and architecture
+- :doc:`extending-solution` - How to create custom solution classes and mappers
+
 Next Steps
 ----------
 
@@ -157,6 +177,11 @@ Next Steps
 - :doc:`core-architecture` - Deep dive into core module design
 - :doc:`extending-core` - How to extend core components
 - :doc:`design-decisions` - Why things work the way they do
+
+**For Solvers Module Development:**
+
+- :doc:`solvers-architecture` - Solvers module architecture and patterns
+- :doc:`extending-solvers` - How to implement custom solver interfaces
 
 **For Indexing Module Development:**
 
@@ -177,3 +202,8 @@ Next Steps
 
 - :doc:`linearization-architecture` - Linearization module architecture and patterns
 - :doc:`extending-linearization` - Custom linearization techniques and formulations
+
+**For Solution Module Development:**
+
+- :doc:`solution-architecture` - Solution module architecture and patterns
+- :doc:`extending-solution` - Custom solution classes, mappers, and validators

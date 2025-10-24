@@ -163,13 +163,15 @@ class LXOptimizer(Generic[TModel]):
         Mirrors enable_rational_conversion() API pattern for consistency.
 
         When enabled, the optimizer will automatically:
+
         - Detect nonlinear terms in the model
         - Check if solver lacks native support
         - Apply appropriate linearization techniques:
-          * Binary × Binary: AND logic
-          * Binary × Continuous: Big-M method
-          * Continuous × Continuous: McCormick envelopes
-          * Piecewise-linear approximations for exp, log, sin, cos, etc.
+
+            - Binary × Binary: AND logic
+            - Binary × Continuous: Big-M method
+            - Continuous × Continuous: McCormick envelopes
+            - Piecewise-linear approximations for exp, log, sin, cos, etc.
 
         Args:
             big_m: Big-M constant for conditional constraints (default: 1e6)
@@ -183,7 +185,8 @@ class LXOptimizer(Generic[TModel]):
         Returns:
             Self for chaining
 
-        Example:
+        Example::
+
             optimizer = (
                 LXOptimizer[Product]()
                 .use_solver("ortools")

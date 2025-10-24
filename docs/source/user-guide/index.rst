@@ -8,10 +8,12 @@ Comprehensive guides for using LumiX effectively in your optimization projects.
    :caption: User Guide Topics
 
    core/index
+   solvers/index
    indexing/index
    nonlinear/index
    linearization/index
    utils/index
+   solution/index
 
 Core Module
 -----------
@@ -25,6 +27,20 @@ The :doc:`core/index` section covers the fundamental concepts and components.
 - Constraint definition and expansion
 - Expression building (linear, quadratic, non-linear)
 - Model construction and solving
+
+Solvers Module
+--------------
+
+The :doc:`solvers/index` section covers using LumiX's unified solver interface.
+
+**Topics Covered:**
+
+- Using the LXOptimizer class
+- Choosing the right solver for your problem
+- Configuring solver parameters
+- Understanding solver capabilities
+- Advanced features (warm start, callbacks, sensitivity analysis)
+- Switching between solvers seamlessly
 
 Indexing Module
 ---------------
@@ -78,6 +94,19 @@ The :doc:`utils/index` section covers utility components for enhanced functional
 - Type-safe ORM integration (SQLAlchemy, Django)
 - Float-to-rational conversion for integer solvers
 - Integration patterns and best practices
+
+Solution Module
+---------------
+
+The :doc:`solution/index` section covers working with optimization solutions.
+
+**Topics Covered:**
+
+- Accessing variable values and solution metadata
+- Sensitivity analysis (shadow prices and reduced costs)
+- Goal programming solution handling
+- Mapping solution values to ORM models
+- Solution validation and export
 
 Quick Start
 -----------

@@ -8,9 +8,12 @@ Complete API documentation for all LumiX modules with auto-generated documentati
    :caption: API Modules
 
    core/index
+   solvers/index
+   indexing/index
    nonlinear/index
    linearization/index
    utils/index
+   solution/index
 
 Core Module
 -----------
@@ -25,6 +28,26 @@ The :doc:`core/index` module provides the fundamental building blocks for optimi
 - :class:`~lumix.core.enums.LXVarType` - Variable type enumeration
 - :class:`~lumix.core.enums.LXConstraintSense` - Constraint sense enumeration
 - :class:`~lumix.core.enums.LXObjectiveSense` - Objective sense enumeration
+
+Solvers Module
+--------------
+
+The :doc:`solvers/index` module provides a unified interface to multiple optimization solvers:
+
+- :class:`~lumix.solvers.base.LXOptimizer` - Main optimizer interface
+- :class:`~lumix.solvers.base.LXSolverInterface` - Base solver interface
+- :class:`~lumix.solvers.capabilities.LXSolverCapability` - Solver capability descriptions
+- :class:`~lumix.solvers.capabilities.LXSolverFeature` - Solver feature flags
+
+Supported solvers: OR-Tools, Gurobi, CPLEX, GLPK, CP-SAT
+
+Indexing Module
+---------------
+
+The :doc:`indexing/index` module provides multi-dimensional indexing capabilities:
+
+- :class:`~lumix.indexing.dimensions.LXIndexDimension` - Single dimension with filtering
+- :class:`~lumix.indexing.cartesian.LXCartesianProduct` - Multi-dimensional cartesian products
 
 Nonlinear Module
 ----------------
@@ -59,6 +82,14 @@ The :doc:`utils/index` module provides utility classes for enhanced functionalit
 - :class:`~lumix.utils.orm.LXTypedQuery` - Fluent query builder with type safety
 - :class:`~lumix.utils.rational.LXRationalConverter` - Float-to-rational conversion
 
+Solution Module
+---------------
+
+The :doc:`solution/index` module provides solution handling and mapping utilities:
+
+- :class:`~lumix.solution.solution.LXSolution` - Solution container with variable values and metadata
+- :class:`~lumix.solution.mapping.LXSolutionMapper` - Utilities for mapping solutions to model instances
+
 Quick Links
 -----------
 
@@ -69,6 +100,14 @@ Core:
   - :class:`lumix.core.variables.LXVariable` - Define decision variables
   - :class:`lumix.core.constraints.LXConstraint` - Add constraints
   - :class:`lumix.core.expressions.LXLinearExpression` - Build expressions
+
+Solvers:
+  - :class:`lumix.solvers.base.LXOptimizer` - Solve models with any solver
+  - :class:`lumix.solvers.capabilities.LXSolverCapability` - Query solver capabilities
+
+Indexing:
+  - :class:`lumix.indexing.dimensions.LXIndexDimension` - Single dimension indexing
+  - :class:`lumix.indexing.cartesian.LXCartesianProduct` - Multi-dimensional products
 
 Nonlinear:
   - :class:`lumix.nonlinear.terms.LXAbsoluteTerm` - Absolute value terms
@@ -85,18 +124,14 @@ Utils:
   - :class:`lumix.utils.orm.LXORMContext` - ORM integration
   - :class:`lumix.utils.rational.LXRationalConverter` - Rational conversion
 
+Solution:
+  - :class:`lumix.solution.solution.LXSolution` - Solution container and access
+  - :class:`lumix.solution.mapping.LXSolutionMapper` - Solution mapping utilities
+
 Planned Sections
 ----------------
 
 The following sections will be added in future updates:
-
-Solvers Module
-~~~~~~~~~~~~~~
-
-- ``LXOptimizer`` - Main optimizer interface
-- ``LXSolverInterface`` - Base solver interface
-- ``LXSolverCapability`` - Solver capability descriptions
-- ``LXSolverFeature`` - Solver feature flags
 
 Analysis Module
 ~~~~~~~~~~~~~~~
@@ -114,18 +149,6 @@ Goal Programming Module
 - ``LXGoal`` - Goal definition
 - ``LXGoalMode`` - Weighted vs. sequential
 - ``LXGoalMetadata`` - Goal metadata
-
-Solution Module
-~~~~~~~~~~~~~~~
-
-- ``LXSolution`` - Solution container
-- ``LXSolutionMapper`` - Solution mapping utilities
-
-Indexing Module
-~~~~~~~~~~~~~~~
-
-- ``LXIndexDimension`` - Index dimension
-- ``LXCartesianProduct`` - Multi-dimensional indexing
 
 Quick Reference
 ---------------

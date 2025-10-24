@@ -16,27 +16,30 @@ class LXSolution(Generic[TModel]):
     Type-safe solution with automatic mapping.
 
     Provides access to:
+
     - Variable values (by name or LXVariable object)
     - Mapped values (variables mapped by index keys)
     - Shadow prices (dual values for constraints)
     - Reduced costs (for sensitivity analysis)
 
     Examples:
-        solution = optimizer.solve(model)
+        Basic usage::
 
-        # Access by variable name
-        prod_value = solution.variables["production"]
+            solution = optimizer.solve(model)
 
-        # Access by LXVariable object
-        prod_value = solution.get_variable(production)
+            # Access by variable name
+            prod_value = solution.variables["production"]
 
-        # Access multi-indexed variables
-        duty_value = solution.variables["duty"][(driver_id, date)]
+            # Access by LXVariable object
+            prod_value = solution.get_variable(production)
 
-        # Access mapped values (indexed by keys)
-        for key, value in solution.get_mapped(duty).items():
-            if value > 0.5:
-                print(f"Variable {key} = {value}")
+            # Access multi-indexed variables
+            duty_value = solution.variables["duty"][(driver_id, date)]
+
+            # Access mapped values (indexed by keys)
+            for key, value in solution.get_mapped(duty).items():
+                if value > 0.5:
+                    print(f"Variable {key} = {value}")
     """
 
     objective_value: float
@@ -84,8 +87,9 @@ class LXSolution(Generic[TModel]):
         Returns the same structure as variables, indexed by the keys
         extracted via the variable's index_func (e.g., product.id).
 
-        Note: This returns index keys, not model instances, to avoid
-        hashability issues with non-frozen dataclasses.
+        Note:
+            This returns index keys, not model instances, to avoid
+            hashability issues with non-frozen dataclasses.
 
         Args:
             var: LXVariable to get mapped values for
@@ -94,9 +98,10 @@ class LXSolution(Generic[TModel]):
             Dictionary mapping index keys to values
 
         Examples:
-            # For production indexed by product.id
-            for product_id, qty in solution.get_mapped(production).items():
-                print(f"Product {product_id}: {qty} units")
+            For production indexed by product.id::
+
+                for product_id, qty in solution.get_mapped(production).items():
+                    print(f"Product {product_id}: {qty} units")
         """
         return self.mapped.get(var.name, {})  # type: ignore
 
