@@ -69,6 +69,15 @@ print(analyzer.generate_summary())
 
 ## Running the Example
 
+### Prerequisites
+
+```bash
+pip install lumix
+pip install ortools  # or cplex, gurobi
+```
+
+### Execute
+
 ```bash
 cd examples/09_sensitivity_analysis
 python sensitivity_analysis.py
@@ -261,6 +270,22 @@ The example also demonstrates:
 
 ## See Also
 
-- **Scenario Analysis**: `examples/08_scenario_analysis/`
-- **What-If Analysis**: `examples/10_whatif_analysis/`
-- **Production Planning**: `examples/01_production_planning/`
+- **Example 08 (Scenario Analysis)**: Testing different business scenarios
+- **Example 10 (What-If Analysis)**: Quick tactical decision support
+- **Example 01 (Production Planning)**: Base model for sensitivity analysis
+- **Goal Programming (Example 11)**: Multi-objective optimization and trade-offs
+
+## Files in This Example
+
+- `sensitivity_analysis.py`: Main sensitivity analysis demonstration
+- `sample_data.py`: Data models (Product, Resource) and sample data
+- `README.md`: This documentation file
+
+## Next Steps
+
+1. Analyze your own optimization models for sensitivity
+2. Use shadow prices for pricing decisions (e.g., resource procurement)
+3. Identify and address bottlenecks in your operations
+4. Build dashboards showing sensitivity metrics
+5. Integrate sensitivity analysis into decision support systems
+6. Compare sensitivity across different scenarios

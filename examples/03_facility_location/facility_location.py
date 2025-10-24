@@ -1,16 +1,62 @@
-"""
-Facility Location Example: Binary Variables and Fixed Costs
-===========================================================
+"""Facility Location Example: Binary Variables and Fixed Costs.
 
-This example demonstrates:
-- Binary decision variables (open warehouse or not)
-- Fixed costs (one-time opening cost)
-- Continuous flow variables (shipping quantities)
-- Big-M constraints (ship only from open warehouses)
-- Mixed-integer programming
+This example demonstrates mixed-integer programming (MIP) with binary decision
+variables, fixed costs, and Big-M constraints - a classic facility location
+problem formulation.
 
-Problem: Decide which warehouses to open and how to serve customers
-to minimize total cost (fixed opening costs + variable shipping costs).
+Problem Description:
+    A logistics company needs to decide which warehouses to open and how to
+    route shipments to minimize total cost. The problem involves:
+        - Binary decisions: open a warehouse or not (fixed costs apply once)
+        - Continuous decisions: how much to ship from each warehouse to each customer
+        - Conditional constraints: can only ship from open warehouses (Big-M)
+        - Capacity constraints: warehouses have maximum throughput
+        - Demand satisfaction: all customer demands must be met
+
+Mathematical Formulation:
+    Decision Variables:
+        open[w] ∈ {0, 1} for each warehouse w
+        ship[w, c] ≥ 0 for each (warehouse, customer) pair
+
+    Minimize:
+        sum(fixed_cost[w] * open[w] for w in warehouses) +
+        sum(shipping_cost[w,c] * ship[w,c] for w,c in pairs)
+
+    Subject to:
+        - Demand: sum(ship[w,c] for all w) >= demand[c] for all customers c
+        - Capacity: sum(ship[w,c] for all c) <= capacity[w] * open[w] for all w
+        - Big-M: ship[w,c] <= M * open[w] for all w,c (can't ship if closed)
+        - Non-negativity: ship[w,c] >= 0
+
+Key Features Demonstrated:
+    - **Binary decision variables**: open/close facilities
+    - **Fixed costs**: one-time costs for opening facilities
+    - **Continuous flow variables**: shipment quantities
+    - **Big-M constraints**: enforce conditional relationships
+    - **Mixed-integer programming**: combining binary and continuous variables
+    - **Multi-model indexing**: ship indexed by (Warehouse, Customer)
+
+Use Cases:
+    This pattern is ideal for:
+        - Facility location and network design
+        - Distribution center planning
+        - Hub location problems
+        - Service facility placement
+        - Any problem with yes/no decisions plus continuous flows
+
+Learning Objectives:
+    1. How to model fixed costs with binary variables
+    2. How to use Big-M constraints for conditional logic
+    3. How to combine binary and continuous variables (MIP)
+    4. How to model capacity constraints with variable bounds
+    5. How to calculate geographic shipping costs
+    6. How to interpret mixed-integer solutions
+
+See Also:
+    - Example 02 (driver_scheduling): Multi-model indexing introduction
+    - Example 05 (cpsat_assignment): CP-SAT for pure integer problems
+    - User Guide: Mixed-Integer Programming section
+    - User Guide: Big-M Constraints
 """
 
 from typing import Dict, Tuple
@@ -40,7 +86,34 @@ solver_to_use = "ortools"
 
 
 def build_facility_location_model() -> LXModel:
-    """Build the facility location optimization model."""
+    """Build the facility location optimization model.
+
+    This function constructs a mixed-integer programming model to minimize
+    total logistics costs (fixed facility costs + variable shipping costs)
+    while satisfying all customer demands and respecting capacity constraints.
+
+    The model uses two types of variables:
+        - Binary: whether to open each warehouse (triggers fixed costs)
+        - Continuous: shipping quantities from warehouses to customers
+
+    Returns:
+        An LXModel instance containing:
+            - Variables: open_warehouse[w] (binary) and ship[w,c] (continuous)
+            - Objective: Minimize total cost (fixed + shipping)
+            - Constraints: Demand satisfaction, capacity, and Big-M linking
+
+    Example:
+        >>> model = build_facility_location_model()
+        >>> print(model.summary())
+        >>> optimizer = LXOptimizer().use_solver("ortools")
+        >>> solution = optimizer.solve(model)
+
+    Notes:
+        The Big-M constraints (ship[w,c] <= M * open[w]) enforce the logic
+        "can only ship from open warehouses". The value M must be large enough
+        to not constrain feasible solutions but not so large as to cause
+        numerical issues. Here, M = total_demand is a safe upper bound.
+    """
 
     # Decision Variable 1: Binary - Open warehouse or not
     open_warehouse = (
@@ -138,7 +211,33 @@ def build_facility_location_model() -> LXModel:
 
 
 def display_solution(model: LXModel):
-    """Display the optimization results."""
+    """Solve the optimization model and display results.
+
+    This function solves the facility location model and presents the results
+    including which warehouses to open, the shipping plan, and cost breakdown.
+
+    Args:
+        model: The LXModel instance to solve, typically from build_facility_location_model().
+
+    Example:
+        >>> model = build_facility_location_model()
+        >>> display_solution(model)
+        ============================================================
+        SOLUTION
+        ============================================================
+        Status: optimal
+        Total Cost: $12,345.67
+        ...
+
+    Notes:
+        The solution demonstrates how to access both binary (open_warehouse)
+        and continuous (ship) variable values, and how to interpret the
+        mixed-integer solution for practical business decisions.
+
+        Note: This problem uses irrational shipping costs (haversine formula),
+        which are problematic for CP-SAT. Use CPLEX, Gurobi, or OR-Tools LP
+        for best results.
+    """
 
     print("\n" + "=" * 70)
     print("SOLUTION")
@@ -200,7 +299,34 @@ def display_solution(model: LXModel):
 
 
 def main():
-    """Run the facility location optimization."""
+    """Run the complete facility location optimization example.
+
+    This function orchestrates the entire optimization workflow:
+        1. Display problem data (warehouses and customers)
+        2. Build the mixed-integer programming model
+        3. Solve the model
+        4. Display and interpret results
+        5. Explain key MIP concepts
+
+    The workflow demonstrates best practices for facility location problems
+    and mixed-integer programming in general.
+
+    Example:
+        Run this example from the command line::
+
+            $ python facility_location.py
+
+        Or import and run programmatically::
+
+            >>> from facility_location import main
+            >>> main()
+
+    Notes:
+        This example showcases three critical MIP concepts:
+        1. Binary variables for discrete yes/no decisions
+        2. Fixed costs that apply once if a facility is opened
+        3. Big-M constraints to link binary and continuous variables
+    """
 
     print("=" * 70)
     print("LumiX Example: Facility Location Problem")

@@ -75,7 +75,103 @@ solver_to_use = "gurobi"
 
 
 def main():
-    """Run multi-priority weighted goal programming example."""
+    """Run the multi-priority weighted goal programming example.
+
+    This function demonstrates advanced goal programming features including
+    multiple priority levels, custom weights within priorities, indexed goal
+    constraints, and different constraint types (LE, GE, EQ). The workflow
+    includes:
+        1. Building a supply chain model with multiple decision variables
+        2. Creating goals across 4 priority levels (0-3)
+        3. Using custom weights to differentiate goals within same priority
+        4. Handling indexed goals (per customer, per warehouse)
+        5. Solving with weighted goal programming
+        6. Analyzing goal satisfaction by priority level
+
+    The example uses a supply chain planning problem with multiple conflicting
+    goals organized by priority:
+        - Priority 0: Maximize profit (custom objective term)
+        - Priority 1: Meet customer demands (highest operational priority)
+        - Priority 2: Maintain target inventory levels
+        - Priority 3: Control transportation costs
+
+    Returns:
+        None. Results are printed to console including:
+            - Model summary with all variables and constraints
+            - Shipment plan with demand satisfaction status
+            - Inventory levels vs. targets with deviations
+            - Cost analysis (revenue, holding, transport, profit)
+            - Goal satisfaction analysis by priority level
+            - Individual goal deviation details
+
+    Example:
+        Run this example from the command line::
+
+            $ python 02_multi_priority_weighted.py
+
+        Or import and run programmatically::
+
+            >>> from examples.goal_programming.multi_priority_weighted import main
+            >>> main()
+
+        Expected output::
+
+            ================================================================================
+            Multi-Priority Weighted Goal Programming Example
+            ================================================================================
+
+            Shipment Plan:
+            Customer                  Demand    Shipped         Status
+            Customer A                100.00     100.00              ✓
+            ...
+
+            Goal Satisfaction by Priority
+            Priority 1 (Meet Customer Demands):
+            ✓ Customer A: Shortfall = 0.00 units
+            P1 Goals Satisfied: 3/3
+            ...
+
+    Notes:
+        Advanced goal programming features demonstrated:
+            - Multiple priority levels (4 levels: P0-P3)
+            - Custom weights within priorities (e.g., by revenue)
+            - Indexed goal constraints (one goal per customer/warehouse)
+            - Different goal types (LE, GE, EQ constraints)
+            - Priority 0 for custom objective terms
+            - Mixing hard and soft constraints
+
+        Custom weights within priority example:
+            For customer demands (Priority 1), weights are normalized by revenue:
+            - weight = customer.revenue_per_unit / 50.0
+            - Higher revenue customers get higher priority
+            - All still at Priority 1, but weighted within that level
+
+        Indexed goals create separate deviation variables for each instance:
+            - demand_1, demand_2, demand_3 for each customer
+            - inventory_target_1, inventory_target_2 for each warehouse
+            - Each can be violated independently with its own penalty
+
+        Equality goals (EQ) penalize both over and under deviations:
+            - inventory == target: both neg and pos deviations are bad
+            - Objective minimizes: weight × (neg_dev + pos_dev)
+
+        Inequality goals (LE/GE) penalize only one direction:
+            - demand >= target: only neg_dev (shortfall) is penalized
+            - cost <= target: only pos_dev (excess) is penalized
+
+        The weighted mode ensures priorities are respected:
+            - P0: 10^7 (custom objective, optional)
+            - P1: 10^6 × weight (highest operational priority)
+            - P2: 10^5 × weight (medium priority)
+            - P3: 10^4 × weight (lowest priority)
+
+        This exponential scaling ensures higher priorities completely
+        dominate lower priorities in the objective function, effectively
+        implementing lexicographic optimization in a single solve.
+
+        The example uses Gurobi for fast solving of the larger model,
+        but any LP solver supporting LumiX will work.
+    """
     print("=" * 80)
     print("Multi-Priority Weighted Goal Programming Example")
     print("=" * 80)

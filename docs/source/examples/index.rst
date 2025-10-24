@@ -1,8 +1,47 @@
 Examples
 ========
 
-.. note::
-   Example documentation is coming soon. For now, please refer to the ``examples/`` directory in the repository.
+The LumiX examples demonstrate key features and best practices through
+practical, real-world optimization problems. Each example is fully documented
+with source code, mathematical formulations, and learning objectives.
+
+Quick Start Guide
+-----------------
+
+**New to LumiX?** Start with these examples in order:
+
+1. **Basic LP** (:doc:`basic_lp`) - The simplest introduction
+2. **Production Planning** (:doc:`production_planning`) - Single-model indexing
+3. **Driver Scheduling** (:doc:`driver_scheduling`) - Multi-model indexing (KEY FEATURE)
+
+Examples by Topic
+-----------------
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Fundamentals
+
+   basic_lp
+   production_planning
+   driver_scheduling
+   facility_location
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Advanced Techniques
+
+   cpsat_assignment
+   mccormick_bilinear
+   piecewise_functions
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Analysis Tools
+
+   scenario_analysis
+   sensitivity_analysis
+   whatif_analysis
+   goal_programming
 
 Available Examples
 ------------------
@@ -200,25 +239,23 @@ By Feature
 
 - Goal Programming: Goal Programming examples
 
-Coming Soon
------------
+Documentation Features
+----------------------
 
-We're working on adding:
+Each example now includes:
 
-- Detailed walkthrough for each example
+✓ **Detailed walkthrough** - Step-by-step code explanation
+✓ **Problem descriptions** - Real-world business context
+✓ **Mathematical formulations** - LaTeX equations and constraints
+✓ **Solution interpretation guides** - How to read and use results
+✓ **Comprehensive README files** - Quick reference in each example directory
+✓ **API cross-references** - Links to relevant LumiX classes and methods
+
+**Coming Soon**:
+
 - Jupyter notebook versions
 - Interactive visualizations
-- Problem descriptions and mathematical formulations
-- Solution interpretation guides
 - Performance comparisons across solvers
-
-In the Meantime
----------------
-
-- Browse the example source code in the repository
-- Each example has comprehensive comments
-- Examples demonstrate best practices
-- Start with basic examples and progress to advanced ones
 
 Contributing Examples
 ---------------------
@@ -230,10 +267,42 @@ Have an interesting use case? We welcome example contributions!
 - Include sample data and clear comments
 - Submit a pull request
 
+Getting Started
+---------------
+
+**Step 1: Choose Your Starting Point**
+
+- **Complete beginner?** → Start with :doc:`basic_lp`
+- **Know linear programming?** → Jump to :doc:`production_planning`
+- **Ready for advanced features?** → Explore :doc:`driver_scheduling`
+
+**Step 2: Run the Examples**
+
+.. code-block:: bash
+
+   # Clone the repository
+   git clone https://github.com/lumix/lumix.git
+   cd lumix
+
+   # Install LumiX with a solver
+   pip install -e .[ortools]
+
+   # Run an example
+   python examples/04_basic_lp/basic_lp.py
+
+**Step 3: Explore and Modify**
+
+- Read the documentation page for detailed explanations
+- Review the source code and README files
+- Try the suggested modifications
+- Adapt patterns to your own problems
+
 Next Steps
 ----------
 
-1. Browse the examples directory
-2. Run examples relevant to your use case
-3. Modify examples to match your problem
-4. Build your own models based on the patterns you learned
+After completing the examples:
+
+1. Review the :doc:`../user-guide/index` for detailed feature documentation
+2. Explore the :doc:`../api/index` for complete API reference
+3. Join the community and share your use cases
+4. Contribute your own examples via pull request

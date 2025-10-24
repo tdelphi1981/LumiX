@@ -1,28 +1,65 @@
-"""
-Worker-Task Assignment Problem with CP-SAT
-===========================================
+"""Worker-Task Assignment Problem with CP-SAT Solver.
 
-Demonstrates OR-Tools CP-SAT solver integration with LumiX.
+This example demonstrates OR-Tools CP-SAT solver integration with LumiX for
+combinatorial optimization, specifically solving an assignment problem with
+integer variables and capacity constraints.
 
-Problem: Assign tasks to workers to minimize total cost while respecting constraints.
+Problem Description:
+    Assign tasks to workers to minimize total cost while satisfying:
+        - Each task must be assigned to exactly one worker
+        - Each worker cannot exceed their maximum task capacity
+        - All assignments must respect integer/binary variable requirements
+
+Mathematical Formulation:
+    Minimize:
+        sum(assignment_cost[w,t] * assignment[w,t] for all worker-task pairs)
+
+    Subject to:
+        - Task coverage: sum(assignment[w,t] for all w) == 1 for each task t
+        - Worker capacity: sum(assignment[w,t] for all t) <= max_tasks[w] for each worker w
+        - Binary variables: assignment[w,t] ∈ {0, 1}
 
 Key Features Demonstrated:
-- CP-SAT solver for integer programming
-- Binary decision variables (worker assigned to task or not)
-- Integer costs and constraints
-- Multi-model expressions (worker × task combinations)
-- Cartesian product indexing
-- CP-SAT's strength in combinatorial optimization
+    - **CP-SAT solver integration**: OR-Tools constraint programming solver
+    - **Binary decision variables**: 0/1 assignment decisions
+    - **Cartesian product indexing**: Variables indexed by (Worker × Task) pairs
+    - **Multi-model expressions**: Coefficients from lambda functions over pairs
+    - **Integer programming**: All values and variables are integers
+    - **Combinatorial optimization**: Assignment problem structure
 
-Constraints:
-1. Each task must be assigned to exactly one worker
-2. Each worker has a maximum number of tasks they can handle
-3. All variables are integer/binary (CP-SAT requirement)
+Why CP-SAT?:
+    CP-SAT excels at:
+        - Pure integer/binary problems (no continuous variables)
+        - Assignment and scheduling problems
+        - Combinatorial optimization with logical constraints
+        - Problems where traditional LP solvers are inefficient
+        - Fast solving for discrete decision problems
 
-Why CP-SAT?
-- Excellent for assignment and scheduling problems
-- Fast for pure integer/binary problems
-- Better than linear solvers for combinatorial optimization
+Use Cases:
+    This pattern applies to:
+        - Project resource allocation
+        - Employee shift scheduling
+        - Course-instructor assignment
+        - Machine-job scheduling
+        - Task delegation in teams
+        - Warehouse-order fulfillment assignment
+
+Learning Objectives:
+    1. How to use CP-SAT solver with LumiX
+    2. How to create binary variables for assignment problems
+    3. How to use cartesian product indexing for worker-task pairs
+    4. How to formulate coverage and capacity constraints
+    5. How to interpret assignment problem solutions
+
+See Also:
+    - Example 02 (driver_scheduling): Multi-model indexing with dates
+    - Example 01 (production_planning): Single-model indexing basics
+    - sample_data.py: Data models and compatibility matrix
+    - LumiX documentation: CP-SAT Solver Integration
+
+Notes:
+    CP-SAT only supports integer and binary variables. For problems with
+    continuous variables, use solvers like OR-Tools LP, Gurobi, or CPLEX.
 """
 
 from dataclasses import dataclass
@@ -40,12 +77,39 @@ solver_to_use = "cpsat"
 
 
 def build_assignment_model() -> Tuple[LXModel, LXVariable]:
-    """
-    Build the worker-task assignment model using CP-SAT.
+    """Build the worker-task assignment optimization model using CP-SAT.
+
+    This function constructs an integer programming model to minimize the total
+    cost of assigning tasks to workers while respecting task coverage requirements
+    and worker capacity constraints.
+
+    The model uses cartesian product indexing where binary assignment variables
+    are indexed by (Worker, Task) pairs, eliminating manual index management.
 
     Returns:
-        Tuple of (model, assignment variable) for solution access
+        A tuple containing:
+            - LXModel: The optimization model with variables, objective, and constraints
+            - LXVariable: The assignment variable family for solution access
+
+    Example:
+        >>> model, assignment = build_assignment_model()
+        >>> print(model.summary())
+        >>> optimizer = LXOptimizer().use_solver("cpsat")
+        >>> solution = optimizer.solve(model)
+        >>> # Access assignments
+        >>> for (w_id, t_id), value in solution.get_mapped(assignment).items():
+        ...     if value > 0.5:  # Assignment is active
+        ...         print(f"Worker {w_id} assigned to Task {t_id}")
+
+    Notes:
+        The data-driven approach means all coefficients are extracted from
+        WORKERS and TASKS data using lambda functions. The model automatically
+        adapts to changes in the data without code modifications.
+
+        CP-SAT solver configuration options (time_limit, num_search_workers)
+        can be passed when calling optimizer.solve().
     """
+
     # Decision Variable: Binary assignment (worker i assigned to task j)
     # This creates a variable for each (worker, task) pair
     assignment = (
@@ -109,7 +173,39 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
 
 
 def main():
-    """Run the worker-task assignment optimization with CP-SAT."""
+    """Run the complete worker-task assignment optimization example.
+
+    This function orchestrates the entire optimization workflow:
+        1. Display problem data (workers and tasks)
+        2. Build the assignment optimization model
+        3. Configure and create CP-SAT optimizer
+        4. Solve the model with time limit and parallel workers
+        5. Display and interpret the optimal assignment
+
+    The workflow demonstrates best practices for CP-SAT usage:
+        - Clear problem data presentation
+        - Structured model building
+        - Solver-specific configuration
+        - Comprehensive result reporting
+
+    Example:
+        Run this example from the command line::
+
+            $ python cpsat_assignment.py
+
+        Or import and run programmatically::
+
+            >>> from cpsat_assignment import main
+            >>> main()
+
+    Notes:
+        This example uses CP-SAT solver parameters:
+            - time_limit: Maximum solve time in seconds
+            - num_search_workers: Number of parallel search threads
+
+        These parameters can be adjusted based on problem size and
+        available computational resources.
+    """
 
     print("=" * 70)
     print("LumiX Example: Worker-Task Assignment with CP-SAT")

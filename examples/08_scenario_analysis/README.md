@@ -53,6 +53,15 @@ labor_sensitivity = analyzer.sensitivity_to_parameter(
 
 ## Running the Example
 
+### Prerequisites
+
+```bash
+pip install lumix
+pip install ortools  # or cplex, gurobi
+```
+
+### Execute
+
 ```bash
 cd examples/08_scenario_analysis
 python scenario_analysis.py
@@ -160,6 +169,22 @@ The example generates actionable insights such as:
 
 ## See Also
 
-- **Sensitivity Analysis**: `examples/09_sensitivity_analysis/`
-- **What-If Analysis**: `examples/10_whatif_analysis/`
-- **Production Planning**: `examples/01_production_planning/`
+- **Example 09 (Sensitivity Analysis)**: Understanding shadow prices and reduced costs
+- **Example 10 (What-If Analysis)**: Quick tactical decision support
+- **Example 01 (Production Planning)**: Base model for scenario testing
+- **Goal Programming (Example 11)**: Soft constraints for multi-objective scenarios
+
+## Files in This Example
+
+- `scenario_analysis.py`: Main scenario analysis demonstration
+- `sample_data.py`: Data models (Product, Resource) and sample data
+- `README.md`: This documentation file
+
+## Next Steps
+
+1. Define your own business scenarios
+2. Add more parameter variations (prices, demands, constraints)
+3. Implement scenario trees for sequential decision-making
+4. Create automated scenario generation from historical data
+5. Build scenario comparison visualizations
+6. Integrate with risk assessment frameworks

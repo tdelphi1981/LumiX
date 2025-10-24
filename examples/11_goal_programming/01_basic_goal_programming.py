@@ -58,7 +58,86 @@ solver_to_use = "ortools"
 
 
 def main():
-    """Run basic goal programming example."""
+    """Run the basic goal programming example with automatic constraint relaxation.
+
+    This function demonstrates LumiX's automatic LP-to-Goal Programming conversion
+    feature, which transforms hard constraints into soft goals with deviation
+    variables. The workflow includes:
+        1. Building a production planning model with hard and soft constraints
+        2. Marking constraints as goals with priorities and weights
+        3. Automatically preparing goal programming (creates deviation variables)
+        4. Solving with weighted goal programming (single optimization)
+        5. Analyzing goal satisfaction and deviations
+
+    The example uses a simple production planning problem with three goals:
+        - Priority 1 (highest): Meet production targets
+        - Priority 2 (medium): Limit overtime hours
+        - Priority 3 (lowest): Achieve target profit
+
+    Returns:
+        None. Results are printed to console including:
+            - Model summary with variables and constraints
+            - Optimal solution with production quantities
+            - Goal satisfaction status for each goal
+            - Deviation analysis (under/over for each goal)
+
+    Example:
+        Run this example from the command line::
+
+            $ python 01_basic_goal_programming.py
+
+        Or import and run programmatically::
+
+            >>> from examples.goal_programming.basic_goal_programming import main
+            >>> main()
+
+        Expected output::
+
+            ====================================================================
+            Basic Goal Programming Example
+            ====================================================================
+
+            Model Summary:
+            ...
+
+            Production Plan:
+            Product A       :   100.00 units (Target: 100.00)
+            Product B       :    80.00 units (Target: 80.00)
+            ...
+
+            Goal Satisfaction:
+            Production Goal Product A: [SATISFIED]
+              Under-production: 0.00
+              Over-production:  0.00
+            ...
+
+    Notes:
+        Goal Programming concepts demonstrated:
+            - Hard constraints: Must be satisfied (e.g., capacity limits)
+            - Soft constraints (goals): Can be violated with penalty
+            - Deviation variables: neg (under) and pos (over) deviation
+            - Priorities: Higher priority goals are more important
+            - Weights: Relative importance within same priority level
+
+        The .as_goal() method marks a constraint as a goal:
+            - .as_goal(priority=1, weight=1.0): Highest priority
+            - Higher priorities dominate lower priorities in weighted mode
+            - Within same priority, weights determine relative importance
+
+        Weighted mode converts priorities to exponentially different weights:
+            - Priority 1: weight * 10^6
+            - Priority 2: weight * 10^5
+            - Priority 3: weight * 10^4
+
+        This ensures higher priorities are always satisfied first before
+        considering lower priority goals.
+
+        The .prepare_goal_programming() method automatically:
+            - Creates deviation variables (neg, pos) for each goal
+            - Replaces goal constraints with relaxed versions
+            - Adds deviation terms to objective function
+            - Maintains the original model structure
+    """
     print("=" * 70)
     print("Basic Goal Programming Example")
     print("=" * 70)
@@ -196,7 +275,7 @@ def main():
             pos_dev = pos_dev_dict.get(goal_id, 0) if isinstance(pos_dev_dict, dict) else pos_dev_dict
 
             satisfied = solution.is_goal_satisfied(goal_name, tolerance=1e-6)
-            status = "✓ Satisfied" if satisfied else "✗ Not Satisfied"
+            status = "[SATISFIED]" if satisfied else "[NOT SATISFIED]"
             print(
                 f"Production Goal {product.name}: {status}\n"
                 f"  Under-production: {neg_dev:.2f}\n"
@@ -215,7 +294,7 @@ def main():
         pos_dev = pos_dev_val.get(goal_id, 0) if isinstance(pos_dev_val, dict) else pos_dev_val
 
         satisfied = solution.is_goal_satisfied("overtime_goal")
-        status = "✓ Satisfied" if satisfied else "✗ Not Satisfied"
+        status = "[SATISFIED]" if satisfied else "[NOT SATISFIED]"
         print(
             f"\nOvertime Goal: {status}\n"
             f"  Under limit:  {neg_dev:.2f}\n"
@@ -234,7 +313,7 @@ def main():
         pos_dev = pos_dev_val.get(goal_id, 0) if isinstance(pos_dev_val, dict) else pos_dev_val
 
         satisfied = solution.is_goal_satisfied("profit_goal")
-        status = "✓ Satisfied" if satisfied else "✗ Not Satisfied"
+        status = "[SATISFIED]" if satisfied else "[NOT SATISFIED]"
         print(
             f"\nProfit Goal: {status}\n"
             f"  Under target: ${neg_dev:.2f}\n"

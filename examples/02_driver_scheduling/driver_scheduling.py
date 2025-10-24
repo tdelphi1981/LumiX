@@ -1,20 +1,62 @@
-"""
-Driver Scheduling Example: Multi-Model Indexing ⭐⭐⭐
-====================================================
+"""Driver Scheduling Example: Multi-Model Indexing.
 
-THIS IS THE MOST IMPORTANT LUMIX EXAMPLE!
+This example demonstrates LumiX's multi-model indexing feature, which allows
+variables to be indexed by multiple data model instances simultaneously using
+cartesian products. This is THE KEY FEATURE that sets LumiX apart from other
+optimization libraries.
 
-Demonstrates multi-model indexing - variables indexed by (Driver, Date) tuples.
-This is LumiX's killer feature that sets it apart from other optimization libraries.
+Problem Description:
+    A delivery company needs to schedule drivers over a week to minimize labor
+    costs while meeting daily coverage requirements. Each driver has:
+        - Different daily rates and overtime multipliers
+        - Limited availability (days off, max working days per week)
+        - Preference constraints
 
-Problem: Schedule drivers over a week, minimizing cost while meeting coverage requirements.
+    Each date has:
+        - Minimum driver coverage requirements
+        - Overtime cost multipliers (e.g., weekends cost 1.5x)
 
-Key Features:
-- Variable indexed by (Driver × Date) cartesian product
-- IndexDimension with filters
-- cost_multi() - cost function receives both models
-- where_multi() - filter combinations based on both models
-- Constraints that sum over specific dimensions
+Mathematical Formulation:
+    Decision Variables:
+        duty[driver, date] ∈ {0, 1} for each (driver, date) pair
+
+    Minimize:
+        sum(cost(driver, date) * duty[driver, date] for all driver, date)
+
+    Subject to:
+        - Driver max days: sum(duty[d, date] for all dates) <= max_days[d]
+        - Daily coverage: sum(duty[driver, dt] for all drivers) >= min_required[dt]
+        - Availability: duty[driver, date] = 0 if driver unavailable on date
+
+Key Features Demonstrated:
+    - **Multi-model indexing**: Variables indexed by (Driver, Date) tuples
+    - **Cartesian product**: LXIndexDimension creates all valid combinations
+    - **cost_multi()**: Cost functions that receive both index models
+    - **where_multi()**: Filter combinations based on both models simultaneously
+    - **Cross-dimensional constraints**: Sum over specific dimensions
+    - **Type-safe solution mapping**: Access solutions using (driver_id, date) keys
+
+Use Cases:
+    This pattern is ideal for:
+        - Employee scheduling and workforce planning
+        - Resource assignment over time
+        - Shift scheduling with multiple constraints
+        - Multi-dimensional allocation problems
+        - Problems with relationship-based decision variables
+
+Learning Objectives:
+    1. How to create variables indexed by multiple models (cartesian products)
+    2. How to use LXIndexDimension with filters for each dimension
+    3. How to define cost functions that depend on multiple index models
+    4. How to filter valid combinations using where_multi()
+    5. How to build constraints that sum over specific dimensions
+    6. How to access multi-indexed solutions using tuple keys
+
+See Also:
+    - Example 01 (production_planning): Single-model indexing introduction
+    - Example 03 (facility_location): Another multi-model example
+    - Example 05 (cpsat_assignment): CP-SAT solver with multi-indexing
+    - User Guide: Multi-Model Indexing section
 """
 
 from typing import Tuple
@@ -37,11 +79,32 @@ solver_to_use = "ortools"
 
 
 def build_scheduling_model() -> LXModel:
-    """
-    Build the driver scheduling model.
+    """Build the driver scheduling optimization model.
 
-    This demonstrates THE KEY FEATURE of LumiX:
-    Variables indexed by multiple models (Driver × Date).
+    This function demonstrates THE KEY FEATURE of LumiX: variables indexed by
+    multiple models simultaneously. The duty variable is indexed by the cartesian
+    product (Driver × Date), creating one binary variable for each valid
+    (driver, date) combination.
+
+    The model uses multi-model indexing to naturally express the assignment
+    problem structure without manual index management.
+
+    Returns:
+        An LXModel instance containing:
+            - Variables: duty[driver, date] for each valid combination
+            - Objective: Minimize total scheduling cost
+            - Constraints: Driver max days and daily coverage requirements
+
+    Example:
+        >>> model = build_scheduling_model()
+        >>> print(model.summary())
+        >>> optimizer = LXOptimizer().use_solver("ortools")
+        >>> solution = optimizer.solve(model)
+
+    Notes:
+        The multi-model indexing automatically creates only feasible combinations
+        based on the where_multi() filter, reducing problem size by excluding
+        infeasible assignments (e.g., drivers on their days off).
     """
 
     # ========================================
@@ -133,7 +196,30 @@ def build_scheduling_model() -> LXModel:
 
 
 def display_solution(model: LXModel):
-    """Display the optimization results."""
+    """Solve the optimization model and display results.
+
+    This function solves the driver scheduling model and presents the results
+    in two views: by date (showing which drivers work each day) and by driver
+    (showing each driver's schedule and earnings).
+
+    Args:
+        model: The LXModel instance to solve, typically from build_scheduling_model().
+
+    Example:
+        >>> model = build_scheduling_model()
+        >>> display_solution(model)
+        ============================================================
+        SOLUTION
+        ============================================================
+        Status: optimal
+        Optimal Cost: $1,234.56
+        ...
+
+    Notes:
+        The function demonstrates how to access multi-indexed solution values
+        using (driver_id, date) tuple keys. This type-safe access preserves
+        the relationship between data models and decision variables.
+    """
 
     print("\n" + "=" * 70)
     print("SOLUTION")
@@ -208,7 +294,33 @@ def display_solution(model: LXModel):
 
 
 def main():
-    """Run the driver scheduling optimization."""
+    """Run the complete driver scheduling optimization example.
+
+    This function orchestrates the entire optimization workflow:
+        1. Display problem data (drivers and dates)
+        2. Build the multi-model indexed optimization model
+        3. Solve the model
+        4. Display and interpret results
+        5. Explain the advantages of multi-model indexing
+
+    The workflow demonstrates best practices for using LumiX's multi-model
+    indexing feature in production applications.
+
+    Example:
+        Run this example from the command line::
+
+            $ python driver_scheduling.py
+
+        Or import and run programmatically::
+
+            >>> from driver_scheduling import main
+            >>> main()
+
+    Notes:
+        This example showcases why multi-model indexing is LumiX's killer
+        feature: it allows natural expression of multi-dimensional assignment
+        problems using actual data model instances rather than numeric indices.
+    """
 
     print("=" * 70)
     print("LumiX Example: Driver Scheduling (Multi-Model Indexing)")

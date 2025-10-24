@@ -1,5 +1,10 @@
 .. LumiX documentation master file
 
+.. image:: _static/Lumix_Logo_1024.png
+   :width: 200px
+   :align: center
+   :alt: LumiX Logo
+
 Welcome to LumiX Documentation
 ===============================
 

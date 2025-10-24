@@ -82,6 +82,15 @@ results = whatif.compare_changes(changes)
 
 ## Running the Example
 
+### Prerequisites
+
+```bash
+pip install lumix
+pip install ortools  # or cplex, gurobi
+```
+
+### Execute
+
 ```bash
 cd examples/10_whatif_analysis
 python whatif_analysis.py
@@ -365,6 +374,22 @@ whatif.get_baseline_solution()  # Retrieved from cache
 
 ## See Also
 
-- **Scenario Analysis**: `examples/08_scenario_analysis/`
-- **Sensitivity Analysis**: `examples/09_sensitivity_analysis/`
-- **Production Planning**: `examples/01_production_planning/`
+- **Example 08 (Scenario Analysis)**: Strategic planning with multiple scenarios
+- **Example 09 (Sensitivity Analysis)**: Understanding shadow prices and reduced costs
+- **Example 01 (Production Planning)**: Base model for what-if analysis
+- **Goal Programming (Example 11)**: Soft constraints and multi-objective trade-offs
+
+## Files in This Example
+
+- `whatif_analysis.py`: Main what-if analysis demonstration
+- `sample_data.py`: Data models (Product, Resource) and sample data
+- `README.md`: This documentation file
+
+## Next Steps
+
+1. Build interactive what-if tools for your optimization models
+2. Create decision support dashboards with what-if capabilities
+3. Automate bottleneck discovery and reporting
+4. Implement real-time what-if analysis for operational decisions
+5. Combine what-if with Monte Carlo simulation for risk assessment
+6. Build ROI calculators based on what-if results

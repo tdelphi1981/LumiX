@@ -1,8 +1,57 @@
-"""
-Sample data classes for scenario analysis example.
+"""Sample data classes for scenario analysis example.
 
-These classes simulate ORM models (like SQLAlchemy, Django ORM, etc.)
-In a real application, these would be your actual database models.
+This module provides data models and sample data for the scenario analysis
+optimization example. The classes are designed to simulate ORM models from
+database frameworks like SQLAlchemy or Django ORM.
+
+Problem Context:
+    A manufacturing company needs to analyze how different business scenarios
+    (market expansion, resource constraints, cost changes) affect their optimal
+    production plan and profitability. The scenario analysis framework allows
+    testing multiple what-if scenarios without rebuilding the model.
+
+Data Structure:
+    - Products: Items manufactured with profit margins and resource consumption
+    - Resources: Limited capacity constraints (labor, machines, materials)
+    - Resource Usage: Many-to-many relationship between products and resources
+
+Key Features:
+    - Simple dataclass structure for easy understanding
+    - Realistic production planning parameters
+    - Multiple products with varying profitability
+    - Three constrained resources (labor, machines, materials)
+    - Minimum production requirements for customer orders
+
+Use Cases:
+    This data structure supports:
+        - Production planning and optimization
+        - Scenario analysis and what-if modeling
+        - Sensitivity analysis on constraints
+        - Resource allocation decisions
+        - Capacity planning studies
+
+Example:
+    Use these models in scenario analysis::
+
+        from sample_data import PRODUCTS, RESOURCES, get_resource_usage
+        from lumix import LXScenario
+
+        # Create a scenario with increased labor capacity
+        scenario = (
+            LXScenario("expansion")
+            .modify_constraint_rhs("capacity_Labor Hours", multiply=1.30)
+            .describe("Market expansion with 30% more labor")
+        )
+
+Notes:
+    In a real application, these dataclasses would be replaced with actual
+    ORM models, and LumiX would work directly with database query results.
+    The data follows standard relational database design patterns.
+
+See Also:
+    - scenario_analysis.py: Main scenario analysis using this data
+    - Example 01 (production_planning): Similar data structure
+    - Example 09 (sensitivity_analysis): Alternative analysis approach
 """
 
 from dataclasses import dataclass
@@ -10,7 +59,36 @@ from dataclasses import dataclass
 
 @dataclass
 class Product:
-    """Represents a product that can be manufactured."""
+    """Represents a product that can be manufactured.
+
+    This class models a product with its economic characteristics and
+    resource consumption requirements. Each product has a profit margin
+    and requires various resources for production.
+
+    Attributes:
+        id: Unique identifier for the product.
+        name: Human-readable product name.
+        selling_price: Revenue per unit sold, in dollars.
+        unit_cost: Total production cost per unit (materials + labor), in dollars.
+        labor_hours: Labor time required per unit, in hours.
+        machine_hours: Machine time required per unit, in hours.
+        material_units: Raw material quantity required per unit.
+        min_production: Minimum production quantity to meet customer orders.
+
+    Example:
+        >>> widget = Product(
+        ...     id=1, name="Widget A", selling_price=100.0, unit_cost=50.0,
+        ...     labor_hours=5.0, machine_hours=3.0, material_units=2.0,
+        ...     min_production=10
+        ... )
+        >>> profit_margin = widget.selling_price - widget.unit_cost
+        >>> print(f"Profit per unit: ${profit_margin}")
+        Profit per unit: $50.0
+
+    Notes:
+        Profit margin = selling_price - unit_cost
+        This is used as the coefficient in the objective function.
+    """
 
     id: int
     name: str
@@ -24,7 +102,29 @@ class Product:
 
 @dataclass
 class Resource:
-    """Represents a limited resource (labor, machine, materials)."""
+    """Represents a limited resource used in production.
+
+    This class models a constrained resource such as labor hours, machine time,
+    or raw materials. Each resource has a maximum capacity that limits total
+    production.
+
+    Attributes:
+        id: Unique identifier for the resource.
+        name: Human-readable resource name (e.g., "Labor Hours", "Machine Hours").
+        capacity: Maximum available quantity per planning period (e.g., per week).
+
+    Example:
+        >>> labor = Resource(id=1, name="Labor Hours", capacity=1000.0)
+        >>> print(f"{labor.name}: {labor.capacity} hours available per week")
+        Labor Hours: 1000.0 hours available per week
+
+    Notes:
+        Capacity constraints are modeled as inequality constraints:
+        sum(resource_usage[p,r] * production[p]) <= capacity[r]
+
+        In scenario analysis, capacity values are often modified to test
+        different business conditions (expansion, constraints, etc.).
+    """
 
     id: int
     name: str
@@ -94,9 +194,46 @@ RESOURCES = [
 
 
 def get_resource_usage(product: Product, resource: Resource) -> float:
-    """
-    Get how much of a resource a product uses.
-    This demonstrates how you'd query relationships in a real ORM.
+    """Get the amount of a specific resource required to produce one unit of a product.
+
+    This function demonstrates how to query relationships between products and
+    resources in optimization models. In a real ORM application, this might be
+    a database relationship or join query.
+
+    Args:
+        product: The product for which to retrieve resource usage.
+        resource: The resource whose usage amount is being queried.
+
+    Returns:
+        The quantity of the specified resource required to produce one unit
+        of the product. Returns 0.0 if the resource is not used by the product.
+
+    Example:
+        >>> widget = Product(id=1, name="Widget A", selling_price=100, unit_cost=50,
+        ...                  labor_hours=5.0, machine_hours=3.0, material_units=2.0,
+        ...                  min_production=10)
+        >>> labor = Resource(id=1, name="Labor Hours", capacity=1000)
+        >>> usage = get_resource_usage(widget, labor)
+        >>> print(f"{widget.name} requires {usage} hours of {labor.name}")
+        Widget A requires 5.0 hours of Labor Hours
+
+        >>> machines = Resource(id=2, name="Machine Hours", capacity=800)
+        >>> usage = get_resource_usage(widget, machines)
+        >>> print(f"{widget.name} requires {usage} hours of {machines.name}")
+        Widget A requires 3.0 hours of Machine Hours
+
+    Notes:
+        This mapping approach allows for flexible resource-product relationships
+        and can be easily extended to support:
+            - Additional resource types
+            - Database-backed lookups
+            - Time-varying resource requirements
+            - Product-specific resource efficiency factors
+
+        In a real application with an ORM, this would typically be:
+            - A database join query
+            - A relationship attribute (e.g., product.resources)
+            - A lookup table with foreign keys
     """
     if resource.name == "Labor Hours":
         return product.labor_hours

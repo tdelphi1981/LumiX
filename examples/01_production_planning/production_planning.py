@@ -1,17 +1,52 @@
-"""
-Production Planning Example: Single-Model Indexing
-==================================================
+"""Production Planning Example: Single-Model Indexing.
 
-This example demonstrates OptiXNG's single-model indexing feature.
-Variables and constraints are indexed by Product and Resource models.
+This example demonstrates LumiX's single-model indexing feature, which allows
+variables and constraints to be indexed directly by data model instances rather
+than manual integer indices.
 
-Problem: Maximize profit while respecting resource capacity constraints.
+Problem Description:
+    A manufacturing company produces multiple products, each requiring different
+    amounts of limited resources (labor hours, machine hours, raw materials).
+    The goal is to maximize total profit while:
+        - Respecting resource capacity constraints
+        - Meeting minimum production requirements for customer orders
+        - Ensuring non-negative production quantities
 
-Key Features:
-- Variables indexed by Product (production[product])
-- Constraints indexed by Resource (capacity[resource])
-- Data-driven modeling (costs and requirements from data)
-- Type-safe solution mapping
+Mathematical Formulation:
+    Maximize:
+        sum(profit_per_unit[p] * production[p] for p in products)
+
+    Subject to:
+        - Resource capacity: sum(usage[p,r] * production[p]) <= capacity[r] for all r
+        - Minimum production: production[p] >= min_production[p] for all p
+        - Non-negativity: production[p] >= 0 for all p
+
+Key Features Demonstrated:
+    - **Single-model indexing**: Variables indexed by Product instances
+    - **Data-driven modeling**: Coefficients extracted from data using lambdas
+    - **Type-safe solution access**: Solutions indexed by model instances
+    - **Automatic expansion**: Variable families expand to one var per product
+    - **Constraint families**: Multiple constraints indexed by data instances
+
+Use Cases:
+    This pattern is ideal for:
+        - Production planning and scheduling
+        - Resource allocation problems
+        - Portfolio optimization
+        - Supply chain optimization
+        - Any problem with homogeneous decision variables indexed by entities
+
+Learning Objectives:
+    1. How to create variable families indexed by data models
+    2. How to use lambda functions for data-driven coefficient extraction
+    3. How to build expressions that automatically sum over all instances
+    4. How to create constraint families for similar constraints
+    5. How to access solutions using the same index as the original data
+
+See Also:
+    - Example 02 (driver_scheduling): Multi-model indexing with cartesian products
+    - Example 04 (basic_lp): Simpler introduction to LumiX basics
+    - User Guide: Single-Model Indexing section
 """
 
 from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
@@ -25,7 +60,32 @@ solver_to_use = "cplex"
 
 
 def build_production_model() -> LXModel:
-    """Build the production planning optimization model using data-driven approach."""
+    """Build the production planning optimization model.
+
+    This function constructs a linear programming model to maximize profit
+    from production while respecting resource capacity constraints and minimum
+    production requirements.
+
+    The model uses single-model indexing where variables are indexed directly
+    by Product instances, eliminating the need for manual index management.
+
+    Returns:
+        An LXModel instance containing:
+            - Variables: production[p] for each product p
+            - Objective: Maximize total profit
+            - Constraints: Resource capacity limits and minimum production
+
+    Example:
+        >>> model = build_production_model()
+        >>> print(model.summary())
+        >>> optimizer = LXOptimizer().use_solver("ortools")
+        >>> solution = optimizer.solve(model)
+
+    Notes:
+        The data-driven approach means all coefficients are extracted from
+        the PRODUCTS and RESOURCES data using lambda functions, making the
+        model automatically adapt to changes in the data.
+    """
 
     # Decision Variable: Production quantity for each product
     # KEY: LXVariable family that auto-expands to one var per product!
@@ -92,7 +152,29 @@ def build_production_model() -> LXModel:
 
 
 def display_solution(model: LXModel):
-    """Display the optimization results."""
+    """Solve the optimization model and display results.
+
+    This function solves the production planning model and presents the results
+    in a human-readable format, including the production plan, profit breakdown,
+    and resource utilization.
+
+    Args:
+        model: The LXModel instance to solve, typically from build_production_model().
+
+    Example:
+        >>> model = build_production_model()
+        >>> display_solution(model)
+        ============================================================
+        SOLUTION
+        ============================================================
+        Status: optimal
+        Optimal Profit: $12,345.67
+        ...
+
+    Notes:
+        The function demonstrates how to access solution values using the same
+        index keys (product IDs) that were used to define the variables.
+    """
 
     print("\n" + "=" * 60)
     print("SOLUTION")
@@ -137,7 +219,29 @@ def display_solution(model: LXModel):
 
 
 def main():
-    """Run the production planning optimization."""
+    """Run the complete production planning example.
+
+    This function orchestrates the entire optimization workflow:
+        1. Display problem data (products and resources)
+        2. Build the optimization model
+        3. Solve the model
+        4. Display and interpret results
+
+    The workflow demonstrates best practices for using LumiX in production:
+        - Clear separation between data, model building, and solving
+        - Comprehensive result reporting
+        - Type-safe solution access
+
+    Example:
+        Run this example from the command line::
+
+            $ python production_planning.py
+
+        Or import and run programmatically::
+
+            >>> from production_planning import main
+            >>> main()
+    """
 
     print("=" * 60)
     print("OptiXNG Example: Production Planning")

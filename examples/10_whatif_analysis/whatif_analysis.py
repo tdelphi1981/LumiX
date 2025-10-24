@@ -49,7 +49,41 @@ solver_to_use = "cplex"
 
 
 def build_production_model() -> LXModel:
-    """Build the production planning optimization model."""
+    """Build the base production planning optimization model for what-if analysis.
+
+    Creates a standard production planning model that will serve as the baseline
+    for interactive what-if analysis. The model maximizes profit while respecting
+    resource capacity constraints and minimum production requirements. This base
+    model will be repeatedly modified and resolved to test different scenarios.
+
+    Returns:
+        An LXModel instance containing:
+            - Variables: production[p] for each product p
+            - Objective: Maximize total profit
+            - Constraints: Resource capacity limits and minimum production
+
+    Example:
+        >>> model = build_production_model()
+        >>> print(model.summary())
+        Model: production_planning
+        Variables: 5
+        Constraints: 8
+        >>> optimizer = LXOptimizer().use_solver("cplex")
+        >>> whatif = LXWhatIfAnalyzer(model, optimizer)
+
+    Notes:
+        This model is identical to the base production model from Example 01,
+        but will be used for quick tactical analysis rather than strategic
+        scenario planning. The LXWhatIfAnalyzer will create temporary
+        modifications to test parameter changes without altering the base model.
+
+        What-if analysis is ideal for:
+            - Quick operational decisions (hours to days)
+            - Testing small parameter changes
+            - Exploring resource trade-offs
+            - Answering specific "what if" questions
+            - Interactive decision support
+    """
 
     # Decision Variable: Production quantity for each product
     production = (
@@ -98,8 +132,59 @@ def build_production_model() -> LXModel:
 # ==================== WHAT-IF ANALYSIS ====================
 
 
-def run_basic_whatif_analysis():
-    """Run basic what-if analysis with simple changes."""
+def run_whatif_analysis():
+    """Run basic what-if analysis with simple parameter changes.
+
+    This function demonstrates quick, interactive what-if analysis by testing
+    individual parameter changes and observing their impact on profit:
+        1. Get baseline solution for comparison
+        2. Test increasing labor hours by 200 units
+        3. Test decreasing machine hours by 100 units (equipment failure)
+        4. Test increasing raw materials by 100 units
+        5. Test setting labor hours to a specific value (1500)
+        6. Test tightening raw materials by 20% (supply chain issues)
+
+    Each test shows the profit impact, percentage change, and marginal value
+    per unit of resource, enabling quick ROI assessment for operational changes.
+
+    Returns:
+        None. Results are printed to console including:
+            - Baseline profit value
+            - New profit after each change
+            - Delta in objective value ($ change)
+            - Percentage change
+            - Marginal value per unit of resource
+            - Risk assessments for negative scenarios
+
+    Example:
+        >>> run_whatif_analysis()
+        ============================================================
+        WHAT-IF ANALYSIS: Quick Impact Assessment
+        ============================================================
+        Baseline Profit: $10,000.00
+
+        WHAT-IF #1: Increase Labor Hours by 200
+        Original Profit:  $10,000.00
+        New Profit:       $10,500.00
+        Change:           $500.00 (+5.00%)
+        Marginal value:  $2.50 per labor hour
+        ...
+
+    Notes:
+        What-if analysis differs from scenario analysis:
+            - What-if: Quick tactical changes, one parameter at a time
+            - Scenario: Strategic planning, multiple coordinated changes
+
+        The LXWhatIfAnalyzer provides methods for:
+            - .increase_constraint_rhs(): Add to RHS by amount
+            - .decrease_constraint_rhs(): Subtract from RHS by amount
+            - .relax_constraint(): Increase RHS (easier to satisfy)
+            - .tighten_constraint(): Decrease RHS (harder to satisfy)
+            - .sensitivity_range(): Test multiple values systematically
+
+        Each analysis preserves the base model and creates temporary
+        modifications, making it safe for interactive exploration.
+    """
 
     print("=" * 80)
     print("WHAT-IF ANALYSIS: Quick Impact Assessment")
@@ -389,7 +474,58 @@ def analyze_variable_bounds():
 
 
 def main():
-    """Run what-if analysis examples."""
+    """Run the complete what-if analysis example workflow.
+
+    This function orchestrates a comprehensive demonstration of LumiX's
+    what-if analysis capabilities by executing multiple related analyses:
+        1. Basic what-if analysis with simple parameter changes
+        2. Bottleneck identification through systematic testing
+        3. Sensitivity range analysis with parameter sweeps
+        4. Multiple change comparison for investment decisions
+        5. Variable bound modification examples
+
+    The workflow demonstrates how what-if analysis enables quick, interactive
+    decision support for tactical operational decisions by testing parameter
+    changes one at a time and comparing their impact.
+
+    Example:
+        Run this example from the command line::
+
+            $ python whatif_analysis.py
+
+        Or import and run programmatically::
+
+            >>> from whatif_analysis import main
+            >>> main()
+
+        Expected output includes:
+            - Individual what-if test results with profit impacts
+            - Bottleneck identification and ranking
+            - Sensitivity curves showing profit vs. parameter values
+            - Investment option comparison tables
+            - Best investment recommendations
+            - Variable bound analysis
+
+    Notes:
+        This example demonstrates the complete LXWhatIfAnalyzer workflow:
+            - Creating analyzer with base model
+            - Testing individual parameter changes
+            - Computing marginal values and ROI
+            - Identifying bottlenecks systematically
+            - Generating sensitivity ranges
+            - Comparing multiple investment options
+
+        What-if analysis is ideal for:
+            - Quick operational decisions (minutes to hours)
+            - Testing specific parameter changes
+            - Understanding resource trade-offs
+            - Prioritizing short-term investments
+            - Interactive decision support systems
+
+        The example uses CPLEX as the solver for fast repeated solves,
+        which is important for interactive what-if analysis where speed
+        matters more than absolute optimality guarantees.
+    """
 
     print("\n")
     print("╔" + "═" * 78 + "╗")
@@ -397,7 +533,7 @@ def main():
     print("╚" + "═" * 78 + "╝")
 
     # Basic what-if analysis
-    run_basic_whatif_analysis()
+    run_whatif_analysis()
 
     # Bottleneck identification
     identify_bottlenecks()

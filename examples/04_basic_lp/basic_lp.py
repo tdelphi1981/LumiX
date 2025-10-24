@@ -1,18 +1,62 @@
-"""
-Basic Linear Programming Example: Diet Problem
-===============================================
+"""Basic Linear Programming Example: Diet Problem.
 
-This is the SIMPLEST possible LumiX example.
-Learn the absolute basics of data-driven model building here.
+This is the SIMPLEST possible LumiX example, designed as an introduction to
+the fundamental concepts of data-driven optimization modeling.
 
-Problem: Minimize cost of food while meeting nutritional requirements.
+Problem Description:
+    The classic Diet Problem: determine the most cost-effective combination
+    of foods that meets daily nutritional requirements. This is one of the
+    first practical applications of linear programming, dating back to 1945.
+
+    Given:
+        - A set of food items, each with cost and nutritional content
+        - Daily minimum requirements for calories, protein, and calcium
+
+    Find: The number of servings of each food that minimizes total cost
+    while meeting all nutritional requirements.
+
+Mathematical Formulation:
+    Minimize:
+        sum(cost[f] * servings[f] for f in foods)
+
+    Subject to:
+        - sum(calories[f] * servings[f]) >= MIN_CALORIES
+        - sum(protein[f] * servings[f]) >= MIN_PROTEIN
+        - sum(calcium[f] * servings[f]) >= MIN_CALCIUM
+        - servings[f] >= 0 for all f
 
 Key Features Demonstrated:
-- Variable families (one Variable expands to multiple solver variables)
-- Data-driven modeling with .from_data()
-- Automatic expression expansion (no manual loops)
-- Type-safe coefficients with lambda functions
-- OR-Tools solver integration
+    - **Variable families**: One LXVariable expands to multiple solver variables
+    - **Data-driven modeling**: Use .from_data() to auto-create variables
+    - **Automatic expansion**: Expressions sum over all data automatically
+    - **Type-safe coefficients**: Lambda functions extract data attributes
+    - **Fluent API**: Chain method calls for readable model building
+    - **Solution mapping**: Access results using original data indices
+
+Learning Objectives:
+    1. Understand variable families and how they expand from data
+    2. Learn to use lambda functions for coefficient extraction
+    3. Master the fluent API pattern for model building
+    4. Practice reading solutions with type-safe indexing
+    5. Recognize when to use continuous vs integer variables
+
+Use Cases:
+    This pattern applies to any resource allocation problem:
+        - Diet and meal planning
+        - Portfolio optimization
+        - Advertising budget allocation
+        - Ingredient blending and mixing
+        - Resource allocation across projects
+
+Prerequisites:
+    This is the perfect starting point for LumiX. No prior knowledge required.
+    After mastering this example, move to example 01 (production planning)
+    for more complex single-model indexing patterns.
+
+See Also:
+    - Example 01 (production_planning): More complex single-model indexing
+    - Example 02 (driver_scheduling): Multi-model indexing
+    - User Guide: Variables and Expressions sections
 """
 
 from dataclasses import dataclass

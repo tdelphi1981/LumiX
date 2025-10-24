@@ -46,7 +46,38 @@ solver_to_use = "ortools"
 
 
 def build_production_model() -> LXModel:
-    """Build the production planning optimization model."""
+    """Build the base production planning optimization model for sensitivity analysis.
+
+    Creates a standard production planning model that will be solved and then
+    analyzed for sensitivity insights including shadow prices, reduced costs,
+    and binding constraints. The model maximizes profit while respecting
+    resource capacity limits and minimum production requirements.
+
+    Returns:
+        An LXModel instance containing:
+            - Variables: production[p] for each product p
+            - Objective: Maximize total profit
+            - Constraints: Resource capacity limits and minimum production
+
+    Example:
+        >>> model = build_production_model()
+        >>> print(model.summary())
+        Model: production_planning
+        Variables: 5
+        Constraints: 8
+        >>> optimizer = LXOptimizer().use_solver("ortools").enable_sensitivity()
+        >>> solution = optimizer.solve(model)
+
+    Notes:
+        This model is identical to the base production model but will be
+        solved with sensitivity analysis enabled (.enable_sensitivity()).
+        The solver must support sensitivity analysis (dual values) to
+        extract shadow prices and reduced costs.
+
+        The model structure remains unchanged from Example 01, but the
+        focus here is on post-solution analysis rather than just finding
+        the optimal solution.
+    """
 
     # Decision Variable: Production quantity for each product
     production = (
@@ -96,7 +127,58 @@ def build_production_model() -> LXModel:
 
 
 def run_sensitivity_analysis():
-    """Run comprehensive sensitivity analysis."""
+    """Run comprehensive sensitivity analysis on the optimal solution.
+
+    This function performs a complete sensitivity analysis workflow that reveals
+    the economic insights hidden in the optimal solution:
+        1. Build and solve the production model with sensitivity enabled
+        2. Analyze shadow prices (dual values) for all constraints
+        3. Identify binding constraints that limit profitability
+        4. Find bottlenecks with high marginal values
+        5. Compute reduced costs for decision variables
+        6. Rank constraints by sensitivity impact
+        7. Generate comprehensive sensitivity reports
+
+    The analysis provides actionable insights for resource investment decisions,
+    capacity planning, and understanding solution robustness.
+
+    Returns:
+        None. Results are printed to console including:
+            - Solution summary with optimal objective value
+            - Comprehensive sensitivity report
+            - Constraint-by-constraint shadow price analysis
+            - Binding constraint identification
+            - Bottleneck ranking and recommendations
+            - Variable reduced cost analysis
+            - Sensitivity summary with key insights
+
+    Example:
+        >>> run_sensitivity_analysis()
+        ============================================================
+        SENSITIVITY ANALYSIS: Production Planning Solution Insights
+        ============================================================
+
+        CONSTRAINT SENSITIVITY ANALYSIS
+        Shadow Price: 2.50 per unit (Labor Hours)
+        Interpretation: Each additional labor hour increases profit by 2.50
+        ...
+
+    Notes:
+        Sensitivity analysis requires:
+            - The optimizer must support dual values (.enable_sensitivity())
+            - The optimal solution must be available (not infeasible/unbounded)
+            - Only works with LP models (not MIP)
+
+        Key concepts demonstrated:
+            - Shadow prices: marginal value of relaxing a constraint by one unit
+            - Reduced costs: opportunity cost of forcing a variable into solution
+            - Binding constraints: constraints satisfied with equality at optimum
+            - Bottlenecks: binding constraints with high shadow prices
+
+        Shadow prices are only valid within the allowable increase/decrease
+        range. Beyond that range, the basis changes and shadow prices become
+        invalid (though this example doesn't compute ranges).
+    """
 
     print("=" * 80)
     print("SENSITIVITY ANALYSIS: Production Planning Solution Insights")
@@ -138,7 +220,7 @@ def run_sensitivity_analysis():
 
             if sens.shadow_price and sens.shadow_price > 0.01:
                 print(
-                    f"    ➜ Interpretation: Each additional unit of this resource "
+                    f"    => Interpretation: Each additional unit of this resource "
                     f"increases profit by ${sens.shadow_price:.2f}"
                 )
 
@@ -258,11 +340,11 @@ def extract_business_insights():
 
         # Investment recommendation
         if sens.shadow_price and sens.shadow_price > 1.0:
-            print(f"     ✓ HIGH PRIORITY: Strong ROI expected from capacity expansion")
+            print(f"     [HIGH PRIORITY]: Strong ROI expected from capacity expansion")
         elif sens.shadow_price and sens.shadow_price > 0.1:
-            print(f"     → MODERATE PRIORITY: Positive ROI from expansion")
+            print(f"     [MODERATE PRIORITY]: Positive ROI from expansion")
         else:
-            print(f"     ✗ LOW PRIORITY: Minimal impact from expansion")
+            print(f"     [LOW PRIORITY]: Minimal impact from expansion")
 
     # Bottleneck analysis
     bottlenecks = analyzer.identify_bottlenecks()
@@ -280,8 +362,8 @@ def extract_business_insights():
             print(f"    Cost of Constraint: ${sens.shadow_price:.2f} per unit shortage")
             print(f"    Recommendation: Expand capacity or optimize usage")
     else:
-        print("\n  ✓ No critical bottlenecks identified")
-        print("  → Current capacity is well-balanced")
+        print("\n  * No critical bottlenecks identified")
+        print("  * Current capacity is well-balanced")
 
     # Production efficiency
     print("\n3. PRODUCTION EFFICIENCY")
@@ -341,7 +423,7 @@ def extract_business_insights():
         print("    - Focus on relaxing the binding constraint")
         print("    - Other resources have slack capacity")
     else:
-        print("\n  ✓ LOW SENSITIVITY:")
+        print("\n  * LOW SENSITIVITY:")
         print("    - No binding constraints")
         print("    - Solution is robust to small parameter changes")
         print("    - Excess capacity available")
@@ -351,7 +433,54 @@ def extract_business_insights():
 
 
 def main():
-    """Run sensitivity analysis examples."""
+    """Run the complete sensitivity analysis example workflow.
+
+    This function orchestrates a comprehensive demonstration of LumiX's
+    sensitivity analysis capabilities by executing two related examples:
+        1. Main sensitivity analysis with shadow prices and reduced costs
+        2. Business insights extraction with investment recommendations
+
+    The workflow demonstrates how to extract actionable business intelligence
+    from optimization solutions by understanding the marginal value of
+    resources and the economic structure of the optimal solution.
+
+    Example:
+        Run this example from the command line::
+
+            $ python sensitivity_analysis.py
+
+        Or import and run programmatically::
+
+            >>> from sensitivity_analysis import main
+            >>> main()
+
+        Expected output includes:
+            - Comprehensive sensitivity reports
+            - Shadow prices for all constraints
+            - Binding constraint identification
+            - Bottleneck analysis and rankings
+            - Variable reduced cost analysis
+            - Investment recommendations based on marginal values
+            - Risk assessment based on solution sensitivity
+
+    Notes:
+        This example demonstrates the complete LXSensitivityAnalyzer workflow:
+            - Solving with sensitivity enabled
+            - Analyzing individual constraints and variables
+            - Identifying bottlenecks and binding constraints
+            - Ranking resources by marginal value
+            - Extracting business insights from dual values
+
+        Sensitivity analysis is a powerful tool for:
+            - Resource investment prioritization
+            - Understanding capacity bottlenecks
+            - Evaluating "what-if" questions
+            - Assessing solution robustness
+            - Making data-driven operational decisions
+
+        The example uses OR-Tools which provides full sensitivity support
+        for linear programming models.
+    """
 
     print("\n")
     print("╔" + "═" * 78 + "╗")
@@ -368,11 +497,11 @@ def main():
     print("ANALYSIS COMPLETE")
     print("=" * 80)
     print("\nKey Takeaways:")
-    print("  ✓ Shadow prices reveal the marginal value of relaxing constraints")
-    print("  ✓ Reduced costs show opportunity costs of changing variable values")
-    print("  ✓ Binding constraints identify current bottlenecks")
-    print("  ✓ Sensitivity analysis supports investment and resource decisions")
-    print("  ✓ Understanding duality provides powerful business insights")
+    print("  * Shadow prices reveal the marginal value of relaxing constraints")
+    print("  * Reduced costs show opportunity costs of changing variable values")
+    print("  * Binding constraints identify current bottlenecks")
+    print("  * Sensitivity analysis supports investment and resource decisions")
+    print("  * Understanding duality provides powerful business insights")
     print()
 
 

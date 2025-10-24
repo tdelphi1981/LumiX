@@ -1,35 +1,82 @@
-"""
-McCormick Envelope Linearization Example: Rectangle Area Optimization
-======================================================================
+"""McCormick Envelope Linearization: Rectangle Area Optimization.
 
-This example demonstrates the automatic linearization of bilinear products
-using McCormick envelopes.
+This example demonstrates automatic linearization of bilinear products using
+McCormick envelopes, a fundamental technique for solving nonlinear optimization
+problems with linear programming solvers.
 
-Problem:
---------
-Maximize the area of a rectangle subject to:
-- Minimum perimeter constraint
-- Individual dimension bounds
+Problem Description:
+    Maximize the area of a rectangle subject to:
+        - Minimum perimeter constraint (2×(length + width) >= MIN_PERIMETER)
+        - Individual dimension bounds (length, width in [MIN, MAX])
 
-The area = length × width is a bilinear product that requires linearization
-for solvers without native quadratic support.
+    The area = length × width is a bilinear product that requires linearization
+    for solvers without native quadratic programming support.
 
-Key Features Demonstrated:
----------------------------
-- Bilinear product linearization (Continuous × Continuous)
-- McCormick envelope technique
-- Automatic auxiliary variable creation
-- Solver-aware linearization
+Mathematical Formulation:
+    Maximize:
+        area = length × width (bilinear product)
+
+    Subject to:
+        - 2×(length + width) >= MIN_PERIMETER
+        - LENGTH_MIN <= length <= LENGTH_MAX
+        - WIDTH_MIN <= width <= WIDTH_MAX
 
 McCormick Envelope Theory:
---------------------------
-For z = x × y with x ∈ [xL, xU], y ∈ [yL, yU], the four constraints:
-    z >= xL*y + yL*x - xL*yL
-    z >= xU*y + yU*x - xU*yU
-    z <= xL*y + yU*x - xL*yU
-    z <= xU*y + yL*x - xU*yL
+    For z = x × y with x in [xL, xU], y in [yL, yU], the tightest linear
+    relaxation (convex hull) is defined by four linear constraints::
 
-form the tightest linear relaxation (convex hull) of the bilinear term.
+        z >= xL*y + yL*x - xL*yL
+        z >= xU*y + yU*x - xU*yU
+        z <= xL*y + yU*x - xL*yU
+        z <= xU*y + yL*x - xU*yL
+
+    These constraints form the convex hull of the bilinear term, providing
+    the tightest possible linear approximation.
+
+Key Features Demonstrated:
+    - **Bilinear product linearization**: Continuous × Continuous variables
+    - **McCormick envelope technique**: Convex hull relaxation
+    - **Automatic auxiliary variable creation**: z = x × y becomes linear
+    - **Solver-aware linearization**: Detects when linearization is needed
+    - **Bound tightening**: Optional refinement of McCormick constraints
+
+Technical Details:
+    The linearizer automatically:
+        1. Detects bilinear products in the objective/constraints
+        2. Creates auxiliary variable z to represent the product
+        3. Adds four McCormick envelope constraints
+        4. Replaces x×y with z throughout the model
+        5. Maintains variable bounds for tightness
+
+Use Cases:
+    McCormick linearization applies to:
+        - Area/volume optimization problems
+        - Pooling and blending problems
+        - Bilinear cost functions
+        - Network flow with fixed charges
+        - Any problem with x×y where both are decision variables
+
+Learning Objectives:
+    1. Understand when and why linearization is needed
+    2. Learn McCormick envelope construction
+    3. Master automatic linearization with LXLinearizer
+    4. Recognize impact of variable bounds on approximation quality
+    5. Interpret linearized model structure and auxiliary variables
+
+See Also:
+    - Example 07 (piecewise_functions): Nonlinear function approximation
+    - LumiX documentation: Linearization module
+    - LXLinearizer API: Configuration and usage
+    - LXNonLinearExpression: Building nonlinear objectives
+
+Prerequisites:
+    Understanding of basic linear programming. Knowledge of quadratic
+    programming is helpful but not required.
+
+Notes:
+    Tighter variable bounds lead to better McCormick approximations.
+    For solvers with native QP support (Gurobi, CPLEX), linearization
+    may not be necessary, but this technique works with any LP solver.
 """
 
 from typing import Any
@@ -64,12 +111,39 @@ solver_to_use = "cplex"
 
 
 def build_rectangle_model():
-    """
-    Build rectangle area maximization model with bilinear objective.
+    """Build rectangle area maximization model with bilinear objective.
+
+    This function constructs a nonlinear optimization model with a bilinear
+    objective function (area = length × width) and linear constraints.
+
+    The model demonstrates:
+        - Scalar variable definition using single-element data sources
+        - Bilinear product in objective function
+        - Linear perimeter constraint
+        - Variable bounds for McCormick envelope construction
 
     Returns:
-        Model with nonlinear objective
+        A tuple containing:
+            - LXModel: Model with nonlinear objective
+            - LXVariable: Length variable for solution access
+            - LXVariable: Width variable for solution access
+
+    Example:
+        >>> model, length, width = build_rectangle_model()
+        >>> print(model.summary())
+        >>> # Check if linearization is needed
+        >>> from lumix.solvers import ORTOOLS_CAPABILITIES
+        >>> needs_lin = ORTOOLS_CAPABILITIES.needs_linearization_for_bilinear()
+        >>> print(f"Needs linearization: {needs_lin}")
+
+    Notes:
+        The bilinear objective will be automatically linearized by LXLinearizer
+        when using solvers that don't support quadratic programming natively.
+
+        Variable bounds are critical for McCormick envelope quality. Tighter
+        bounds result in better approximations of the bilinear product.
     """
+
     # Decision Variables (scalar variables need single-element data source)
     # Using "dimension" as a simple scalar identifier
     scalar_data = ["dim"]
@@ -117,7 +191,39 @@ def build_rectangle_model():
 
 
 def main():
-    """Run the rectangle optimization with linearization."""
+    """Run the rectangle optimization example with linearization.
+
+    This function demonstrates the complete workflow for solving a problem
+    with bilinear terms:
+        1. Build model with nonlinear objective
+        2. Check if linearization is needed for the solver
+        3. Apply McCormick envelope linearization
+        4. Solve the linearized model
+        5. Verify the linearization accuracy
+
+    The workflow shows best practices for:
+        - Detecting linearization requirements
+        - Configuring the linearizer
+        - Analyzing linearization statistics
+        - Validating the approximation quality
+
+    Example:
+        Run this example from the command line::
+
+            $ python rectangle_area.py
+
+        Or import and run programmatically::
+
+            >>> from rectangle_area import main
+            >>> main()
+
+    Notes:
+        The example displays detailed information about:
+            - McCormick envelope constraints generated
+            - Auxiliary variables and constraints added
+            - Linearization accuracy verification
+            - Comparison between exact product and linearized value
+    """
 
     print("=" * 70)
     print("LumiX Example: McCormick Envelope Linearization")
@@ -126,8 +232,8 @@ def main():
 
     print("Problem: Maximize rectangle area (length × width)")
     print(f"  Subject to: 2×(length + width) >= {MIN_PERIMETER}")
-    print(f"  Bounds: length ∈ [{LENGTH_MIN}, {LENGTH_MAX}]")
-    print(f"          width ∈ [{WIDTH_MIN}, {WIDTH_MAX}]")
+    print(f"  Bounds: length in [{LENGTH_MIN}, {LENGTH_MAX}]")
+    print(f"          width in [{WIDTH_MIN}, {WIDTH_MAX}]")
     print()
 
     # Build model with nonlinear objective

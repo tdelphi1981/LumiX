@@ -83,7 +83,17 @@ custom = LXNonLinearFunctions.custom(var, lambda x: my_func(x), linearizer)
 
 ## Running the Example
 
+### Prerequisites
+
 ```bash
+pip install lumix
+pip install ortools  # or cplex, gurobi
+```
+
+### Execute
+
+```bash
+cd examples/07_piecewise_functions
 python exponential_growth.py
 ```
 
@@ -169,8 +179,186 @@ Constraints:
 - **Constraints**: `3` (convexity, input, output)
 - **Solver-specific**: SOS2 marking (no explicit constraints needed)
 
+## Use Cases
+
+Piecewise-linear approximation is valuable for:
+
+1. **Financial Modeling**: Option pricing, interest rate curves
+2. **Economics**: Utility functions, production functions
+3. **Engineering**: Stress-strain curves, thermodynamic properties
+4. **Machine Learning**: Activation functions, loss functions
+5. **Operations Research**: Travel time functions, cost curves
+6. **Physics**: Non-linear physical relationships
+
+## Implementation Details in LumiX
+
+### Creating PWL Approximations
+
+```python
+from lumix import LXModel, LXVariable, LXNonLinearFunctions, LXLinearizer
+
+# Create model and variable
+model = LXModel("investment")
+time = LXVariable[None, float]("time").continuous().bounds(lower=0, upper=10)
+model.add_variable(time)
+
+# Create linearizer
+linearizer = LXLinearizer(model)
+
+# Approximate exp(time) with 30 segments
+growth = LXNonLinearFunctions.exp(
+    time,
+    linearizer,
+    segments=30,
+    adaptive_breakpoints=True  # Recommended!
+)
+
+# Use growth in objective or constraints
+model.maximize(growth)
+```
+
+### Supported Functions
+
+```python
+# Exponential and logarithm
+exp_result = LXNonLinearFunctions.exp(var, linearizer, segments=30)
+log_result = LXNonLinearFunctions.log(var, linearizer, base=10, segments=30)
+ln_result = LXNonLinearFunctions.ln(var, linearizer, segments=30)
+
+# Trigonometric
+sin_result = LXNonLinearFunctions.sin(var, linearizer, segments=50)
+cos_result = LXNonLinearFunctions.cos(var, linearizer, segments=50)
+tan_result = LXNonLinearFunctions.tan(var, linearizer, segments=50)
+
+# Power functions
+square = LXNonLinearFunctions.power(var, 2, linearizer)
+cube = LXNonLinearFunctions.power(var, 3, linearizer)
+sqrt_result = LXNonLinearFunctions.sqrt(var, linearizer)
+
+# Sigmoid and activation
+sigmoid = LXNonLinearFunctions.sigmoid(var, linearizer, segments=40)
+tanh = LXNonLinearFunctions.tanh(var, linearizer, segments=40)
+relu = LXNonLinearFunctions.relu(var, linearizer)
+
+# Absolute value
+abs_val = LXNonLinearFunctions.abs(var, linearizer)
+
+# Custom function
+def my_function(x):
+    return x**3 - 2*x**2 + 5
+
+custom = LXNonLinearFunctions.custom(
+    var,
+    my_function,
+    linearizer,
+    segments=40,
+    adaptive_breakpoints=True
+)
+```
+
+## Performance Considerations
+
+### Segment Count Trade-off
+
+| Segments | Accuracy | Variables Added | Constraints Added | Solve Time |
+|----------|----------|-----------------|-------------------|------------|
+| 10 | Low | 11 | 3 | Fast |
+| 20 | Medium | 21 | 3 | Fast |
+| 30 | Good | 31 | 3 | Medium |
+| 50 | High | 51 | 3 | Medium |
+| 100 | Very High | 101 | 3 | Slow |
+
+**Recommendation**: Start with 20-30 segments, increase if accuracy is insufficient.
+
+### Adaptive vs Uniform Breakpoints
+
+**Uniform Breakpoints**: Equal spacing across domain
+```python
+segments=30, adaptive_breakpoints=False
+```
+
+**Adaptive Breakpoints**: More breakpoints where curvature is high
+```python
+segments=30, adaptive_breakpoints=True  # Recommended
+```
+
+**Accuracy Improvement**: Adaptive breakpoints can be 10-100× more accurate for the same segment count!
+
+## Advanced: Creating Custom Functions
+
+```python
+def custom_cost_function(x):
+    """Custom non-linear cost function"""
+    if x < 10:
+        return 5 * x
+    elif x < 50:
+        return 50 + 4 * (x - 10)  # Volume discount
+    else:
+        return 210 + 3 * (x - 50)  # Bulk discount
+
+# Approximate with PWL
+cost_approx = LXNonLinearFunctions.custom(
+    quantity,
+    custom_cost_function,
+    linearizer,
+    segments=20,
+    domain_min=0,
+    domain_max=100
+)
+
+# Use in model
+model.minimize(cost_approx)
+```
+
+## Limitations
+
+1. **Approximation**: PWL is an approximation, not exact (except at breakpoints)
+2. **Domain Bounds**: Must specify variable bounds (domain)
+3. **Segment Overhead**: More segments = more variables and slower solves
+4. **Solver Support**: SOS2 requires solver support (OR-Tools, CPLEX, Gurobi)
+
+## Comparison: PWL vs Other Approaches
+
+### vs Bilinear (McCormick)
+
+| Feature | PWL | McCormick |
+|---------|-----|-----------|
+| **Applicability** | Any univariate function | Only x × y products |
+| **Exactness** | Approximate | Exact for some problems |
+| **Overhead** | n variables, 3 constraints | 1 variable, 4 constraints |
+| **Accuracy** | Tunable (segment count) | Fixed (depends on bounds) |
+
+### vs Polynomial Approximation
+
+| Feature | PWL | Polynomial |
+|---------|-----|------------|
+| **Flexibility** | Very flexible | Limited by degree |
+| **Local Fit** | Excellent | Good globally, poor locally |
+| **Oscillation** | No oscillation | Runge's phenomenon |
+| **Implementation** | Simple (linear segments) | Complex (high-degree terms) |
+
 ## See Also
 
-- **Bilinear products**: See `examples/06_mccormick_bilinear/`
-- **McCormick envelopes**: For continuous × continuous products
-- **Function library**: Full list in documentation
+- **Example 06 (McCormick Bilinear)**: For continuous × continuous products
+- **Example 03 (Facility Location)**: Big-M technique for binary × continuous
+- **Goal Programming (Example 11)**: Combining linear and nonlinear objectives
+- **LumiX Documentation**: Nonlinear module and function library reference
+
+## Files in This Example
+
+- `exponential_growth.py`: Investment optimization with exponential growth
+- `README.md`: This documentation file
+
+## References
+
+- Beale, E. M. L., & Tomlin, J. A. (1970). "Special facilities in a general mathematical programming system for non-convex problems using ordered sets of variables"
+- Vielma, J. P., Ahmed, S., & Nemhauser, G. (2010). "Mixed-integer models for nonseparable piecewise-linear optimization"
+
+## Next Steps
+
+1. Try different segment counts and measure accuracy
+2. Compare adaptive vs uniform breakpoints
+3. Implement custom functions for your domain
+4. Combine multiple nonlinear functions in one model
+5. Experiment with different formulations (SOS2, incremental, logarithmic)
+6. Measure solve time vs accuracy trade-offs

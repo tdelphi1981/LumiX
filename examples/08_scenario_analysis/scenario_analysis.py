@@ -1,28 +1,72 @@
-"""
-Scenario Analysis Example: Business Planning with What-If Scenarios
-====================================================================
+"""Scenario Analysis Example: Business Planning with What-If Scenarios.
 
-This example demonstrates LumiX's scenario analysis capabilities for
-exploring different business conditions and strategic decisions.
+This example demonstrates LumiX's scenario analysis capabilities for exploring
+different business conditions and strategic decisions through systematic
+comparison of multiple optimization scenarios.
 
-Problem: A manufacturing company wants to understand how different
-scenarios (market expansion, resource constraints, cost changes) would
-affect their optimal production plan and profitability.
+Problem Description:
+    A manufacturing company has an existing production optimization model
+    and wants to understand how their optimal production plan and profitability
+    would change under different business scenarios:
+
+    - **Market Expansion**: Increased demand and higher capacity
+    - **Resource Constraint**: Reduced capacity due to supply chain issues
+    - **Cost Changes**: Different raw material and labor costs
+    - **New Product Introduction**: Adding new product lines
+
+    The goal is to compare these scenarios side-by-side to inform strategic
+    planning and resource allocation decisions.
+
+Mathematical Formulation:
+    Base Model:
+        Maximize: sum(profit[p] * production[p])
+        Subject to: sum(usage[p,r] * production[p]) <= capacity[r] for all r
+
+    Scenarios modify:
+        - Constraint RHS values (capacity[r])
+        - Variable bounds (production[p])
+        - Objective coefficients (profit[p])
 
 Key Features Demonstrated:
-- Creating multiple business scenarios
-- Modifying constraint RHS (capacity, budget)
-- Modifying variable bounds (production limits)
-- Running and comparing scenarios
-- Sensitivity to parameter ranges
-- Best scenario identification
-- Practical business insights
+    - **LXScenario**: Creating named scenarios with modifications
+    - **LXScenarioModification**: Constraint RHS and variable bound changes
+    - **LXScenarioAnalyzer**: Running and comparing multiple scenarios
+    - **Comparative Analysis**: Side-by-side scenario comparison
+    - **Best Scenario Identification**: Ranking scenarios by objective value
+    - **Business Insights**: Translating technical results to decisions
 
 Use Cases:
-- Strategic planning and forecasting
-- Resource allocation decisions
-- Investment prioritization
-- Risk assessment
+    This pattern is essential for:
+        - Strategic planning and forecasting (3-5 year plans)
+        - Resource allocation decisions (capital budgeting)
+        - Investment prioritization (which projects to fund)
+        - Risk assessment (sensitivity to external factors)
+        - Business continuity planning (supply chain disruptions)
+        - Market analysis (expansion vs consolidation)
+
+Learning Objectives:
+    1. How to create and configure business scenarios
+    2. How to modify constraints and variable bounds
+    3. How to run scenario analysis systematically
+    4. How to compare and interpret scenario results
+    5. How to identify the optimal strategy under uncertainty
+
+Prerequisites:
+    Before this example, complete:
+        - Example 01 (production_planning): Base optimization model
+        - Example 04 (basic_lp): Understanding variable bounds
+
+See Also:
+    - Example 09 (sensitivity_analysis): Shadow prices and reduced costs
+    - Example 10 (whatif_analysis): Quick tactical parameter changes
+    - User Guide: Scenario Analysis section
+
+Notes:
+    Scenario analysis differs from sensitivity analysis:
+        - Scenario: Tests discrete business cases (e.g., "market expansion")
+        - Sensitivity: Continuous parameter variation (e.g., capacity +/- 10%)
+
+    Both are valuable and complementary analysis techniques.
 """
 
 from lumix import (
@@ -44,7 +88,33 @@ solver_to_use = "ortools"
 
 
 def build_production_model() -> LXModel:
-    """Build the base production planning optimization model."""
+    """Build the base production planning optimization model for scenario analysis.
+
+    Creates a standard production planning model that will serve as the base
+    for scenario modifications. The model maximizes profit while respecting
+    resource capacity constraints and minimum production requirements.
+
+    Returns:
+        An LXModel instance with:
+            - Variables: production[p] for each product p
+            - Objective: Maximize total profit
+            - Constraints: Resource capacities and minimum production levels
+
+    Example:
+        >>> model = build_production_model()
+        >>> print(model.summary())
+        Model: production_planning
+        Variables: 5
+        Constraints: 8
+
+    Notes:
+        This base model will be reused across all scenarios. Each scenario
+        will create modifications (constraint RHS changes, bound changes)
+        without altering the base model structure.
+
+        The model is intentionally generic to demonstrate how scenario
+        analysis can be applied to any optimization model.
+    """
 
     # Decision Variable: Production quantity for each product
     production = (
@@ -94,7 +164,49 @@ def build_production_model() -> LXModel:
 
 
 def run_scenario_analysis():
-    """Run comprehensive scenario analysis."""
+    """Run comprehensive scenario analysis across multiple business conditions.
+
+    This function orchestrates a complete scenario analysis workflow by:
+        1. Building the base production optimization model
+        2. Creating 6 distinct business scenarios with different resource conditions
+        3. Solving all scenarios systematically
+        4. Comparing results to identify the optimal strategy
+        5. Performing sensitivity analysis on labor capacity
+        6. Providing actionable business insights
+
+    The scenarios tested include market expansion, resource constraints, moderate
+    growth, labor investment, automation, and material procurement strategies.
+    Each scenario modifies constraint RHS values to reflect different business
+    conditions.
+
+    Returns:
+        None. Results are printed to console including:
+            - Scenario comparison table
+            - Best scenario identification
+            - Labor capacity sensitivity analysis
+            - Strategic recommendations and risk assessment
+
+    Example:
+        >>> run_scenario_analysis()
+        ============================================================
+        SCENARIO ANALYSIS: Production Planning Under Different Conditions
+        ============================================================
+        Creating 6 business scenarios...
+        Best Scenario: market_expansion
+        Objective Value: 12345.67
+        ...
+
+    Notes:
+        This function demonstrates the complete LXScenarioAnalyzer workflow:
+            - Creating scenarios with .modify_constraint_rhs()
+            - Running batch analysis with .run_all_scenarios()
+            - Comparing scenarios with .compare_scenarios()
+            - Parameter sensitivity with .sensitivity_to_parameter()
+
+        The function includes a baseline scenario automatically for comparison.
+        Labor capacity sensitivity tests multipliers from 0.7x to 1.5x to
+        understand the profit-capacity relationship.
+    """
 
     print("=" * 80)
     print("SCENARIO ANALYSIS: Production Planning Under Different Conditions")
@@ -310,7 +422,47 @@ def compare_investment_scenarios():
 
 
 def main():
-    """Run scenario analysis examples."""
+    """Run the complete scenario analysis example workflow.
+
+    This function executes a comprehensive demonstration of LumiX's scenario
+    analysis capabilities by running two related examples:
+        1. Main scenario analysis with 6 business scenarios
+        2. Investment scenario comparison for capital allocation decisions
+
+    The workflow demonstrates how scenario analysis supports strategic
+    decision-making by comparing multiple what-if cases systematically.
+    Results include scenario rankings, sensitivity analysis, and actionable
+    business recommendations.
+
+    Example:
+        Run this example from the command line::
+
+            $ python scenario_analysis.py
+
+        Or import and run programmatically::
+
+            >>> from scenario_analysis import main
+            >>> main()
+
+        Expected output includes:
+            - Scenario comparison tables
+            - Best scenario identification
+            - Labor capacity sensitivity curves
+            - Investment option rankings
+            - Business insights and recommendations
+
+    Notes:
+        This is a comprehensive example that demonstrates:
+            - LXScenario creation and configuration
+            - LXScenarioModification for constraint RHS changes
+            - LXScenarioAnalyzer for batch scenario execution
+            - Comparative analysis and ranking
+            - Parameter sensitivity analysis
+
+        The example uses OR-Tools as the solver and demonstrates how to
+        systematically explore different business strategies through
+        optimization modeling.
+    """
 
     print("\n")
     print("╔" + "═" * 78 + "╗")
@@ -327,10 +479,10 @@ def main():
     print("ANALYSIS COMPLETE")
     print("=" * 80)
     print("\nKey Takeaways:")
-    print("  ✓ Scenario analysis helps explore different business conditions")
-    print("  ✓ Sensitivity analysis identifies most impactful parameters")
-    print("  ✓ Comparing scenarios enables data-driven decision making")
-    print("  ✓ What-if analysis supports strategic planning and risk assessment")
+    print("  * Scenario analysis helps explore different business conditions")
+    print("  * Sensitivity analysis identifies most impactful parameters")
+    print("  * Comparing scenarios enables data-driven decision making")
+    print("  * What-if analysis supports strategic planning and risk assessment")
     print()
 
 

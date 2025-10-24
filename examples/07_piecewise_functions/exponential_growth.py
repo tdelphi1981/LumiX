@@ -1,29 +1,79 @@
-"""
-Piecewise-Linear Approximation Example: Exponential Growth Investment
-======================================================================
+"""Piecewise-Linear Approximation: Exponential Growth Investment Model.
 
-This example demonstrates piecewise-linear approximation of nonlinear
-functions using the LumiX linearization library.
+This example demonstrates piecewise-linear approximation of nonlinear functions
+using LumiX's linearization library with adaptive breakpoint generation and
+SOS2 formulation for efficient solving.
 
-Problem:
---------
-Optimize investment allocation to maximize total return with exponential
-growth, subject to budget constraints.
+Problem Description:
+    Optimize investment allocation to maximize total return with exponential
+    growth, subject to budget constraints. The return function exhibits
+    exponential growth that must be approximated using piecewise-linear segments.
 
-Return = investment_amount × exp(growth_rate × time)
+    Return = investment_amount × exp(growth_rate × time)
+
+Mathematical Formulation:
+    Maximize:
+        sum(return[i] for i in investments)
+
+    Subject to:
+        - sum(amount[i]) <= TOTAL_BUDGET
+        - return[i] = amount[i] × exp(effective_rate[i] × TIME_HORIZON)
+        - amount[i] ∈ [min[i], max[i]] for all i
 
 Key Features Demonstrated:
----------------------------
-- Piecewise-linear approximation of exp() function
-- Adaptive breakpoint generation (more segments where function curves)
-- SOS2 formulation for efficient solving
-- Nonlinear function library usage
+    - **Piecewise-linear approximation**: Approximating exp() function
+    - **Adaptive breakpoint generation**: More segments where function curves sharply
+    - **SOS2 formulation**: Special Ordered Set for efficient piecewise representation
+    - **Nonlinear function library**: Using LXNonLinearFunctions utility
+    - **Convex approximation**: Piecewise-linear underestimation of convex functions
 
 Technical Details:
-------------------
-The exponential function e^x is approximated using a piecewise-linear
-function with adaptive breakpoints. The adaptive algorithm places more
-breakpoints where the second derivative is large (function curves sharply).
+    Piecewise-Linear Approximation:
+        The exponential function e^x is approximated using a piecewise-linear
+        function with adaptive breakpoints. The adaptive algorithm places more
+        breakpoints where the second derivative is large (function curves sharply),
+        resulting in better accuracy with fewer total segments.
+
+    SOS2 (Special Ordered Set Type 2):
+        An efficient formulation where at most two adjacent lambda variables
+        can be nonzero, representing linear interpolation between breakpoints.
+        This is more efficient than binary variable big-M formulations.
+
+    Adaptive Breakpoints:
+        The algorithm samples the function at many points and computes the
+        second derivative |f''(x)|. More breakpoints are placed where the
+        curvature is high, optimizing approximation quality.
+
+Use Cases:
+    Piecewise-linear approximation applies to:
+        - Investment return modeling (exponential, logarithmic)
+        - Production cost curves (economies of scale)
+        - Revenue functions with diminishing returns
+        - Nonlinear pricing structures
+        - Any smooth nonlinear function approximation
+
+Learning Objectives:
+    1. Understand piecewise-linear approximation theory
+    2. Learn adaptive breakpoint generation techniques
+    3. Master SOS2 formulation for piecewise functions
+    4. Use LXPiecewiseLinearizer for automatic approximation
+    5. Evaluate approximation accuracy vs. segment count trade-offs
+
+See Also:
+    - Example 06 (mccormick_bilinear): Bilinear term linearization
+    - LumiX documentation: Piecewise Linearization
+    - LXPiecewiseLinearizer API: Configuration options
+    - LXNonLinearFunctions: Library of common nonlinear functions
+
+Prerequisites:
+    Basic understanding of linear programming. Familiarity with
+    nonlinear optimization is helpful but not required.
+
+Notes:
+    For convex functions (like exp), piecewise-linear approximation
+    provides a lower bound. For concave functions, it provides an
+    upper bound. Approximation quality improves with more segments
+    and adaptive breakpoint placement.
 """
 
 import math
@@ -62,12 +112,38 @@ solver_to_use = "ortools"
 
 
 def build_investment_model():
-    """
-    Build investment optimization model with exponential returns.
+    """Build investment optimization model with exponential returns.
+
+    This function constructs an optimization model where investment returns
+    follow an exponential growth pattern, simplified to linear form for
+    demonstration purposes.
+
+    In a real piecewise-linear scenario, the model would use:
+        - LXPiecewiseLinearizer to approximate exp(variable) functions
+        - SOS2 constraints for efficient piecewise representation
+        - Adaptive breakpoints for accurate approximation
 
     Returns:
-        Model with piecewise-linear approximations
+        A tuple containing:
+            - LXModel: The optimization model
+            - list[LXVariable]: Investment amount variables
+
+    Example:
+        >>> model, vars = build_investment_model()
+        >>> print(model.summary())
+        >>> optimizer = LXOptimizer().use_solver("ortools")
+        >>> solution = optimizer.solve(model)
+
+    Notes:
+        This simplified version uses linear multipliers pre-computed
+        from the exponential function. For true nonlinear modeling with
+        variables in the exponent, use LXPiecewiseLinearizer to create
+        piecewise-linear approximations of exp(variable).
+
+        The effective rate accounts for risk: higher risk reduces
+        the effective growth rate.
     """
+
     model = LXModel("exponential_investment")
 
     # Create linearizer for nonlinear functions
@@ -136,9 +212,34 @@ def build_investment_model():
 
 
 def demonstrate_piecewise_approximation():
+    """Demonstrate piecewise-linear approximation of exponential function.
+
+    This function illustrates the key concepts of piecewise-linear approximation:
+        - Adaptive breakpoint generation based on function curvature
+        - SOS2 formulation for efficient interpolation
+        - Trade-offs between segment count and accuracy
+
+    The demonstration shows how to approximate f(t) = exp(t) over a domain
+    [0, 10] using 30 segments with adaptive breakpoint placement.
+
+    Example:
+        >>> demonstrate_piecewise_approximation()
+        # Displays:
+        # - Approximation method details
+        # - Number of auxiliary variables and constraints
+        # - Explanation of adaptive breakpoint algorithm
+
+    Notes:
+        Adaptive breakpoints work by:
+            1. Sampling the function at many points
+            2. Computing second derivative |f''(x)| at each point
+            3. Placing more breakpoints where |f''(x)| is large
+            4. Ensuring smooth, accurate piecewise-linear representation
+
+        For exp(t), f''(t) = exp(t), so more breakpoints are placed
+        at larger t values where the function grows most rapidly.
     """
-    Demonstrate piecewise-linear approximation of exponential function.
-    """
+
     print("=" * 70)
     print("Demonstrating Piecewise-Linear Approximation")
     print("=" * 70)
@@ -196,7 +297,35 @@ def demonstrate_piecewise_approximation():
 
 
 def main():
-    """Run the investment optimization example."""
+    """Run the complete investment optimization example with piecewise approximation.
+
+    This function demonstrates:
+        1. Piecewise-linear approximation theory and concepts
+        2. Building an investment optimization model
+        3. Solving with exponential return functions
+        4. Interpreting optimal allocation results
+
+    The workflow showcases:
+        - Adaptive breakpoint generation demonstration
+        - Investment problem formulation and solving
+        - ROI calculations and result interpretation
+
+    Example:
+        Run this example from the command line::
+
+            $ python exponential_growth.py
+
+        Or import and run programmatically::
+
+            >>> from exponential_growth import main
+            >>> main()
+
+    Notes:
+        The example first demonstrates piecewise approximation concepts,
+        then solves a practical investment allocation problem. Results
+        show optimal allocation across different investment vehicles with
+        varying risk-return profiles.
+    """
 
     print("=" * 70)
     print("LumiX Example: Piecewise-Linear Function Approximation")
