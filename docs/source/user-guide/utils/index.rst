@@ -6,11 +6,12 @@ Comprehensive guide to using LumiX's utility modules for enhanced functionality.
 Introduction
 ------------
 
-The utils module provides three categories of utilities to enhance your LumiX experience:
+The utils module provides four categories of utilities to enhance your LumiX experience:
 
 1. **Logging**: Enhanced logging specifically designed for optimization models
 2. **ORM Integration**: Type-safe integration with database ORMs
 3. **Rational Conversion**: Float-to-rational conversion for integer-only solvers
+4. **Model Copying**: ORM-safe model copying for what-if and scenario analysis
 
 These utilities are designed to integrate seamlessly with the core LumiX functionality
 while remaining optional - you can use whichever components fit your workflow.
@@ -42,6 +43,7 @@ Module Components
    logging
    orm-integration
    rational-conversion
+   model-copying
 
 Logging Utilities
 ~~~~~~~~~~~~~~~~~
@@ -111,6 +113,36 @@ The :doc:`rational-conversion` guide covers float-to-rational conversion:
    # Convert coefficients
    coeffs = {"x1": 3.5, "x2": 2.333, "x3": 1.25}
    int_coeffs, denom = converter.convert_coefficients(coeffs)
+
+Model Copying
+~~~~~~~~~~~~~
+
+The :doc:`model-copying` guide covers ORM-safe model copying:
+
+- **Purpose**: Safely copy models with ORM data sources for analysis
+- **Key Features**: Automatic ORM detachment, session independence, lambda closure handling
+- **When to Use**: What-if analysis, scenario analysis, any workflow requiring model copies
+
+**Quick Example:**
+
+.. code-block:: python
+
+   from copy import deepcopy
+   from lumix import LXModel, LXVariable
+
+   # Build model with SQLAlchemy data
+   production = LXVariable[Product, float]("production")
+       .from_model(session)  # Uses ORM session
+
+   model = LXModel("production").add_variable(production)
+
+   # Copy works automatically! ORM objects detached
+   modified_model = deepcopy(model)  # ✓ Success
+
+   # Use for what-if analysis
+   from lumix.analysis import LXWhatIfAnalyzer
+   analyzer = LXWhatIfAnalyzer(model, optimizer)
+   result = analyzer.increase_constraint_rhs("capacity", by=100)
 
 Common Use Cases
 ----------------
@@ -283,9 +315,12 @@ Explore each component in detail:
 - :doc:`logging` - Complete logging guide
 - :doc:`orm-integration` - ORM integration patterns
 - :doc:`rational-conversion` - Rational conversion algorithms
+- :doc:`model-copying` - ORM-safe model copying strategy
 
 Or continue to:
 
 - :doc:`/api/utils/index` - Detailed API reference
+- :doc:`/user-guide/analysis/whatif` - What-if analysis guide (uses model copying)
+- :doc:`/tutorials/production_planning/step7_whatif` - Tutorial with model copying
 - :doc:`/development/utils-architecture` - Architecture details
 - :doc:`/examples/index` - Working examples

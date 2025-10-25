@@ -527,10 +527,158 @@ When to Use What-If vs. Scenario Analysis
 - Use **scenario** for comparing complete alternative futures systematically
 - Use **both** together for comprehensive analysis
 
+Model Copying with ORM Integration
+-----------------------------------
+
+Under the Hood
+~~~~~~~~~~~~~~
+
+What-if analysis requires creating modified copies of your model without affecting the original. The ``LXWhatIfAnalyzer`` uses Python's ``deepcopy`` internally:
+
+.. code-block:: python
+
+   from copy import deepcopy
+
+   # What-if analyzer does this internally
+   modified_model = deepcopy(original_model)
+   modified_model.constraints[0].rhs_value = new_value
+   modified_solution = optimizer.solve(modified_model)
+
+ORM Challenges
+~~~~~~~~~~~~~~
+
+When using ORM frameworks (SQLAlchemy, Django), model copying faces challenges:
+
+**Problem**: ORM objects are bound to database sessions and cannot be pickled/deep copied directly.
+
+**Solution**: LumiX implements automatic **ORM detachment** in ``__deepcopy__`` methods.
+
+How It Works
+~~~~~~~~~~~~
+
+1. **Detect ORM Objects**: Identify SQLAlchemy (``_sa_instance_state``) or Django (``_state``, ``_meta``) instances
+2. **Materialize Data**: Force-load lazy relationships before copying
+3. **Detach from Session**: Create plain Python objects with same attributes
+4. **Handle Closures**: Inspect lambda closures for captured ORM objects and detach them
+5. **Deep Copy**: Use standard ``deepcopy`` with detached objects
+
+Example with SQLAlchemy
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from sqlalchemy.orm import Session
+   from lumix import LXModel, LXVariable, LXWhatIfAnalyzer
+
+   # Build model with ORM data (session-bound objects)
+   session = Session(engine)
+   products = session.query(Product).all()  # SQLAlchemy objects
+
+   production = LXVariable[Product, float]("production")
+       .continuous()
+       .indexed_by(lambda p: p.id)
+       .from_data(products)  # Uses ORM objects
+
+   model = LXModel("production").add_variable(production)
+
+   # What-if analyzer handles ORM detachment automatically
+   analyzer = LXWhatIfAnalyzer(model, optimizer)
+
+   # This works! Model is copied with ORM detachment
+   result = analyzer.increase_constraint_rhs("capacity", by=100)
+
+**Behind the scenes:**
+
+1. ``LXWhatIfAnalyzer`` calls ``deepcopy(model)``
+2. ``LXModel.__deepcopy__`` detaches all ORM objects
+3. Modified model is independent of database session
+4. Safe to solve and compare
+
+The copy_utils Module
+~~~~~~~~~~~~~~~~~~~~~~
+
+LumiX provides utilities in ``lumix.utils.copy_utils`` for ORM-safe copying:
+
+.. code-block:: python
+
+   from lumix.utils.copy_utils import (
+       detach_orm_object,
+       materialize_and_detach_list,
+       copy_function_detaching_closure
+   )
+
+   # Detach single ORM object
+   product = session.query(Product).first()
+   detached = detach_orm_object(product)
+   # Now safe to pickle/deepcopy
+
+   # Detach list of ORM objects
+   products = session.query(Product).all()
+   detached_list = materialize_and_detach_list(products, {})
+
+   # Copy lambda with ORM object in closure
+   profit_func = lambda p: product.profit * p.quantity
+   safe_func = copy_function_detaching_closure(profit_func, {})
+
+These utilities are automatically used by ``__deepcopy__`` methods in core classes.
+
+Supported ORMs
+~~~~~~~~~~~~~~
+
+- **SQLAlchemy**: Full support with automatic session detachment
+- **Django ORM**: Full support with field value copying
+- **Plain Python**: No modification needed (pass-through)
+
+For complete details, see :doc:`/user-guide/utils/model-copying`.
+
+Best Practices with ORM
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. **Use Eager Loading**
+
+   Load all needed data before what-if analysis to avoid lazy-loading errors:
+
+   .. code-block:: python
+
+      from sqlalchemy.orm import joinedload
+
+      products = session.query(Product).options(
+          joinedload(Product.materials),
+          joinedload(Product.machine_requirements)
+      ).all()
+
+2. **Close Session After Model Building**
+
+   Once the model is built, the session is no longer needed:
+
+   .. code-block:: python
+
+      model = build_model(session)
+      session.close()  # Safe to close
+
+      # What-if analysis still works
+      analyzer = LXWhatIfAnalyzer(model, optimizer)
+      result = analyzer.increase_constraint_rhs("capacity", by=100)
+
+3. **Avoid Complex Closures**
+
+   Keep lambda functions simple to avoid pickling issues:
+
+   .. code-block:: python
+
+      # Bad: Complex closure with session
+      bad_func = lambda p: session.query(...).first().cost  # ❌
+
+      # Good: Simple value capture
+      cost = product.cost
+      good_func = lambda p: cost * p.quantity  # ✓
+
 Next Steps
 ----------
 
 - :doc:`sensitivity` - Understand shadow prices and reduced costs
 - :doc:`scenario` - Compare multiple scenarios systematically
+- :doc:`/user-guide/utils/model-copying` - Deep dive into ORM-safe copying
 - :doc:`/api/analysis/index` - Complete API reference
+- :doc:`/tutorials/production_planning/step7_whatif` - Tutorial with what-if analysis
 - :doc:`/development/analysis-architecture` - Architecture details

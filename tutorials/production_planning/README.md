@@ -1,6 +1,6 @@
 # Manufacturing Production Planning Tutorial
 
-A comprehensive 4-step tutorial demonstrating how to build production planning solutions using LumiX with SQLAlchemy ORM, progressing from basic continuous variable optimization to large-scale multi-period planning with goal programming.
+A comprehensive 7-step tutorial demonstrating how to build production planning solutions using LumiX with SQLAlchemy ORM, progressing from basic continuous variable optimization to advanced what-if analysis with ORM-safe model copying.
 
 ## 📚 Full Documentation
 
@@ -23,6 +23,9 @@ This tutorial teaches you how to solve a real-world manufacturing production pla
 - **Step 2**: Database integration with SQLAlchemy ORM and persistent storage
 - **Step 3**: Goal programming with customer orders and priorities
 - **Step 4**: Large-scale multi-period planning with setup costs and inventory
+- **Step 5**: Scenario analysis for comparing business conditions
+- **Step 6**: Sensitivity analysis with shadow prices and marginal values
+- **Step 7**: What-if analysis with interactive parameter exploration
 
 By the end of this tutorial, you'll understand:
 - Continuous variables for quantity optimization
@@ -34,6 +37,10 @@ By the end of this tutorial, you'll understand:
 - Multi-period planning with inventory management
 - Setup costs and production batches
 - Large-scale optimization (160x more variables than Step 1)
+- Scenario analysis for strategic planning
+- Sensitivity analysis for understanding parameter impacts
+- What-if analysis for tactical decision support
+- ORM-safe model copying for analysis workflows
 
 ## Problem Description
 
@@ -47,8 +54,8 @@ By the end of this tutorial, you'll understand:
 
 **Data Scale by Step**:
 
-| Element | Step 1-3 | Step 4 |
-|---------|----------|--------|
+| Element | Step 1-3 | Step 4-7 |
+|---------|----------|----------|
 | Products | 3 | 9 (3x) |
 | Machines | 2 | 6 (3x) |
 | Materials | 3 | 9 (3x) |
@@ -56,6 +63,7 @@ By the end of this tutorial, you'll understand:
 | Customers | 5 | 8 |
 | Orders | 9 | 15 across periods |
 | Variables | ~10 | ~1,600 (160x) |
+| Analysis | Basic | Scenario/Sensitivity/What-If |
 
 ## Tutorial Structure
 
@@ -186,6 +194,93 @@ By the end of this tutorial, you'll understand:
 
 ---
 
+### Step 5: Scenario Analysis 🎭
+
+**Focus**: Comparing multiple business scenarios systematically
+
+**What you'll learn**:
+- Scenario definition and management
+- Optimistic/baseline/pessimistic scenarios
+- Market demand sensitivity analysis
+- Capacity expansion scenarios
+- Multi-scenario result comparison
+- Scenario visualization in HTML reports
+
+**Key LumiX features**:
+- `LXScenarioAnalyzer` for systematic comparison
+- Scenario modification patterns
+- Batch scenario execution
+- Result aggregation and reporting
+
+**Files**:
+- `production_scenarios.py`: Scenario analysis implementation
+- `report_generator.py`: Enhanced reports with scenario comparison
+- `README.md`: Scenario analysis documentation
+
+[📖 Go to Step 5](step5_scenario_analysis/)
+
+---
+
+### Step 6: Sensitivity Analysis 📊
+
+**Focus**: Understanding marginal values and parameter impacts
+
+**What you'll learn**:
+- Shadow prices (marginal values of resources)
+- Reduced costs (opportunity costs)
+- Binding vs non-binding constraints
+- Bottleneck identification using dual information
+- Valid ranges for parameter changes
+- Sensitivity reporting and visualization
+
+**Key LumiX features**:
+- `LXSensitivityAnalyzer` for dual analysis
+- Shadow price extraction
+- Binding constraint identification
+- Sensitivity range calculation
+- Comprehensive sensitivity reports
+
+**Files**:
+- `production_sensitivity.py`: Sensitivity analysis implementation
+- `report_generator.py`: Reports with sensitivity analysis
+- `README.md`: Sensitivity analysis documentation
+
+[📖 Go to Step 6](step6_sensitivity_analysis/)
+
+---
+
+### Step 7: What-If Analysis 🔍
+
+**Focus**: Interactive parameter exploration for tactical decisions
+
+**What you'll learn**:
+- Interactive what-if scenarios
+- Bottleneck identification by testing all constraints
+- Investment ROI comparison
+- Sensitivity range analysis (profit curves)
+- Risk assessment (downside scenarios)
+- **ORM-safe model copying** for what-if analysis
+- Model detachment from database sessions
+
+**Key LumiX features**:
+- `LXWhatIfAnalyzer` for interactive exploration
+- `increase_constraint_rhs()` / `decrease_constraint_rhs()`
+- `find_bottlenecks()` for systematic testing
+- `relax_constraint()` / `tighten_constraint()`
+- **Deep copy with ORM detachment** (`copy_utils` module)
+- Automatic session detachment for SQLAlchemy/Django
+
+**Files**:
+- `production_whatif.py`: What-if analysis implementation
+- `report_generator.py`: Reports with what-if visualizations
+- `README.md`: What-if analysis and ORM copying documentation
+
+**New Feature**: This step demonstrates LumiX's ORM-safe model copying strategy, which enables what-if analysis on models using SQLAlchemy or Django data sources. The `copy_utils` module automatically detaches ORM objects from database sessions during deep copy operations.
+
+[📖 Go to Step 7](step7_whatif_analysis/)
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -239,6 +334,51 @@ python sample_data.py
 python production_scaled.py
 ```
 
+### Step 5: Scenario Analysis
+
+```bash
+cd tutorials/production_planning/step5_scenario_analysis
+
+# First, populate the database
+python sample_data.py
+
+# Then run scenario analysis
+python production_scenarios.py
+
+# View the HTML report with scenario comparison
+open production_scenarios_report.html  # macOS
+```
+
+### Step 6: Sensitivity Analysis
+
+```bash
+cd tutorials/production_planning/step6_sensitivity_analysis
+
+# First, populate the database
+python sample_data.py
+
+# Then run sensitivity analysis
+python production_sensitivity.py
+
+# View the HTML report with sensitivity analysis
+open production_sensitivity_report.html  # macOS
+```
+
+### Step 7: What-If Analysis
+
+```bash
+cd tutorials/production_planning/step7_whatif_analysis
+
+# First, populate the database
+python sample_data.py
+
+# Then run what-if analysis (may take 30-60 seconds for all scenarios)
+python production_whatif.py
+
+# View the HTML report with what-if analysis
+open production_whatif_report.html  # macOS
+```
+
 ## Learning Path
 
 ### For Beginners
@@ -273,6 +413,16 @@ Go to **Step 4** for:
 - Setup costs and batch constraints
 - Inventory management
 - Performance optimization techniques
+
+### For Advanced Analysis Workflows
+
+Complete **Steps 5-7** for:
+- **Step 5**: Scenario analysis and strategic planning
+- **Step 6**: Sensitivity analysis and bottleneck identification
+- **Step 7**: What-if analysis and tactical decision support
+- ORM-safe model copying for analysis
+- Investment ROI comparison
+- Risk assessment and contingency planning
 
 ## Key Concepts Demonstrated
 

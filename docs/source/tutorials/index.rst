@@ -68,7 +68,7 @@ A comprehensive 4-step tutorial demonstrating how to build a complete course tim
 Manufacturing Production Planning
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A comprehensive 3-step tutorial demonstrating how to build production planning solutions for manufacturing, progressing from basic continuous variable optimization to advanced goal programming with customer order priorities.
+A comprehensive 7-step tutorial demonstrating how to build production planning solutions for manufacturing, progressing from basic continuous variable optimization to advanced what-if analysis with ORM-safe model copying.
 
 **What You'll Learn:**
 
@@ -78,32 +78,42 @@ A comprehensive 3-step tutorial demonstrating how to build production planning s
 - Database integration with Bill of Materials (BOM) structure
 - Goal programming for customer order fulfillment with tier-based priorities
 - Multi-objective optimization balancing profit and customer satisfaction
+- Multi-period planning with setup costs and inventory management
+- Scenario analysis for comparing business conditions
+- Sensitivity analysis with shadow prices and marginal values
+- What-if analysis with interactive parameter exploration
+- ORM-safe model copying for analysis workflows
 
 **Tutorial Steps:**
 
 1. **Basic Production Planning** - Core optimization with continuous variables and resource constraints
 2. **Database Integration** - Persistent storage with SQLite for products, machines, materials, and BOM
 3. **Goal Programming** - Customer orders as soft constraints with priority-based fulfillment
+4. **Large-Scale Multi-Period** - Setup costs, inventory, and 4-week planning horizon (1,600+ variables)
+5. **Scenario Analysis** - Compare optimistic, baseline, and pessimistic business scenarios
+6. **Sensitivity Analysis** - Shadow prices, bottleneck identification, and marginal value analysis
+7. **What-If Analysis** - Interactive parameter exploration, investment ROI, and risk assessment
 
 **Tutorial Path:**
 
 .. code-block:: text
 
-   Step 1: Basic Model         Step 2: Add Database      Step 3: Add Goals
-   ├─ 3 products              ├─ SQLite storage         ├─ 5 customers (Gold/Silver/Bronze)
-   ├─ 2 machines              ├─ BOM tables             ├─ 9 customer orders
-   ├─ 3 materials             ├─ Recipe relationships   ├─ Tier-based priorities
-   ├─ Continuous variables    ├─ Solution persistence   ├─ Order fulfillment analysis
-   ├─ Profit maximization     ├─ CRUD operations        ├─ Weighted goal programming
-   └─ Python data structures  └─ Database queries       └─ Satisfaction tracking
+   Step 1: Basic       Step 2: Database    Step 3: Goals       Step 4: Multi-Period    Steps 5-7: Analysis
+   ├─ 3 products      ├─ SQLite DB        ├─ 5 customers      ├─ 9 products          ├─ Scenario analysis
+   ├─ 2 machines      ├─ BOM tables       ├─ 9 orders         ├─ 6 machines          ├─ Sensitivity analysis
+   ├─ 3 materials     ├─ ORM models       ├─ Priorities       ├─ 4 periods           ├─ What-if analysis
+   ├─ Continuous      ├─ from_model()     ├─ Soft goals       ├─ Setup costs         ├─ Bottleneck ID
+   ├─ Profit max      ├─ Persistence      ├─ Multi-obj        ├─ Inventory           ├─ Investment ROI
+   └─ ~10 variables   └─ CRUD ops         └─ Satisfaction     └─ ~1,600 variables    └─ Risk assessment
 
 **Prerequisites:**
 
 - Basic Python knowledge (dataclasses, functions, loops)
 - Understanding of linear programming helpful but not required
-- LumiX installed with a solver (OR-Tools recommended)
+- LumiX installed with a solver (OR-Tools recommended for Steps 1-4, Gurobi/CPLEX for Steps 5-7)
+- SQLAlchemy for database steps (Step 2+)
 
-**Time to Complete:** 2-3 hours for all steps
+**Time to Complete:** 5-7 hours for all steps (1-2 hours for Steps 1-4, 2-3 hours for Steps 5-7)
 
 Quick Start
 -----------
