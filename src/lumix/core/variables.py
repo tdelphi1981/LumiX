@@ -90,6 +90,139 @@ class LXVariable(Generic[TModel, TValue]):
     _multi_cost_func: Optional[Callable[..., float]] = None
     _join_config: Optional[dict] = None
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+
+        This method enables what-if analysis on variables using ORM data sources by:
+        1. Materializing lazy-loaded ORM data before copying
+        2. Detaching ORM objects from database sessions
+        3. Safely copying lambda functions (index_func, cost_func, filters, etc.)
+        4. Deep copying cartesian products and join configurations
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this variable with all ORM dependencies resolved
+
+        Note:
+            After copying, the new variable will have _session=None and all data
+            stored in _data as detached objects safe for pickling.
+        """
+        from copy import deepcopy
+        from ..utils.copy_utils import (
+            materialize_and_detach_list,
+            copy_function_detaching_closure
+        )
+
+        # Create new instance without calling __init__
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Copy simple attributes
+        result.name = self.name
+        result.var_type = self.var_type
+        result.lower_bound = self.lower_bound
+        result.upper_bound = self.upper_bound
+        result.model_type = self.model_type
+
+        # Copy callable attributes - may have closures capturing ORM objects
+        result.index_func = (
+            copy_function_detaching_closure(self.index_func, memo)
+            if self.index_func is not None
+            else None
+        )
+        result.cost_func = (
+            copy_function_detaching_closure(self.cost_func, memo)
+            if self.cost_func is not None
+            else None
+        )
+        result._filter = (
+            copy_function_detaching_closure(self._filter, memo)
+            if self._filter is not None
+            else None
+        )
+        result._multi_cost_func = (
+            copy_function_detaching_closure(self._multi_cost_func, memo)
+            if self._multi_cost_func is not None
+            else None
+        )
+
+        # Handle data sources
+        if self._session is not None:
+            # Materialize ORM data before copying
+            try:
+                instances = self.get_instances()
+                result._data = materialize_and_detach_list(instances, memo)
+            except Exception as e:
+                import warnings
+                warnings.warn(
+                    f"Failed to materialize variable data for '{self.name}': {e}. "
+                    f"Variable will be empty in the copy.",
+                    UserWarning
+                )
+                result._data = []
+            result._session = None
+        elif self._data is not None:
+            # Already have data - just detach and copy
+            result._data = materialize_and_detach_list(self._data, memo)
+            result._session = None
+        else:
+            result._data = None
+            result._session = None
+
+        # Deep copy cartesian product (if present)
+        result._cartesian = (
+            deepcopy(self._cartesian, memo)
+            if self._cartesian is not None
+            else None
+        )
+
+        # Handle join configuration
+        if self._join_config is not None:
+            result._join_config = {}
+            result._join_config['primary'] = self._join_config['primary']
+            result._join_config['related'] = self._join_config['related']
+            result._join_config['join_func'] = copy_function_detaching_closure(
+                self._join_config['join_func'], memo
+            )
+            result._join_config['key_func'] = copy_function_detaching_closure(
+                self._join_config['key_func'], memo
+            )
+        else:
+            result._join_config = None
+
+        return result
+
+    def __getstate__(self):
+        """Support for pickle protocol - detach ORM sessions before pickling.
+
+        Returns:
+            Dictionary of instance state safe for pickling
+        """
+        state = self.__dict__.copy()
+
+        # If using ORM session, materialize data before pickling
+        if state.get('_session') is not None:
+            try:
+                instances = self.get_instances()
+                from ..utils.copy_utils import detach_orm_object
+                state['_data'] = [detach_orm_object(inst) for inst in instances]
+            except Exception:
+                state['_data'] = []
+            state['_session'] = None
+
+        return state
+
+    def __setstate__(self, state):
+        """Support for pickle protocol - restore from pickled state.
+
+        Args:
+            state: Dictionary of instance state from pickling
+        """
+        self.__dict__.update(state)
+
     def continuous(self) -> Self:
         """Set as continuous variable. Returns self for chaining."""
         self.var_type = LXVarType.CONTINUOUS

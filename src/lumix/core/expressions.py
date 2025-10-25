@@ -38,6 +38,55 @@ class LXLinearExpression(Generic[TModel]):
     _multi_terms: List[Tuple[LXVariable, Callable[..., float], Optional[Callable[..., bool]]]] = field(
         default_factory=list)
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that handles variables and lambda functions.
+
+        This method enables what-if analysis on expressions by:
+        1. Deep copying all variables in the expression
+        2. Safely copying coefficient and filter lambda functions
+        3. Preserving the expression structure
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this expression with all dependencies resolved
+        """
+        from copy import deepcopy
+        from ..utils.copy_utils import copy_function_detaching_closure
+
+        # Create new instance
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Copy simple attributes
+        result.constant = self.constant
+
+        # Deep copy terms dictionary
+        # Each term: (LXVariable, coeff_func, where_func)
+        result.terms = {}
+        for var_name, (var, coeff_func, where_func) in self.terms.items():
+            copied_var = deepcopy(var, memo)
+            copied_coeff = copy_function_detaching_closure(coeff_func, memo)
+            copied_where = copy_function_detaching_closure(where_func, memo)
+            result.terms[var_name] = (copied_var, copied_coeff, copied_where)
+
+        # Deep copy multi-terms list
+        # Each multi-term: (LXVariable, coeff_func, where_func)
+        result._multi_terms = []
+        for var, coeff_func, where_func in self._multi_terms:
+            copied_var = deepcopy(var, memo)
+            copied_coeff = copy_function_detaching_closure(coeff_func, memo)
+            copied_where = (
+                copy_function_detaching_closure(where_func, memo)
+                if where_func is not None
+                else None
+            )
+            result._multi_terms.append((copied_var, copied_coeff, copied_where))
+
+        return result
+
     def add_term(
             self, var: LXVariable[TModel, Any],
             coeff: float | Callable[[TModel], float] = 1.0,
@@ -208,6 +257,27 @@ class LXQuadraticTerm:
     var2: LXVariable
     coefficient: float = 1.0
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that handles variables.
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this quadratic term
+        """
+        from copy import deepcopy
+
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        result.var1 = deepcopy(self.var1, memo)
+        result.var2 = deepcopy(self.var2, memo)
+        result.coefficient = self.coefficient
+
+        return result
+
     def is_squared_term(self) -> bool:
         """Check if this is x^2 (same variable twice)."""
         return self.var1.name == self.var2.name
@@ -231,6 +301,37 @@ class LXQuadraticExpression:
     linear_terms: LXLinearExpression = field(default_factory=LXLinearExpression)
     quadratic_terms: List[LXQuadraticTerm] = field(default_factory=list)
     constant: float = 0.0
+
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that handles linear and quadratic terms.
+
+        This method enables what-if analysis on quadratic expressions by:
+        1. Deep copying the linear expression component
+        2. Deep copying all quadratic terms
+        3. Preserving the expression structure
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this quadratic expression with all dependencies resolved
+        """
+        from copy import deepcopy
+
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Deep copy linear terms
+        result.linear_terms = deepcopy(self.linear_terms, memo)
+
+        # Deep copy quadratic terms
+        result.quadratic_terms = [deepcopy(term, memo) for term in self.quadratic_terms]
+
+        # Copy constant
+        result.constant = self.constant
+
+        return result
 
     def add_quadratic(self, var1: LXVariable, var2: LXVariable, coeff: float = 1.0) -> Self:
         """

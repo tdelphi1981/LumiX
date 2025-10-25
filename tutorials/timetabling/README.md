@@ -1,20 +1,37 @@
 # High School Course Timetabling Tutorial
 
-A comprehensive three-step tutorial demonstrating how to build a complete course timetabling solution using LumiX, progressing from basic optimization to advanced goal programming with database integration.
+A comprehensive 4-step tutorial demonstrating how to build a complete course timetabling solution using LumiX, progressing from basic optimization to production-ready large-scale systems with goal programming and specialized room constraints.
+
+## 📚 Full Documentation
+
+**For comprehensive documentation with code examples, mathematical formulations, and detailed walkthroughs, see:**
+
+📖 **[Complete Tutorial Documentation](../../docs/source/tutorials/timetabling/index.rst)** (Sphinx/HTML)
+
+This README provides a quick overview. The full Sphinx documentation includes:
+- Step-by-step code walkthroughs with line-by-line explanations
+- Mathematical formulations with LaTeX equations
+- Performance benchmarks and optimization tips
+- Troubleshooting guides and common pitfalls
+- API cross-references and related documentation
 
 ## Overview
 
 This tutorial teaches you how to solve a real-world high school course timetabling problem through progressive complexity:
 
-- **Step 1**: Basic timetabling with Python lists
-- **Step 2**: Database integration with SQLite
-- **Step 3**: Goal programming with teacher preferences
+- **Step 1**: Basic timetabling with Python lists and multi-model indexing
+- **Step 2**: Database integration with SQLite and SQLAlchemy ORM
+- **Step 3**: Goal programming with teacher preferences and priorities
+- **Step 4**: Large-scale optimization with room types and interactive HTML reports (production-ready)
 
 By the end of this tutorial, you'll understand:
 - Multi-dimensional indexing with 3D variables
-- Database-driven optimization models
-- Multi-objective optimization with priorities
-- Practical timetabling constraints and solutions
+- Database-driven optimization models with ORM integration
+- Multi-objective optimization with goal programming
+- Scaling to production-ready problem sizes
+- Room type constraints for specialized facilities
+- Performance optimization patterns
+- Interactive HTML report generation with modern dashboards
 
 ## Problem Description
 
@@ -115,6 +132,39 @@ By the end of this tutorial, you'll understand:
 
 ---
 
+### Step 4: Large-Scale Optimization with Room Types 🚀
+
+**Focus**: Production-ready scale with specialized room constraints
+
+**What you'll learn**:
+- Scaling to realistic problem sizes (16x more variables)
+- Room type constraints (REGULAR, LAB, GYM)
+- Performance optimization with cached checkers
+- Handling complex compatibility rules
+- Production-ready patterns
+- Generating interactive HTML reports with modern dashboards
+
+**Key features**:
+- 15 teachers across 3 departments
+- 12 classrooms with room types (8 regular, 3 labs, 1 gym)
+- 12 classes across 4 grades
+- 80 lectures with realistic distribution
+- 40 timeslots (8 periods per day)
+- Room type requirements (lab subjects need labs, PE needs gym)
+- Enhanced performance with caching (~7,000x speedup)
+- Interactive HTML5 + CSS report with teacher/class/room timetables
+
+**Files**:
+- `database.py`: Extended schema with room types and subject requirements
+- `sample_data.py`: Large-scale realistic data generation
+- `timetabling_scaled.py`: Production-scale optimization
+- `report_generator.py`: Interactive HTML report generation
+- `README.md`: Scaling and performance documentation
+
+[📖 Go to Step 4](step4_scaled_up/)
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -156,6 +206,18 @@ python sample_data.py
 python timetabling_goals.py
 ```
 
+### Step 4: Large-Scale Optimization
+
+```bash
+cd tutorials/timetabling/step4_scaled_up
+
+# First, populate the database with large-scale data
+python sample_data.py
+
+# Then run the production-scale optimization (10-30 seconds)
+python timetabling_scaled.py
+```
+
 ## Learning Path
 
 ### For Beginners
@@ -175,11 +237,17 @@ Skip to **Step 2** if you already know basics and want to learn:
 
 ### For Advanced Users
 
-Jump to **Step 3** if you want to focus on:
+Jump to **Step 3** for:
 - Goal programming
 - Multi-objective optimization
 - Priority-based scheduling
 - Trade-off analysis
+
+Or go straight to **Step 4** for:
+- Production-scale optimization
+- Performance optimization patterns
+- Complex constraint systems
+- Real-world deployment strategies
 
 ## Key Concepts Demonstrated
 
@@ -233,19 +301,24 @@ model.add_constraint(
 
 ## Feature Comparison
 
-| Feature | Step 1 | Step 2 | Step 3 |
-|---------|--------|--------|--------|
-| **Basic Model** | ✓ | ✓ | ✓ |
-| **3D Indexing** | ✓ | ✓ | ✓ |
-| **Hard Constraints** | ✓ | ✓ | ✓ |
-| **Python Lists** | ✓ | | |
-| **SQLite Database** | | ✓ | ✓ |
-| **Solution Persistence** | | ✓ | ✓ |
-| **Teacher Seniority** | | | ✓ |
-| **Teacher Preferences** | | | ✓ |
-| **Goal Programming** | | | ✓ |
-| **Priority Levels** | | | ✓ |
-| **Satisfaction Analysis** | | | ✓ |
+| Feature | Step 1 | Step 2 | Step 3 | Step 4 |
+|---------|--------|--------|--------|--------|
+| **Basic Model** | ✓ | ✓ | ✓ | ✓ |
+| **3D Indexing** | ✓ | ✓ | ✓ | ✓ |
+| **Hard Constraints** | ✓ | ✓ | ✓ | ✓ |
+| **Python Lists** | ✓ | | | |
+| **SQLite Database** | | ✓ | ✓ | ✓ |
+| **Solution Persistence** | | ✓ | ✓ | ✓ |
+| **Teacher Seniority** | | | ✓ | ✓ |
+| **Teacher Preferences** | | | ✓ | ✓ |
+| **Goal Programming** | | | ✓ | ✓ |
+| **Priority Levels** | | | ✓ | ✓ |
+| **Satisfaction Analysis** | | | ✓ | ✓ |
+| **Large-Scale Data** | | | | ✓ |
+| **Room Types** | | | | ✓ |
+| **Room Type Constraints** | | | | ✓ |
+| **Performance Caching** | | | | ✓ |
+| **Interactive HTML Report** | | | | ✓ |
 
 ## Real-World Applications
 
@@ -292,6 +365,8 @@ After completing the tutorial, try these extensions:
 3. **Web interface**: Flask/Django app for schedule management
 4. **Automated updates**: Daily schedule adjustments
 5. **Multi-week planning**: Semester or year-long schedules
+6. **Enhanced HTML reports**: Add PDF export, email distribution, or embed charts
+7. **Real-time editing**: Allow users to manually adjust schedules in the HTML interface
 
 ## Tips for Success
 
@@ -362,6 +437,7 @@ where=lambda lec, ts, current=lecture: lec.id == current.id  # Captures value
 - [Step 1 README](step1_basic_timetabling/README.md)
 - [Step 2 README](step2_database_integration/README.md)
 - [Step 3 README](step3_goal_programming/README.md)
+- [Step 4 README](step4_scaled_up/README.md)
 
 ### Examples
 
@@ -378,9 +454,10 @@ where=lambda lec, ts, current=lecture: lec.id == current.id  # Captures value
 
 This tutorial has shown you:
 
-✓ **Step 1**: Built a basic timetabling model with 3D multi-model indexing
-✓ **Step 2**: Integrated SQLite database for persistent data storage
-✓ **Step 3**: Added teacher preferences using goal programming with priorities
+- **Step 1**: Built a basic timetabling model with 3D multi-model indexing
+- **Step 2**: Integrated SQLite database for persistent data storage
+- **Step 3**: Added teacher preferences using goal programming with priorities
+- **Step 4**: Built large-scale production-ready model with room type constraints and interactive HTML reports
 
 You've learned:
 - Multi-dimensional variable indexing
@@ -389,6 +466,9 @@ You've learned:
 - Multi-objective optimization
 - Priority-based decision making
 - Solution analysis and interpretation
+- Scaling to production sizes
+- Performance optimization with caching
+- Interactive visualization with modern HTML dashboards
 
 These skills transfer to many real-world optimization problems. Happy optimizing!
 

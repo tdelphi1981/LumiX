@@ -45,6 +45,30 @@ class RelaxedConstraint(Generic[TModel]):
         self.goal_metadata = goal_metadata
         self.goal_instances = goal_instances
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that handles constraint and deviation variables.
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this relaxed constraint
+        """
+        from copy import deepcopy
+
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Deep copy all components
+        result.constraint = deepcopy(self.constraint, memo)
+        result.pos_deviation = deepcopy(self.pos_deviation, memo)
+        result.neg_deviation = deepcopy(self.neg_deviation, memo)
+        result.goal_metadata = deepcopy(self.goal_metadata, memo)
+        result.goal_instances = deepcopy(self.goal_instances, memo)
+
+        return result
+
     def get_undesired_variables(self) -> List[LXVariable[LXGoal, float]]:
         """
         Get list of undesired deviation variables to minimize.

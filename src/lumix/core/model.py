@@ -159,6 +159,88 @@ class LXModel(Generic[TModel]):
         self._relaxed_constraints: List["RelaxedConstraint"] = []
         self._goal_programming_prepared: bool = False
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that enables what-if analysis with ORM data sources.
+
+        This method orchestrates deep copying of the entire model including:
+        1. All variable families (with ORM data materialization)
+        2. All constraint families (with ORM data materialization)
+        3. Objective expression
+        4. Goal programming metadata
+
+        This is the central method that makes what-if analysis possible by creating
+        independent copies of models that can be modified without affecting the original.
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this model with all ORM dependencies resolved
+
+        Note:
+            After copying, all variables and constraints will have their ORM sessions
+            detached and data materialized. The copy is completely independent and safe
+            for serialization/pickling.
+
+        Example:
+            >>> original_model = build_model_with_orm(session)
+            >>> modified_model = deepcopy(original_model)
+            >>> # modified_model can now be changed without affecting original_model
+        """
+        from copy import deepcopy
+
+        # Create new instance without calling __init__
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Copy simple attributes
+        result.name = self.name
+        result.objective_sense = self.objective_sense
+        result.goal_mode = self.goal_mode
+        result._goal_programming_prepared = self._goal_programming_prepared
+
+        # Deep copy all variable families
+        # Each variable's __deepcopy__ will materialize and detach ORM data
+        result.variables = [deepcopy(var, memo) for var in self.variables]
+
+        # Deep copy all constraint families
+        # Each constraint's __deepcopy__ will materialize and detach ORM data
+        result.constraints = [deepcopy(constr, memo) for constr in self.constraints]
+
+        # Deep copy objective expression (if present)
+        result.objective_expr = (
+            deepcopy(self.objective_expr, memo)
+            if self.objective_expr is not None
+            else None
+        )
+
+        # Deep copy relaxed constraints (for goal programming)
+        result._relaxed_constraints = [
+            deepcopy(rc, memo) for rc in self._relaxed_constraints
+        ]
+
+        return result
+
+    def __getstate__(self):
+        """Support for pickle protocol - detach ORM sessions before pickling.
+
+        Returns:
+            Dictionary of instance state safe for pickling
+        """
+        # The default pickle behavior will work since all nested objects
+        # (variables, constraints, expressions) have their own __getstate__
+        # methods that handle ORM detachment
+        return self.__dict__.copy()
+
+    def __setstate__(self, state):
+        """Support for pickle protocol - restore from pickled state.
+
+        Args:
+            state: Dictionary of instance state from pickling
+        """
+        self.__dict__.update(state)
+
     def add_variable(self, var: LXVariable) -> Self:
         """
         Add variable with full type checking.

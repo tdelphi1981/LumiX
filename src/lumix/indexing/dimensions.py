@@ -113,6 +113,101 @@ class LXIndexDimension(Generic[TModel]):
     _data: Optional[List[TModel]] = None
     _session: Optional[Any] = None
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+
+        This method enables what-if analysis on models using ORM data sources by:
+        1. Materializing lazy-loaded ORM data before copying
+        2. Detaching ORM objects from database sessions
+        3. Safely copying lambda functions that may capture ORM objects
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this dimension with all ORM dependencies resolved
+
+        Note:
+            After copying, the new dimension will have _session=None and all data
+            stored in _data as detached objects safe for pickling.
+        """
+        from copy import deepcopy
+        from ..utils.copy_utils import (
+            materialize_and_detach_list,
+            copy_function_detaching_closure
+        )
+
+        # Create new instance without calling __init__
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Copy simple attributes
+        result.model_type = self.model_type
+        result.label = self.label
+
+        # Copy functions - may have closures capturing ORM objects
+        result.key_func = copy_function_detaching_closure(self.key_func, memo)
+        result.filter_func = (
+            copy_function_detaching_closure(self.filter_func, memo)
+            if self.filter_func is not None
+            else None
+        )
+
+        # CRITICAL: Handle data sources
+        # If using ORM session, materialize data before copying
+        if self._session is not None:
+            try:
+                instances = self.get_instances()
+                result._data = materialize_and_detach_list(instances, memo)
+            except Exception as e:
+                import warnings
+                warnings.warn(
+                    f"Failed to materialize dimension data for {self.model_type.__name__}: {e}. "
+                    f"Dimension will be empty in the copy.",
+                    UserWarning
+                )
+                result._data = []
+            result._session = None
+        elif self._data is not None:
+            # Already have data - just detach and copy
+            result._data = materialize_and_detach_list(self._data, memo)
+            result._session = None
+        else:
+            # No data source configured
+            result._data = None
+            result._session = None
+
+        return result
+
+    def __getstate__(self):
+        """Support for pickle protocol - detach ORM sessions before pickling.
+
+        Returns:
+            Dictionary of instance state safe for pickling
+        """
+        state = self.__dict__.copy()
+
+        # If using ORM session, materialize data before pickling
+        if state.get('_session') is not None:
+            try:
+                instances = self.get_instances()
+                from ..utils.copy_utils import detach_orm_object
+                state['_data'] = [detach_orm_object(inst) for inst in instances]
+            except Exception:
+                state['_data'] = []
+            state['_session'] = None
+
+        return state
+
+    def __setstate__(self, state):
+        """Support for pickle protocol - restore from pickled state.
+
+        Args:
+            state: Dictionary of instance state from pickling
+        """
+        self.__dict__.update(state)
+
     def from_data(self, data: List[TModel]) -> LXIndexDimension[TModel]:
         """Provide data instances directly for this dimension.
 

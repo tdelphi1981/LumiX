@@ -2,22 +2,28 @@
 
 ## Overview
 
-This is the second step in the High School Course Timetabling tutorial. It extends Step 1 by integrating a **SQLite database** for data storage and solution persistence.
+This is the second step in the High School Course Timetabling tutorial. It extends Step 1 by integrating **SQLAlchemy ORM** with a SQLite database for data storage and solution persistence.
 
 The optimization model is identical to Step 1, but:
-- **Input data** is loaded from a database instead of Python lists
+- **Direct ORM queries**: Data is queried from database on-demand, not pre-loaded into lists
+- **No intermediate lists**: True ORM pattern - query only what's needed when it's needed
+- **from_model() integration**: LumiX queries database directly for variable creation
 - **Solutions** are saved to the database for future reference
+- **Type-safe operations** with IDE autocomplete support
 - **Data management** is separated from optimization logic
 
 ## What's New in Step 2
 
 ### Key Changes from Step 1
 
-1. **Data Storage**: All entities (teachers, classrooms, lectures, etc.) stored in SQLite database
-2. **Data Loading**: Model reads data from database tables instead of Python lists
-3. **Solution Persistence**: Optimization results saved to `schedule_assignments` table
-4. **Database Operations**: CRUD operations for all entities
-5. **Data Consistency**: Database constraints ensure referential integrity
+1. **SQLAlchemy ORM**: Use declarative models instead of Python dataclasses
+2. **Direct Database Queries**: Query data on-demand without pre-loading into lists
+3. **True ORM Pattern**: No intermediate Python lists - database is the source of truth
+4. **from_model() Integration**: LumiX queries database directly for variable creation
+5. **Type Safety**: IDE autocomplete for ORM model attributes
+6. **Solution Persistence**: Optimization results saved to `schedule_assignments` table
+7. **Cached Helpers**: Performance optimization with cached class-classroom compatibility checks
+8. **Data Consistency**: Database foreign key constraints ensure referential integrity
 
 ### Why Use a Database?
 
@@ -338,48 +344,94 @@ ORDER BY ts.day_of_week, ts.period;
 
 ## Integration with LumiX
 
-### Loading Data from Database
+### True ORM Pattern: Direct Database Queries
 
-The key pattern for integrating databases with LumiX:
+This example demonstrates the **true ORM pattern** using SQLAlchemy: query data directly from the database on-demand, without pre-loading into lists.
 
 ```python
-# 1. Load data from database
-db = TimetableDatabase("school.db")
-lectures = db.get_all_lectures()
-timeslots = db.get_all_timeslots()
-classrooms = db.get_all_classrooms()
-
-# 2. Build LumiX variables using database entities
-assignment = (
-    LXVariable[Tuple[Lecture, TimeSlot, Classroom], int]("assignment")
-    .binary()
-    .indexed_by_product(
-        LXIndexDimension(Lecture, lambda lec: lec.id).from_data(lectures),
-        LXIndexDimension(TimeSlot, lambda ts: ts.id).from_data(timeslots),
-        LXIndexDimension(Classroom, lambda room: room.id).from_data(classrooms),
-    )
-    .where_multi(
-        lambda lec, ts, room: db.check_class_fits_classroom(lec.class_id, room.id)
-    )
+from database import (
+    init_database,
+    get_session,
+    Lecture,
+    TimeSlot,
+    Classroom,
+    Teacher,
+    SchoolClass,
+    create_cached_class_fits_checker,
 )
 
-# 3. Build model, solve, and save results
-model = build_model(...)
-solution = optimizer.solve(model)
+# 1. Initialize database and session
+engine = init_database("sqlite:///school.db")
+session = get_session(engine)
 
-# 4. Save solution back to database
-for (lec_id, ts_id, room_id), value in solution.variables["assignment"].items():
-    if value > 0.5:
-        db.save_schedule_assignment(lec_id, ts_id, room_id)
+try:
+    # 2. Create cached checker for performance
+    fits_checker = create_cached_class_fits_checker(session)
+
+    # 3. Build LumiX variables using from_model() - LumiX queries database directly
+    assignment = (
+        LXVariable[Tuple[Lecture, TimeSlot, Classroom], int]("assignment")
+        .binary()
+        .indexed_by_product(
+            LXIndexDimension(Lecture, lambda lec: lec.id).from_model(session),
+            LXIndexDimension(TimeSlot, lambda ts: ts.id).from_model(session),
+            LXIndexDimension(Classroom, lambda room: room.id).from_model(session),
+        )
+        .where_multi(
+            lambda lec, ts, room: fits_checker(lec.class_id, room.id)
+        )
+    )
+
+    # 4. Build constraints by querying database directly (no pre-loading)
+    model = LXModel("timetabling_orm")
+    model.add_variable(assignment)
+
+    # Query lectures on-demand for constraint building (no pre-loaded list)
+    for lecture in session.query(Lecture).all():  # Direct query
+        expr = LXLinearExpression().add_multi_term(
+            assignment,
+            coeff=lambda lec, ts, room: 1.0,
+            where=lambda lec, ts, room, current_lec=lecture: lec.id == current_lec.id,
+        )
+        model.add_constraint(...)
+
+    # Query teachers on-demand for constraints
+    for teacher in session.query(Teacher).all():  # Direct query, no list
+        teacher_lec_ids = [lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()]
+        # Build constraint using teacher_lec_ids...
+
+    # 5. Solve
+    solution = optimizer.solve(model)
+
+    # 6. Save solution by querying database directly (no pre-loaded lists)
+    save_solution_to_db(solution, session)  # Queries data inside as needed
+
+finally:
+    session.close()
 ```
+
+**Key Difference from Hybrid Approach:**
+- **True ORM (this tutorial)**: Query data in loops (`for teacher in session.query(Teacher).all()`)
+- **Hybrid/Anti-pattern**: Pre-load all data (`teachers = session.query(Teacher).all()`, then `for teacher in teachers`)
+- **from_model() advantage**: LumiX queries database directly during variable creation
+
+**Why True ORM is Better:**
+- Less memory usage (no intermediate lists)
+- Database is the single source of truth
+- More flexible (can filter queries with `.filter_by()`)
+- Better for large datasets (supports pagination/limits)
+- Cleaner code (fewer temporary variables)
 
 ### Benefits of This Pattern
 
 1. **Separation of Concerns**: Data management separate from optimization logic
-2. **Testability**: Easy to test with different datasets
-3. **Scalability**: Database handles large datasets efficiently
-4. **Reusability**: Same model can work with different databases
-5. **Collaboration**: Multiple developers can work with same data
+2. **Direct Queries**: No intermediate Python lists - query on-demand
+3. **Type Safety**: IDE autocomplete for ORM model attributes
+4. **from_model() Integration**: LumiX can query database directly for variable creation
+5. **Testability**: Easy to test with different datasets
+6. **Scalability**: Database handles large datasets efficiently
+7. **Reusability**: Same model can work with different databases
+8. **Collaboration**: Multiple developers can work with same data
 
 ## Key Learnings
 

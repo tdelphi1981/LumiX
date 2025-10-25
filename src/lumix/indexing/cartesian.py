@@ -151,6 +151,40 @@ class LXCartesianProduct(Generic[TModel1, TModel2]):
         self.dimensions: list[LXIndexDimension] = [dim1, dim2]
         self._cross_filter: Optional[Callable] = None
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that handles dimensions and cross-filter functions.
+
+        This method enables what-if analysis on cartesian products by:
+        1. Deep copying all index dimensions (with ORM data materialization)
+        2. Safely copying the cross-filter lambda function
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this cartesian product with all dependencies resolved
+        """
+        from copy import deepcopy
+        from ..utils.copy_utils import copy_function_detaching_closure
+
+        # Create new instance without calling __init__
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Deep copy all dimensions
+        # Each dimension's __deepcopy__ will materialize and detach ORM data
+        result.dimensions = [deepcopy(dim, memo) for dim in self.dimensions]
+
+        # Copy cross-filter function (may have closures capturing ORM objects)
+        result._cross_filter = (
+            copy_function_detaching_closure(self._cross_filter, memo)
+            if self._cross_filter is not None
+            else None
+        )
+
+        return result
+
     def add_dimension(self, dim: LXIndexDimension) -> Self:
         """Add another dimension to create 3D or higher-dimensional indexing.
 

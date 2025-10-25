@@ -78,9 +78,15 @@ solver_to_use = "gurobi"
 def build_timetabling_model_with_goals(session) -> LXModel:
     """Build timetabling model with goal programming for teacher preferences using ORM.
 
-    This function builds the same basic model as Steps 1 & 2, then adds
+    This function builds the same basic model as Step 2, then adds
     teacher preferences as soft goal constraints with priorities. Uses
     SQLAlchemy ORM and LumiX's from_model() for direct database integration.
+
+    ORM Pattern (like Step 2):
+        - Uses session.query().count() for reporting
+        - Queries data on-demand when building constraints
+        - Uses ORM filtering like session.query(Lecture).filter_by(teacher_id=...)
+        - No pre-loading of data into lists
 
     Args:
         session: SQLAlchemy Session instance.
@@ -88,21 +94,6 @@ def build_timetabling_model_with_goals(session) -> LXModel:
     Returns:
         An LXModel instance with both hard constraints and soft goals.
     """
-    print("\nLoading data from database using ORM...")
-    teachers = session.query(Teacher).all()
-    classrooms = session.query(Classroom).all()
-    classes = session.query(SchoolClass).all()
-    lectures = session.query(Lecture).all()
-    timeslots = session.query(TimeSlot).all()
-    preferences = session.query(TeacherPreference).all()
-
-    print(f"  Loaded {len(teachers)} teachers")
-    print(f"  Loaded {len(classrooms)} classrooms")
-    print(f"  Loaded {len(classes)} classes")
-    print(f"  Loaded {len(lectures)} lectures")
-    print(f"  Loaded {len(timeslots)} timeslots")
-    print(f"  Loaded {len(preferences)} teacher preferences")
-
     print("\nBuilding course timetabling model with goal programming...")
     print("  Using LumiX's from_model() for direct database querying")
 
@@ -129,12 +120,21 @@ def build_timetabling_model_with_goals(session) -> LXModel:
     model = LXModel("high_school_timetabling_goals")
     model.add_variable(assignment)
 
+    # Report data counts (query count only, not loading into memory)
+    print(f"  Loaded {session.query(Teacher).count()} teachers")
+    print(f"  Loaded {session.query(Classroom).count()} classrooms")
+    print(f"  Loaded {session.query(SchoolClass).count()} classes")
+    print(f"  Loaded {session.query(Lecture).count()} lectures")
+    print(f"  Loaded {session.query(TimeSlot).count()} timeslots")
+    print(f"  Loaded {session.query(TeacherPreference).count()} teacher preferences")
+
     # ========== HARD CONSTRAINTS (same as Steps 1 & 2) ==========
 
     # Constraint 1: Each lecture assigned exactly once (HARD)
-    print("  Adding hard constraints...")
+    print("\n  Adding hard constraints...")
     print("    - Lecture coverage constraints")
-    for lecture in lectures:
+    # Query lectures directly from database (no pre-loading into list)
+    for lecture in session.query(Lecture).all():
         expr = LXLinearExpression().add_multi_term(
             assignment,
             coeff=lambda lec, ts, room: 1.0,
@@ -148,8 +148,9 @@ def build_timetabling_model_with_goals(session) -> LXModel:
 
     # Constraint 2: No classroom conflicts (HARD)
     print("    - Classroom conflict constraints")
-    for timeslot in timeslots:
-        for classroom in classrooms:
+    # Query timeslots and classrooms directly from database
+    for timeslot in session.query(TimeSlot).all():
+        for classroom in session.query(Classroom).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
@@ -167,16 +168,18 @@ def build_timetabling_model_with_goals(session) -> LXModel:
 
     # Constraint 3: No teacher conflicts (HARD)
     print("    - Teacher conflict constraints")
-    for teacher in teachers:
-        teacher_lectures = [lec for lec in lectures if lec.teacher_id == teacher.id]
+    # Query teachers directly and use ORM relationship filtering
+    for teacher in session.query(Teacher).all():
+        # Query only this teacher's lectures (ORM filtering, not loading all lectures)
+        teacher_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()]
 
-        for timeslot in timeslots:
+        for timeslot in session.query(TimeSlot).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, current_ts=timeslot, t_lectures=teacher_lectures: ts.id
+                where=lambda lec, ts, room, current_ts=timeslot, t_lec_ids=teacher_lecture_ids: ts.id
                 == current_ts.id
-                and lec.id in [tl.id for tl in t_lectures],
+                and lec.id in t_lec_ids,
             )
 
             model.add_constraint(
@@ -188,16 +191,18 @@ def build_timetabling_model_with_goals(session) -> LXModel:
 
     # Constraint 4: No class conflicts (HARD)
     print("    - Class conflict constraints")
-    for school_class in classes:
-        class_lectures = [lec for lec in lectures if lec.class_id == school_class.id]
+    # Query school classes directly and use ORM relationship filtering
+    for school_class in session.query(SchoolClass).all():
+        # Query only this class's lectures (ORM filtering, not loading all lectures)
+        class_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(class_id=school_class.id).all()]
 
-        for timeslot in timeslots:
+        for timeslot in session.query(TimeSlot).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, current_ts=timeslot, c_lectures=class_lectures: ts.id
+                where=lambda lec, ts, room, current_ts=timeslot, c_lec_ids=class_lecture_ids: ts.id
                 == current_ts.id
-                and lec.id in [cl.id for cl in c_lectures],
+                and lec.id in c_lec_ids,
             )
 
             model.add_constraint(
@@ -211,8 +216,10 @@ def build_timetabling_model_with_goals(session) -> LXModel:
 
     print("\n  Adding soft goal constraints (teacher preferences)...")
 
-    for pref in preferences:
-        teacher = next((t for t in teachers if t.id == pref.teacher_id), None)
+    # Query preferences directly from database (no pre-loading into list)
+    for pref in session.query(TeacherPreference).all():
+        # Query teacher using ORM
+        teacher = session.query(Teacher).filter_by(id=pref.teacher_id).first()
         if not teacher:
             continue
 
@@ -222,25 +229,28 @@ def build_timetabling_model_with_goals(session) -> LXModel:
 
         if pref.preference_type == "DAY_OFF":
             # Goal: Minimize assignments on the preferred day off
-            # Get all timeslots for the specified day
-            day_timeslots = [
-                ts for ts in timeslots if ts.day_of_week == pref.day_of_week
+            # Get all timeslots for the specified day using ORM filtering
+            day_timeslot_ids = [
+                ts.id for ts in session.query(TimeSlot).filter_by(day_of_week=pref.day_of_week).all()
             ]
 
-            # Get all lectures taught by this teacher
-            teacher_lectures = [lec for lec in lectures if lec.teacher_id == teacher.id]
+            # Get all lectures taught by this teacher using ORM filtering
+            teacher_lecture_ids = [
+                lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()
+            ]
 
             # Sum of all assignments on that day for this teacher
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, t_lectures=teacher_lectures, d_slots=day_timeslots: lec.id
-                in [tl.id for tl in t_lectures]
-                and ts.id in [ds.id for ds in d_slots],
+                where=lambda lec, ts, room, t_lec_ids=teacher_lecture_ids, d_slot_ids=day_timeslot_ids: lec.id
+                in t_lec_ids
+                and ts.id in d_slot_ids,
             )
 
             # Goal: minimize this sum (ideally 0 = complete day off)
-            day_name = day_timeslots[0].day_name if day_timeslots else "Unknown"
+            day_timeslot = session.query(TimeSlot).filter_by(day_of_week=pref.day_of_week).first()
+            day_name = day_timeslot.day_name if day_timeslot else "Unknown"
             goal_name = f"day_off_teacher_{teacher.id}_{day_name}"
 
             model.add_constraint(
@@ -277,8 +287,9 @@ def build_timetabling_model_with_goals(session) -> LXModel:
                 .as_goal(priority=priority, weight=1.0)
             )
 
-            lecture = next((l for l in lectures if l.id == pref.lecture_id), None)
-            timeslot = next((ts for ts in timeslots if ts.id == pref.timeslot_id), None)
+            # Query lecture and timeslot using ORM
+            lecture = session.query(Lecture).filter_by(id=pref.lecture_id).first()
+            timeslot = session.query(TimeSlot).filter_by(id=pref.timeslot_id).first()
             if lecture and timeslot:
                 subject_name = get_subject_name(session, lecture.subject_id)
                 class_name = get_class_name(session, lecture.class_id)
@@ -301,7 +312,7 @@ def build_timetabling_model_with_goals(session) -> LXModel:
 
 
 def analyze_goal_satisfaction(solution, session):
-    """Analyze which teacher preferences were satisfied.
+    """Analyze which teacher preferences were satisfied using ORM.
 
     Args:
         solution: LXSolution object.
@@ -311,25 +322,22 @@ def analyze_goal_satisfaction(solution, session):
     print("GOAL SATISFACTION ANALYSIS")
     print(f"{'=' * 80}")
 
-    preferences = session.query(TeacherPreference).all()
-    teachers = session.query(Teacher).all()
-
     # Group preferences by priority
     priority_groups = {1: [], 2: [], 3: []}
 
-    for pref in preferences:
-        teacher = next((t for t in teachers if t.id == pref.teacher_id), None)
+    # Query preferences directly from database (no pre-loading into list)
+    for pref in session.query(TeacherPreference).all():
+        # Query teacher using ORM
+        teacher = session.query(Teacher).filter_by(id=pref.teacher_id).first()
         if not teacher:
             continue
 
         priority = calculate_priority_from_work_years(teacher.work_years)
 
         if pref.preference_type == "DAY_OFF":
-            timeslots = session.query(TimeSlot).all()
-            day_timeslots = [
-                ts for ts in timeslots if ts.day_of_week == pref.day_of_week
-            ]
-            day_name = day_timeslots[0].day_name if day_timeslots else "Unknown"
+            # Query timeslot for day name using ORM
+            day_timeslot = session.query(TimeSlot).filter_by(day_of_week=pref.day_of_week).first()
+            day_name = day_timeslot.day_name if day_timeslot else "Unknown"
             goal_name = f"day_off_teacher_{teacher.id}_{day_name}"
         else:  # SPECIFIC_TIME
             goal_name = f"specific_time_teacher_{teacher.id}_lecture_{pref.lecture_id}"
@@ -403,22 +411,16 @@ def analyze_goal_satisfaction(solution, session):
                 dev_value = deviations
 
             if pref.preference_type == "DAY_OFF":
-                timeslots = session.query(TimeSlot).all()
-                day_name = next(
-                    (ts.day_name for ts in timeslots if ts.day_of_week == pref.day_of_week),
-                    "Unknown",
-                )
+                # Query timeslot for day name using ORM
+                day_timeslot = session.query(TimeSlot).filter_by(day_of_week=pref.day_of_week).first()
+                day_name = day_timeslot.day_name if day_timeslot else "Unknown"
                 print(
                     f"  {status}: {teacher.name} wants {day_name} off (deviation: {dev_value:.0f} lectures)"
                 )
             else:  # SPECIFIC_TIME
-                lecture = next(
-                    (l for l in session.query(Lecture).all() if l.id == pref.lecture_id), None
-                )
-                timeslot = next(
-                    (ts for ts in session.query(TimeSlot).all() if ts.id == pref.timeslot_id),
-                    None,
-                )
+                # Query lecture and timeslot using ORM
+                lecture = session.query(Lecture).filter_by(id=pref.lecture_id).first()
+                timeslot = session.query(TimeSlot).filter_by(id=pref.timeslot_id).first()
                 if lecture and timeslot:
                     subject_name = get_subject_name(session, lecture.subject_id)
                     class_name = get_class_name(session, lecture.class_id)
@@ -443,9 +445,8 @@ def display_teacher_timetable(
     # Create grid
     grid = [[" " for _ in range(5)] for _ in range(6)]
 
-    # Get teacher's lectures using ORM query
-    lectures = session.query(Lecture).all()
-    teacher_lectures = [lec for lec in lectures if lec.teacher_id == teacher.id]
+    # Get teacher's lectures using ORM query with filtering
+    teacher_lectures = session.query(Lecture).filter_by(teacher_id=teacher.id).all()
     timeslots = session.query(TimeSlot).all()
     classrooms = session.query(Classroom).all()
 
@@ -508,9 +509,8 @@ def display_solution(solution, session):
         if value > 0.5:
             schedule_data[(lecture_id, timeslot_id, classroom_id)] = 1
 
-    # Display teacher timetables using ORM queries
-    teachers = session.query(Teacher).all()
-    for teacher in teachers:
+    # Display teacher timetables by querying directly from database
+    for teacher in session.query(Teacher).all():
         display_teacher_timetable(session, teacher, schedule_data)
 
     # Analyze goal satisfaction
@@ -538,8 +538,7 @@ def main():
 
     try:
         # Verify database is populated
-        teachers = session.query(Teacher).all()
-        if not teachers:
+        if session.query(Teacher).count() == 0:
             print("\n❌ Database is empty! Please run sample_data.py first:")
             print("   python sample_data.py")
             return

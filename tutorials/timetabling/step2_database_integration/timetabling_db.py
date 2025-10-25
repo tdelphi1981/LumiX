@@ -102,25 +102,20 @@ def build_timetabling_model(session) -> LXModel:
     model = LXModel("high_school_timetabling_orm")
     model.add_variable(assignment)
 
-    # Get data counts for reporting (LumiX already queried via from_model)
-    teachers = session.query(Teacher).all()
-    classrooms = session.query(Classroom).all()
-    classes = session.query(SchoolClass).all()
-    lectures = session.query(Lecture).all()
-    timeslots = session.query(TimeSlot).all()
-
-    print(f"  Loaded {len(teachers)} teachers")
-    print(f"  Loaded {len(classrooms)} classrooms")
-    print(f"  Loaded {len(classes)} classes")
-    print(f"  Loaded {len(lectures)} lectures")
-    print(f"  Loaded {len(timeslots)} timeslots")
+    # Report data counts (query count only, not loading into memory)
+    print(f"  Loaded {session.query(Teacher).count()} teachers")
+    print(f"  Loaded {session.query(Classroom).count()} classrooms")
+    print(f"  Loaded {session.query(SchoolClass).count()} classes")
+    print(f"  Loaded {session.query(Lecture).count()} lectures")
+    print(f"  Loaded {session.query(TimeSlot).count()} timeslots")
 
     # ========== CONSTRAINTS ==========
 
     # Constraint 1: Each lecture assigned exactly once
     print("\n  Adding hard constraints...")
     print("    - Lecture coverage constraints")
-    for lecture in lectures:
+    # Query lectures directly from database (no pre-loading into list)
+    for lecture in session.query(Lecture).all():
         expr = LXLinearExpression().add_multi_term(
             assignment,
             coeff=lambda lec, ts, room: 1.0,
@@ -134,8 +129,9 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 2: No classroom conflicts
     print("    - Classroom conflict constraints")
-    for timeslot in timeslots:
-        for classroom in classrooms:
+    # Query timeslots and classrooms directly from database
+    for timeslot in session.query(TimeSlot).all():
+        for classroom in session.query(Classroom).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
@@ -153,16 +149,18 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 3: No teacher conflicts
     print("    - Teacher conflict constraints")
-    for teacher in teachers:
-        teacher_lectures = [lec for lec in lectures if lec.teacher_id == teacher.id]
+    # Query teachers directly and use ORM relationship filtering
+    for teacher in session.query(Teacher).all():
+        # Query only this teacher's lectures (ORM filtering, not loading all lectures)
+        teacher_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()]
 
-        for timeslot in timeslots:
+        for timeslot in session.query(TimeSlot).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, current_ts=timeslot, t_lectures=teacher_lectures: ts.id
+                where=lambda lec, ts, room, current_ts=timeslot, t_lec_ids=teacher_lecture_ids: ts.id
                 == current_ts.id
-                and lec.id in [tl.id for tl in t_lectures],
+                and lec.id in t_lec_ids,
             )
 
             model.add_constraint(
@@ -174,16 +172,18 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 4: No class conflicts
     print("    - Class conflict constraints")
-    for school_class in classes:
-        class_lectures = [lec for lec in lectures if lec.class_id == school_class.id]
+    # Query school classes directly and use ORM relationship filtering
+    for school_class in session.query(SchoolClass).all():
+        # Query only this class's lectures (ORM filtering, not loading all lectures)
+        class_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(class_id=school_class.id).all()]
 
-        for timeslot in timeslots:
+        for timeslot in session.query(TimeSlot).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, current_ts=timeslot, c_lectures=class_lectures: ts.id
+                where=lambda lec, ts, room, current_ts=timeslot, c_lec_ids=class_lecture_ids: ts.id
                 == current_ts.id
-                and lec.id in [cl.id for cl in c_lectures],
+                and lec.id in c_lec_ids,
             )
 
             model.add_constraint(
@@ -374,14 +374,11 @@ def display_solution(solution, session):
         if value > 0.5:
             schedule_data[(lecture_id, timeslot_id, classroom_id)] = 1
 
-    # Display all timetables using ORM queries
-    teachers = session.query(Teacher).all()
-    classes = session.query(SchoolClass).all()
-
-    for teacher in teachers:
+    # Display all timetables by querying directly from database
+    for teacher in session.query(Teacher).all():
         display_teacher_timetable(session, teacher, schedule_data)
 
-    for school_class in classes:
+    for school_class in session.query(SchoolClass).all():
         display_class_timetable(session, school_class, schedule_data)
 
 

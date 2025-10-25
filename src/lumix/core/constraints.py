@@ -63,6 +63,121 @@ class LXConstraint(Generic[TModel]):
     # Goal programming metadata
     goal_metadata: Optional["LXGoalMetadata"] = None
 
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+
+        This method enables what-if analysis on constraints using ORM data sources by:
+        1. Materializing lazy-loaded ORM data before copying
+        2. Detaching ORM objects from database sessions
+        3. Safely copying lambda functions (index_func, rhs_func, etc.)
+        4. Deep copying constraint expressions and goal metadata
+
+        Args:
+            memo: Dictionary for tracking circular references during deepcopy
+
+        Returns:
+            Deep copy of this constraint with all ORM dependencies resolved
+
+        Note:
+            After copying, the new constraint will have _session=None and all data
+            stored in _data as detached objects safe for pickling.
+        """
+        from copy import deepcopy
+        from ..utils.copy_utils import (
+            materialize_and_detach_list,
+            copy_function_detaching_closure
+        )
+
+        # Create new instance without calling __init__
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+
+        # Copy simple attributes
+        result.name = self.name
+        result.sense = self.sense
+        result.rhs_value = self.rhs_value
+        result.model_type = self.model_type
+
+        # Copy callable attributes - may have closures capturing ORM objects
+        result.index_func = (
+            copy_function_detaching_closure(self.index_func, memo)
+            if self.index_func is not None
+            else None
+        )
+        result.rhs_func = (
+            copy_function_detaching_closure(self.rhs_func, memo)
+            if self.rhs_func is not None
+            else None
+        )
+
+        # Deep copy LHS expression (may contain variables and terms)
+        result.lhs = (
+            deepcopy(self.lhs, memo)
+            if self.lhs is not None
+            else None
+        )
+
+        # Handle data sources
+        if self._session is not None:
+            # Materialize ORM data before copying
+            try:
+                instances = self.get_instances()
+                result._data = materialize_and_detach_list(instances, memo)
+            except Exception as e:
+                import warnings
+                warnings.warn(
+                    f"Failed to materialize constraint data for '{self.name}': {e}. "
+                    f"Constraint will have no instances in the copy.",
+                    UserWarning
+                )
+                result._data = []
+            result._session = None
+        elif self._data is not None:
+            # Already have data - just detach and copy
+            result._data = materialize_and_detach_list(self._data, memo)
+            result._session = None
+        else:
+            result._data = None
+            result._session = None
+
+        # Deep copy goal metadata if present
+        result.goal_metadata = (
+            deepcopy(self.goal_metadata, memo)
+            if self.goal_metadata is not None
+            else None
+        )
+
+        return result
+
+    def __getstate__(self):
+        """Support for pickle protocol - detach ORM sessions before pickling.
+
+        Returns:
+            Dictionary of instance state safe for pickling
+        """
+        state = self.__dict__.copy()
+
+        # If using ORM session, materialize data before pickling
+        if state.get('_session') is not None:
+            try:
+                instances = self.get_instances()
+                from ..utils.copy_utils import detach_orm_object
+                state['_data'] = [detach_orm_object(inst) for inst in instances]
+            except Exception:
+                state['_data'] = []
+            state['_session'] = None
+
+        return state
+
+    def __setstate__(self, state):
+        """Support for pickle protocol - restore from pickled state.
+
+        Args:
+            state: Dictionary of instance state from pickling
+        """
+        self.__dict__.update(state)
+
     def expression(self, expr: LXLinearExpression[TModel]) -> Self:
         """
         Set LHS expression.

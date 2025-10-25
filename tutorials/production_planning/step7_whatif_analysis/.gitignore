@@ -1,0 +1,10 @@
+# Database files
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# HTML reports
+*.html

@@ -1,0 +1,16 @@
+# SQLite database
+production.db
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# HTML reports
+*.html
+
+# Virtual environment
+venv/
+env/

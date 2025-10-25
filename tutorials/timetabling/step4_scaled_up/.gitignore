@@ -3,6 +3,7 @@
 *.db-journal
 *.sqlite
 *.sqlite3
+*.html
 
 # Python cache
 __pycache__/

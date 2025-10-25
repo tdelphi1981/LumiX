@@ -15,6 +15,7 @@ Teachers can express preferences like "I want Tuesdays off" or "I want to teach 
 3. **Priority Calculation**: Priorities assigned based on years of service
 4. **Goal Programming**: Preferences converted to soft constraints (goals)
 5. **Mixed Optimization**: Hard constraints (must satisfy) + soft goals (minimize violations)
+6. **True ORM Pattern**: Like Step 2, uses direct ORM queries instead of loading data into lists
 
 ### Why Use Goal Programming?
 
@@ -220,9 +221,9 @@ python timetabling_goals.py
 ```
 
 The program will:
-1. Load data including teacher preferences
-2. Build hard constraints (basic timetabling)
-3. Add soft goal constraints (teacher preferences with priorities)
+1. Query data from database using ORM (on-demand, not pre-loading into lists)
+2. Build hard constraints (basic timetabling) using direct ORM queries
+3. Add soft goal constraints (teacher preferences with priorities) using ORM filtering
 4. Solve using goal programming
 5. Display teacher timetables
 6. Analyze which preferences were satisfied
@@ -235,12 +236,14 @@ LumiX Tutorial: High School Course Timetabling - Step 3
 ================================================================================
 
 This example demonstrates:
-  ✓ Goal programming with teacher preferences
+  ✓ SQLAlchemy ORM with goal programming
+  ✓ LumiX's from_model(session) for direct database querying
   ✓ Priority-based optimization (seniority determines priority)
   ✓ Mixed hard constraints + soft goals
   ✓ Preference satisfaction analysis
 
-Loading data from database...
+Building course timetabling model with goal programming...
+  Using LumiX's from_model() for direct database querying
   Loaded 5 teachers
   Loaded 4 classrooms
   Loaded 4 classes
@@ -248,7 +251,6 @@ Loading data from database...
   Loaded 30 timeslots
   Loaded 7 teacher preferences
 
-Building course timetabling model with goal programming...
   Adding hard constraints...
     - Lecture coverage constraints
     - Classroom conflict constraints
@@ -314,10 +316,18 @@ Tutorial Step 3 Complete!
 ================================================================================
 
 What's new in Step 3:
+  → SQLAlchemy ORM models with teacher preferences
+  → from_model(session) instead of from_data()
   → Teacher preferences as soft goal constraints
   → Priority levels based on teacher seniority (work years)
   → Goal programming: minimize preference violations
   → Comprehensive goal satisfaction analysis
+
+ORM Benefits:
+  ✓ No manual SQL queries
+  ✓ IDE autocomplete for model attributes
+  ✓ Automatic foreign key validation
+  ✓ Type-safe database operations
 
 Key Insights:
   • Senior teachers' preferences are prioritized
@@ -379,19 +389,24 @@ neg_dev = deviations["neg"]  # Negative deviation
 
 ## Implementation Patterns
 
-### Pattern 1: DAY_OFF Goal
+### Pattern 1: DAY_OFF Goal (with ORM)
 
 ```python
 # Goal: Minimize assignments on a specific day for a teacher
-day_timeslots = [ts for ts in timeslots if ts.day_of_week == preferred_day]
-teacher_lectures = [lec for lec in lectures if lec.teacher_id == teacher.id]
+# Query data using ORM filtering (not list comprehensions)
+day_timeslot_ids = [
+    ts.id for ts in session.query(TimeSlot).filter_by(day_of_week=preferred_day).all()
+]
+teacher_lecture_ids = [
+    lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()
+]
 
 expr = LXLinearExpression().add_multi_term(
     assignment,
     coeff=lambda lec, ts, room: 1.0,
-    where=lambda lec, ts, room: (
-        lec.id in [tl.id for tl in teacher_lectures] and
-        ts.id in [ds.id for ds in day_timeslots]
+    where=lambda lec, ts, room, t_lec_ids=teacher_lecture_ids, d_slot_ids=day_timeslot_ids: (
+        lec.id in t_lec_ids and
+        ts.id in d_slot_ids
     )
 )
 
@@ -404,16 +419,16 @@ model.add_constraint(
 )
 ```
 
-### Pattern 2: SPECIFIC_TIME Goal
+### Pattern 2: SPECIFIC_TIME Goal (with ORM)
 
 ```python
 # Goal: Assign specific lecture to specific timeslot
 expr = LXLinearExpression().add_multi_term(
     assignment,
     coeff=lambda lec, ts, room: 1.0,
-    where=lambda lec, ts, room: (
-        lec.id == target_lecture_id and
-        ts.id == target_timeslot_id
+    where=lambda lec, ts, room, target_lec=pref.lecture_id, target_ts=pref.timeslot_id: (
+        lec.id == target_lec and
+        ts.id == target_ts
     )
 )
 
@@ -424,9 +439,41 @@ model.add_constraint(
     .rhs(1)  # Target: assigned to that timeslot
     .as_goal(priority=priority, weight=1.0)
 )
+
+# Query lecture and timeslot details using ORM (for display)
+lecture = session.query(Lecture).filter_by(id=pref.lecture_id).first()
+timeslot = session.query(TimeSlot).filter_by(id=pref.timeslot_id).first()
 ```
 
-### Pattern 3: Priority Calculation
+### Pattern 3: ORM Querying Pattern
+
+Step 3 uses the same ORM pattern as Step 2 - **no pre-loading data into lists**:
+
+```python
+# ❌ DON'T: Load everything into lists (old approach)
+teachers = session.query(Teacher).all()
+lectures = session.query(Lecture).all()
+timeslots = session.query(TimeSlot).all()
+
+# ✓ DO: Query on-demand when needed (ORM pattern)
+for teacher in session.query(Teacher).all():
+    # Query only this teacher's lectures using ORM filtering
+    teacher_lecture_ids = [
+        lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()
+    ]
+
+    for timeslot in session.query(TimeSlot).all():
+        # Use the filtered data in constraints
+        expr = LXLinearExpression().add_multi_term(...)
+```
+
+**Benefits:**
+- More efficient memory usage
+- Demonstrates proper ORM usage
+- Follows SQLAlchemy best practices
+- Consistent with Step 2
+
+### Pattern 4: Priority Calculation
 
 ```python
 def calculate_priority(work_years: int) -> int:
@@ -473,7 +520,17 @@ Goal programming makes trade-offs visible:
 
 This transparency helps explain scheduling decisions.
 
-### 4. Hard vs. Soft Constraints
+### 4. ORM Pattern Consistency
+
+Step 3 maintains the same ORM pattern as Step 2:
+- **No pre-loading**: Data is queried on-demand, not loaded into lists upfront
+- **Direct queries**: Uses `session.query()` throughout the code
+- **ORM filtering**: Uses `.filter_by()` for targeted queries
+- **Type safety**: Leverages SQLAlchemy's type system
+
+This consistency makes it easier to learn and maintain the codebase.
+
+### 5. Hard vs. Soft Constraints
 
 Understanding the difference:
 

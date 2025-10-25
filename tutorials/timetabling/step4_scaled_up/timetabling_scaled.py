@@ -16,6 +16,7 @@ New Features in Step 4:
     - **More Departments**: Math/Science (8 teachers), Humanities (5), PE (2)
     - **40 Timeslots**: 8 periods per day instead of 6
     - **Enhanced Analytics**: Better solution quality reporting
+    - **Interactive HTML Report**: Modern dashboard with timetables and statistics
 
 Prerequisites:
     Before running this script, populate the database:
@@ -28,6 +29,7 @@ Learning Objectives:
     3. How cached checkers improve performance at scale
     4. How goal programming scales with problem size
     5. How to analyze solution quality for large problems
+    6. How to generate interactive HTML reports for solutions
 """
 
 import time
@@ -59,6 +61,7 @@ from database import (
     get_class_name,
     get_classroom_name,
 )
+from report_generator import generate_html_report
 
 solver_to_use = "ortools"
 
@@ -112,23 +115,23 @@ def build_timetabling_model(session) -> LXModel:
     model = LXModel("high_school_timetabling_large_scale")
     model.add_variable(assignment)
 
-    # Get data for constraints
-    teachers = session.query(Teacher).all()
-    classrooms = session.query(Classroom).all()
-    classes = session.query(SchoolClass).all()
-    lectures = session.query(Lecture).all()
-    timeslots = session.query(TimeSlot).all()
-
     variable_creation_time = time.time() - start_time
 
+    # Query counts directly (not loading into lists)
+    num_teachers = session.query(Teacher).count()
+    num_classrooms = session.query(Classroom).count()
+    num_classes = session.query(SchoolClass).count()
+    num_lectures = session.query(Lecture).count()
+    num_timeslots = session.query(TimeSlot).count()
+
     print(f"\n  Dataset Statistics:")
-    print(f"    Teachers:   {len(teachers):3d}")
-    print(f"    Classrooms: {len(classrooms):3d} (8 regular, 3 labs, 1 gym)")
-    print(f"    Classes:    {len(classes):3d} (4 grades × 3 classes)")
-    print(f"    Lectures:   {len(lectures):3d}")
-    print(f"    Timeslots:  {len(timeslots):3d} (5 days × 8 periods)")
+    print(f"    Teachers:   {num_teachers:3d}")
+    print(f"    Classrooms: {num_classrooms:3d} (8 regular, 3 labs, 1 gym)")
+    print(f"    Classes:    {num_classes:3d} (4 grades × 3 classes)")
+    print(f"    Lectures:   {num_lectures:3d}")
+    print(f"    Timeslots:  {num_timeslots:3d} (5 days × 8 periods)")
     print(f"\n  Model Size:")
-    print(f"    Potential variables: {len(lectures) * len(timeslots) * len(classrooms):,}")
+    print(f"    Potential variables: {num_lectures * num_timeslots * num_classrooms:,}")
     print(f"    (Actual count reduced after room type filtering)")
     print(f"    Variable creation time: {variable_creation_time:.2f}s")
 
@@ -139,7 +142,8 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 1: Each lecture assigned exactly once
     print("    [1/4] Lecture coverage constraints...")
-    for lecture in lectures:
+    # Query lectures directly from database (no pre-loading into list)
+    for lecture in session.query(Lecture).all():
         expr = LXLinearExpression().add_multi_term(
             assignment,
             coeff=lambda lec, ts, room: 1.0,
@@ -153,8 +157,9 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 2: No classroom conflicts
     print("    [2/4] Classroom conflict constraints...")
-    for timeslot in timeslots:
-        for classroom in classrooms:
+    # Query timeslots and classrooms directly from database
+    for timeslot in session.query(TimeSlot).all():
+        for classroom in session.query(Classroom).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
@@ -172,16 +177,18 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 3: No teacher conflicts
     print("    [3/4] Teacher conflict constraints...")
-    for teacher in teachers:
-        teacher_lectures = [lec for lec in lectures if lec.teacher_id == teacher.id]
+    # Query teachers directly and use ORM relationship filtering
+    for teacher in session.query(Teacher).all():
+        # Query only this teacher's lectures (ORM filtering, not loading all lectures)
+        teacher_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(teacher_id=teacher.id).all()]
 
-        for timeslot in timeslots:
+        for timeslot in session.query(TimeSlot).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, current_ts=timeslot, t_lectures=teacher_lectures: ts.id
+                where=lambda lec, ts, room, current_ts=timeslot, t_lec_ids=teacher_lecture_ids: ts.id
                 == current_ts.id
-                and lec.id in [tl.id for tl in t_lectures],
+                and lec.id in t_lec_ids,
             )
 
             model.add_constraint(
@@ -193,16 +200,18 @@ def build_timetabling_model(session) -> LXModel:
 
     # Constraint 4: No class conflicts
     print("    [4/4] Class conflict constraints...")
-    for school_class in classes:
-        class_lectures = [lec for lec in lectures if lec.class_id == school_class.id]
+    # Query school classes directly and use ORM relationship filtering
+    for school_class in session.query(SchoolClass).all():
+        # Query only this class's lectures (ORM filtering, not loading all lectures)
+        class_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(class_id=school_class.id).all()]
 
-        for timeslot in timeslots:
+        for timeslot in session.query(TimeSlot).all():
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, current_ts=timeslot, c_lectures=class_lectures: ts.id
+                where=lambda lec, ts, room, current_ts=timeslot, c_lec_ids=class_lecture_ids: ts.id
                 == current_ts.id
-                and lec.id in [cl.id for cl in c_lectures],
+                and lec.id in c_lec_ids,
             )
 
             model.add_constraint(
@@ -225,14 +234,14 @@ def build_timetabling_model(session) -> LXModel:
     print(f"\n  Building goal programming constraints...")
     goal_start = time.time()
 
-    # Get teacher preferences
-    preferences = session.query(TeacherPreference).all()
-
-    print(f"    Processing {len(preferences)} teacher preferences...")
+    # Query count of teacher preferences directly
+    num_preferences = session.query(TeacherPreference).count()
+    print(f"    Processing {num_preferences} teacher preferences...")
 
     priority_counts = {1: 0, 2: 0, 3: 0}
 
-    for pref in preferences:
+    # Query preferences directly from database (no pre-loading into list)
+    for pref in session.query(TeacherPreference).all():
         teacher = session.query(Teacher).filter_by(id=pref.teacher_id).first()
         if not teacher:
             continue
@@ -242,15 +251,17 @@ def build_timetabling_model(session) -> LXModel:
 
         if pref.preference_type == "DAY_OFF":
             # Goal: Minimize lectures on preferred day
-            teacher_lectures = [lec for lec in lectures if lec.teacher_id == pref.teacher_id]
-            day_timeslots = [ts for ts in timeslots if ts.day_of_week == pref.day_of_week]
+            # Query only this teacher's lectures (ORM filtering)
+            teacher_lecture_ids = [lec.id for lec in session.query(Lecture).filter_by(teacher_id=pref.teacher_id).all()]
+            # Query only this day's timeslots (ORM filtering)
+            day_timeslot_ids = [ts.id for ts in session.query(TimeSlot).filter_by(day_of_week=pref.day_of_week).all()]
 
             expr = LXLinearExpression().add_multi_term(
                 assignment,
                 coeff=lambda lec, ts, room: 1.0,
-                where=lambda lec, ts, room, t_lectures=teacher_lectures, d_slots=day_timeslots:
-                    lec.id in [tl.id for tl in t_lectures]
-                    and ts.id in [ds.id for ds in d_slots],
+                where=lambda lec, ts, room, t_lec_ids=teacher_lecture_ids, d_slot_ids=day_timeslot_ids:
+                    lec.id in t_lec_ids
+                    and ts.id in d_slot_ids,
             )
 
             model.add_constraint(
@@ -461,13 +472,15 @@ def print_solution_summary(solution, session):
 
     # Count assignments
     total_assignments = sum(1 for v in solution.variables["assignment"].values() if v > 0.5)
-    lectures = session.query(Lecture).all()
+    num_lectures = session.query(Lecture).count()
 
-    print(f"Lectures scheduled: {total_assignments}/{len(lectures)}")
+    print(f"Lectures scheduled: {total_assignments}/{num_lectures}")
 
-    # Room type usage
-    classrooms = session.query(Classroom).all()
-    room_usage = {room.room_type: 0 for room in classrooms}
+    # Room type usage (query all classrooms to build room_usage dict)
+    room_usage = {}
+    for room in session.query(Classroom).all():
+        if room.room_type not in room_usage:
+            room_usage[room.room_type] = 0
 
     for (lecture_id, timeslot_id, classroom_id), value in solution.variables["assignment"].items():
         if value > 0.5:
@@ -611,8 +624,8 @@ def main():
 
     try:
         # Verify database is populated
-        teachers = session.query(Teacher).all()
-        if not teachers:
+        num_teachers = session.query(Teacher).count()
+        if num_teachers == 0:
             print("\n❌ Database is empty! Please run sample_data.py first:")
             print("   python sample_data.py")
             return
@@ -647,6 +660,9 @@ def main():
         # Save solution to database
         save_solution_to_db(solution, session)
 
+        # Generate interactive HTML report
+        generate_html_report(solution, session, "timetable_report.html")
+
         print("\n" + "=" * 80)
         print("TUTORIAL STEP 4 COMPLETE!")
         print("=" * 80)
@@ -656,12 +672,15 @@ def main():
         print("  → Cached compatibility checker for performance")
         print("  → 40 timeslots (8 periods per day)")
         print("  → More realistic department structure")
+        print("  → Interactive HTML report with modern dashboard")
         print("\nKey Takeaways:")
         print("  ✓ LumiX handles large-scale problems efficiently")
         print("  ✓ Room type constraints are easy to model")
         print("  ✓ Caching is crucial for performance at scale")
         print("  ✓ Goal programming scales well with problem size")
         print("  ✓ Solution quality remains high even with size increase")
+        print("  ✓ Rich visualization with interactive HTML reports")
+        print("\n📊 Open 'timetable_report.html' in your browser to explore the interactive dashboard!")
         print("=" * 80)
 
     finally:
