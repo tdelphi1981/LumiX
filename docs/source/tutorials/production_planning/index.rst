@@ -287,8 +287,8 @@ Quick Start
 .. code-block:: bash
 
    # Clone repository
-   git clone https://github.com/lumix/lumix.git
-   cd lumix/tutorials/production_planning
+   git clone https://github.com/tdelphi1981/LumiX.git
+   cd LumiX/tutorials/production_planning
 
    # Start with Step 1
    cd step1_basic_production
@@ -553,8 +553,8 @@ Getting Help
 
 - **Tutorial Issues**: Check README files in each step directory
 - **API Questions**: Consult :doc:`/api/index`
-- **Bug Reports**: https://github.com/lumix/lumix/issues
-- **Discussions**: https://github.com/lumix/lumix/discussions
+- **Bug Reports**: https://github.com/tdelphi1981/LumiX/issues
+- **Discussions**: https://github.com/tdelphi1981/LumiX/discussions
 
 Contributing
 ------------

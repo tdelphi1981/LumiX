@@ -3,10 +3,6 @@ Step 7: What-If Analysis
 
 In this final step, we extend Step 4's multi-period production planning model with comprehensive **what-if analysis** capabilities for interactive tactical decision support.
 
-.. contents:: Table of Contents
-   :local:
-   :depth: 2
-
 Overview
 --------
 

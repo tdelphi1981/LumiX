@@ -57,8 +57,8 @@ Clone and Install
 
 .. code-block:: bash
 
-   git clone https://github.com/lumix/lumix.git
-   cd lumix
+   git clone https://github.com/tdelphi1981/LumiX.git
+   cd LumiX
    pip install -e .[dev]
 
 Run Tests

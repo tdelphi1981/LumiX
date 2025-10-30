@@ -8,9 +8,7 @@ Overview
 
 Learn fundamental continuous variable optimization for production planning with profit maximization.
 
-For detailed documentation, see the README in the tutorial directory:
-
-:doc:`/tutorials/production_planning/step1_basic_production/README`
+For detailed documentation, see the README file in the ``tutorials/production_planning/step1_basic_production/`` directory of the repository
 
 Key Topics
 ----------

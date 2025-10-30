@@ -133,8 +133,8 @@ Quick Start
 .. code-block:: bash
 
    # Clone the repository
-   git clone https://github.com/lumix/lumix.git
-   cd lumix
+   git clone https://github.com/tdelphi1981/LumiX.git
+   cd LumiX
 
    # Navigate to tutorials
    cd tutorials/timetabling

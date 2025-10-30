@@ -259,8 +259,8 @@ Community & Support
 -------------------
 
 - **Documentation**: https://lumix.readthedocs.io
-- **Source Code**: https://github.com/lumix/lumix
-- **Issue Tracker**: https://github.com/lumix/lumix/issues
+- **Source Code**: https://github.com/tdelphi1981/LumiX
+- **Issue Tracker**: https://github.com/tdelphi1981/LumiX/issues
 - **License**: Academic Free License v3.0
 
 Indices and Tables

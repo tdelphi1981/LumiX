@@ -652,4 +652,4 @@ If you've created a useful extension, consider contributing it back to LumiX:
 4. Update documentation
 5. Submit a pull request
 
-See the `Contributing Guide <https://github.com/lumix/lumix/blob/main/CONTRIBUTING.md>`_ for details.
+See the `Contributing Guide <https://github.com/tdelphi1981/LumiX/blob/main/CONTRIBUTING.md>`_ for details.

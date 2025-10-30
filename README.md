@@ -323,8 +323,8 @@ model.add_constraint(
 ### Setup Development Environment
 
 ```bash
-git clone https://github.com/lumix/lumix.git
-cd lumix
+git clone https://github.com/tdelphi1981/LumiX.git
+cd LumiX
 pip install -e .[dev]
 ```
 
@@ -399,8 +399,8 @@ LumiX builds upon the excellent work of:
 ## 📞 Support
 
 - **Documentation**: https://lumix.readthedocs.io
-- **Issues**: https://github.com/lumix/lumix/issues
-- **Discussions**: https://github.com/lumix/lumix/discussions
+- **Issues**: https://github.com/tdelphi1981/LumiX/issues
+- **Discussions**: https://github.com/tdelphi1981/LumiX/discussions
 
 ## 🗺️ Roadmap
 
@@ -412,6 +412,15 @@ LumiX builds upon the excellent work of:
 - [ ] Advanced constraint programming features
 - [ ] Parallel scenario evaluation
 - [ ] Model versioning and serialization
+
+## Authors
+
+This project is maintained by:
+
+- **Tolga BERBER** - tolga.berber@fen.ktu.edu.tr
+- **Beyzanur SİYAH** - beyzanursiyah@ktu.edu.tr
+
+For a complete list of contributors, see [AUTHORS](AUTHORS).
 
 ---
 

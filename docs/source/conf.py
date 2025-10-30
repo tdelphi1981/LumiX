@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath("../../src"))
 
 project = "LumiX"
 copyright = "2024, LumiX Contributors"
+# For specific author information, see the AUTHORS file in the project root
 author = "LumiX Contributors"
 release = "0.1.0"
 version = "0.1.0"

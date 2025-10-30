@@ -3,10 +3,6 @@ Model Copying and ORM Detachment
 
 This guide explains LumiX's strategy for safely copying optimization models that use ORM (Object-Relational Mapping) data sources, enabling what-if analysis and scenario comparison.
 
-.. contents:: Table of Contents
-   :local:
-   :depth: 2
-
 Overview
 --------
 
@@ -676,8 +672,16 @@ See Also
 - :doc:`/user-guide/analysis/whatif` - What-if analysis using model copying
 - :doc:`/user-guide/analysis/scenario` - Scenario analysis
 - :doc:`orm-integration` - ORM integration overview
-- :doc:`/api/utils/copy_utils` - API reference for copy_utils module
 - :doc:`/tutorials/production_planning/step7_whatif` - Tutorial using ORM copying
+
+API Reference
+~~~~~~~~~~~~~
+
+For detailed API documentation of the ``copy_utils`` module functions, see the source code docstrings:
+
+- ``lumix.utils.copy_utils.detach_orm_object``
+- ``lumix.utils.copy_utils.materialize_and_detach_list``
+- ``lumix.utils.copy_utils.copy_function_detaching_closure``
 
 References
 ----------

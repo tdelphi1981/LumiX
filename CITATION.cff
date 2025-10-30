@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use LumiX in your research, please cite it as below."
+title: "LumiX: A type-safe, IDE-friendly wrapper for optimization solvers"
+version: 0.1.1
+date-released: 2024-10-30
+authors:
+  - family-names: BERBER
+    given-names: Tolga
+    email: tolga.berber@fen.ktu.edu.tr
+  - family-names: SİYAH
+    given-names: Beyzanur
+    email: beyzanursiyah@ktu.edu.tr
+repository-code: "https://github.com/tdelphi1981/LumiX"
+url: "https://lumix.readthedocs.io"
+keywords:
+  - optimization
+  - mathematical-programming
+  - linear-programming
+  - solver
+  - ortools
+  - gurobi
+  - cplex
+  - academic
+license: AFL-3.0
+abstract: "A type-safe, IDE-friendly wrapper for optimization solvers with automatic data-driven modeling"

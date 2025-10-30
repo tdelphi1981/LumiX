@@ -140,8 +140,8 @@ Each example is self-contained and can be run directly:
 .. code-block:: bash
 
    # Clone the repository
-   git clone https://github.com/lumix/lumix.git
-   cd lumix
+   git clone https://github.com/tdelphi1981/LumiX.git
+   cd LumiX
 
    # Install LumiX with a solver
    pip install -e .[ortools]
@@ -281,8 +281,8 @@ Getting Started
 .. code-block:: bash
 
    # Clone the repository
-   git clone https://github.com/lumix/lumix.git
-   cd lumix
+   git clone https://github.com/tdelphi1981/LumiX.git
+   cd LumiX
 
    # Install LumiX with a solver
    pip install -e .[ortools]

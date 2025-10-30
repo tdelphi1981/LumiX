@@ -1,9 +1,10 @@
 [project]
-name = "lumix"
-version = "0.1.0"
+name = "lumix-opt"
+version = "0.1.1"
 description = "A type-safe, IDE-friendly wrapper for optimization solvers with automatic data-driven modeling"
 authors = [
-    {name = "LumiX Contributors"}
+    {name = "Tolga BERBER", email="tolga.berber@fen.ktu.edu.tr"},
+    {name = "Beyzanur SİYAH", email="beyzanursiyah@ktu.edu.tr"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,10 +51,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lumix/lumix"
+Homepage = "https://github.com/tdelphi1981/LumiX"
 Documentation = "https://lumix.readthedocs.io"
-Repository = "https://github.com/lumix/lumix"
-Issues = "https://github.com/lumix/lumix/issues"
+Repository = "https://github.com/tdelphi1981/LumiX"
+Issues = "https://github.com/tdelphi1981/LumiX/issues"
 
 [build-system]
 requires = ["setuptools>=68.0.0", "wheel"]

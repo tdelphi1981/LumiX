@@ -364,4 +364,4 @@ Getting Help
 
 - Check the examples in the repository
 - Read the API documentation
-- Open an issue on GitHub: https://github.com/lumix/lumix/issues
+- Open an issue on GitHub: https://github.com/tdelphi1981/LumiX/issues

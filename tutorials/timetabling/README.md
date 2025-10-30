@@ -447,8 +447,8 @@ where=lambda lec, ts, current=lecture: lec.id == current.id  # Captures value
 
 ### Community
 
-- [LumiX GitHub Issues](https://github.com/lumix/lumix/issues)
-- [LumiX Discussions](https://github.com/lumix/lumix/discussions)
+- [LumiX GitHub Issues](https://github.com/tdelphi1981/LumiX/issues)
+- [LumiX Discussions](https://github.com/tdelphi1981/LumiX/discussions)
 
 ## Summary
 
