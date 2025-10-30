@@ -28,13 +28,13 @@ LumiX makes mathematical programming accessible, maintainable, and enjoyable by 
 
 ```bash
 # Install core library
-pip install lumix
+pip install lumix-opt
 
 # Install with a solver (e.g., OR-Tools - free and open-source)
-pip install lumix[ortools]
+pip install "lumix-opt[ortools]"
 
 # Or install with multiple solvers
-pip install lumix[ortools,gurobi,cplex]
+pip install "lumix-opt[ortools,gurobi,cplex]"
 ```
 
 ### Simple Example
