@@ -10,7 +10,7 @@ Install LumiX using pip:
 
 .. code-block:: bash
 
-   pip install lumix
+   pip install lumix-opt
 
 This installs the core library with minimal dependencies. You'll need to install at least one solver separately.
 
@@ -26,13 +26,13 @@ Individual Solvers
 
 .. code-block:: bash
 
-   pip install lumix[ortools]
+   pip install "lumix-opt[ortools]"
 
 **Gurobi** (Commercial/Academic License Required)
 
 .. code-block:: bash
 
-   pip install lumix[gurobi]
+   pip install "lumix-opt[gurobi]"
 
 .. note::
    Gurobi requires a valid license. Academic licenses are available for free at https://www.gurobi.com/academia/
@@ -41,7 +41,7 @@ Individual Solvers
 
 .. code-block:: bash
 
-   pip install lumix[cplex]
+   pip install "lumix-opt[cplex]"
 
 .. note::
    CPLEX requires a valid license. Academic licenses are available through IBM Academic Initiative.
@@ -50,7 +50,7 @@ Individual Solvers
 
 .. code-block:: bash
 
-   pip install lumix[glpk]
+   pip install "lumix-opt[glpk]"
 
 All Solvers
 ~~~~~~~~~~~
@@ -59,7 +59,7 @@ To install all supported solvers at once:
 
 .. code-block:: bash
 
-   pip install lumix[all-solvers]
+   pip install "lumix-opt[all-solvers]"
 
 .. warning::
    Commercial solvers (Gurobi, CPLEX) still require valid licenses even if installed.
