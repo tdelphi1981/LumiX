@@ -5,8 +5,6 @@ Implements three formulation methods:
 1. SOS2: Special Ordered Set type 2 (most efficient when supported)
 2. Incremental: Binary selection variables
 3. Logarithmic: Gray code encoding (best for many segments)
-
-Reference: sample_impl/opt_wrapper_design.py:335-578
 """
 
 from typing import Any, Callable, List, Literal, Optional
@@ -51,8 +49,6 @@ class LXPiecewiseLinearizer:
     ) -> LXVariable:
         """
         Create piecewise-linear approximation of arbitrary function.
-
-        Reference: sample_impl/opt_wrapper_design.py:346-397
 
         Args:
             func: Function to approximate (e.g., lambda x: math.exp(x))
@@ -127,8 +123,6 @@ class LXPiecewiseLinearizer:
         """
         Generate adaptive breakpoints based on function curvature.
 
-        Reference: sample_impl/opt_wrapper_design.py:399-434
-
         Uses second derivative as a measure of curvature to place
         more breakpoints where the function changes rapidly.
 
@@ -176,8 +170,6 @@ class LXPiecewiseLinearizer:
     ) -> LXVariable:
         """
         SOS2 (Special Ordered Set type 2) formulation.
-
-        Reference: sample_impl/opt_wrapper_design.py:436-507
 
         Most efficient when solver has native SOS2 support.
 
@@ -259,8 +251,6 @@ class LXPiecewiseLinearizer:
     ) -> LXVariable:
         """
         Incremental (multiple choice) formulation.
-
-        Reference: sample_impl/opt_wrapper_design.py:509-567
 
         Uses binary variables to select which segment is active.
         More variables but can be faster for some solvers.
@@ -362,8 +352,6 @@ class LXPiecewiseLinearizer:
     ) -> LXVariable:
         """
         Logarithmic formulation using Gray code.
-
-        Reference: sample_impl/opt_wrapper_design.py:569-577
 
         Uses log2(n) binary variables instead of n.
         Best for many segments but more complex to implement.

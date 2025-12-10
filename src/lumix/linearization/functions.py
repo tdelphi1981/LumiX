@@ -1,7 +1,6 @@
 """
 Pre-built piecewise-linear approximations for common nonlinear functions.
 
-Reference: sample_impl/opt_wrapper_design.py:581-712
 """
 
 import math
@@ -36,8 +35,6 @@ class LXNonLinearFunctions:
         """
         Exponential function: e^x
 
-        Reference: sample_impl/opt_wrapper_design.py:585-599
-
         Args:
             var: Input variable
             linearizer: Piecewise linearizer instance
@@ -66,8 +63,6 @@ class LXNonLinearFunctions:
     ) -> LXVariable:
         """
         Logarithm: log_base(x)
-
-        Reference: sample_impl/opt_wrapper_design.py:602-617
 
         Args:
             var: Input variable (must be positive)
@@ -105,8 +100,6 @@ class LXNonLinearFunctions:
     ) -> LXVariable:
         """
         Square root: √x
-
-        Reference: sample_impl/opt_wrapper_design.py:620-634
 
         Args:
             var: Input variable (must be non-negative)
@@ -147,8 +140,6 @@ class LXNonLinearFunctions:
         """
         Power function: x^n
 
-        Reference: sample_impl/opt_wrapper_design.py:637-652
-
         Args:
             var: Input variable
             exponent: Power to raise variable to
@@ -185,8 +176,6 @@ class LXNonLinearFunctions:
     ) -> LXVariable:
         """
         Sigmoid function: 1 / (1 + e^(-x))
-
-        Reference: sample_impl/opt_wrapper_design.py:655-669
 
         Useful for modeling probabilities, S-curves, saturation effects.
 
@@ -226,8 +215,6 @@ class LXNonLinearFunctions:
     ) -> LXVariable:
         """
         Sine function: sin(x)
-
-        Reference: sample_impl/opt_wrapper_design.py:672-686
 
         Useful for seasonal patterns, cyclical behavior.
 
@@ -326,8 +313,6 @@ class LXNonLinearFunctions:
     ) -> LXVariable:
         """
         Custom user-defined function.
-
-        Reference: sample_impl/opt_wrapper_design.py:689-711
 
         Allows approximation of any arbitrary function.
 

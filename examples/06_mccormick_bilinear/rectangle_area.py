@@ -105,7 +105,7 @@ WIDTH_MIN = 2.0  # Minimum width (meters)
 WIDTH_MAX = 10.0  # Maximum width (meters)
 
 
-solver_to_use = "cplex"
+solver_to_use = "ortools"
 
 # ==================== MODEL BUILDING ====================
 

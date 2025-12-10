@@ -5,8 +5,6 @@ Implements three main methods:
 1. Binary × Binary: AND logic
 2. Binary × Continuous: Big-M method
 3. Continuous × Continuous: McCormick envelopes
-
-Reference: sample_impl/opt_wrapper_design.py:1285-1366
 """
 
 from typing import Any, List, Optional
@@ -238,8 +236,6 @@ class LXBilinearLinearizer:
     ) -> LXVariable:
         """
         Linearize Continuous × Continuous using McCormick envelopes.
-
-        Reference: sample_impl/opt_wrapper_design.py:1285-1366
 
         Creates auxiliary variable z = x * y with convex hull constraints:
             z >= xL*y + yL*x - xL*yL  (convex envelope 1)
