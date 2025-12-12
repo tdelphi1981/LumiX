@@ -26,7 +26,6 @@ classifiers = [
 dependencies = [
     "typing-extensions>=4.5.0",
     "numpy>=1.24.0",
-    "jupyterlab>=4.5.0",
 ]
 
 [project.optional-dependencies]
@@ -95,4 +94,5 @@ ignore = ["E501"]
 dev = [
     "pulp>=3.3.0",
     "pyomo>=6.9.5",
+    "jupyterlab>=4.5.0",
 ]
