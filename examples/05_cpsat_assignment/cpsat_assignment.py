@@ -8,6 +8,7 @@ Problem Description:
     Assign tasks to workers to minimize total cost while satisfying:
         - Each task must be assigned to exactly one worker
         - Each worker cannot exceed their maximum task capacity
+        - Each worker must be assigned at least one task
         - All assignments must respect integer/binary variable requirements
 
 Mathematical Formulation:
@@ -17,6 +18,7 @@ Mathematical Formulation:
     Subject to:
         - Task coverage: sum(assignment[w,t] for all w) == 1 for each task t
         - Worker capacity: sum(assignment[w,t] for all t) <= max_tasks[w] for each worker w
+        - Worker minimum: sum(assignment[w,t] for all t) >= 1 for each worker w
         - Binary variables: assignment[w,t] ∈ {0, 1}
 
 Key Features Demonstrated:
@@ -164,6 +166,23 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
             )
             .le()
             .rhs(worker.max_tasks)
+        )
+
+    # Constraint 3: Each worker must be assigned at least one task
+    # For each worker w: sum over tasks(assignment[w,t]) >= 1
+    for worker in WORKERS:
+        # Capture worker.id in the lambda to avoid closure issues
+        worker_id = worker.id
+        model.add_constraint(
+            LXConstraint[Worker](f"worker_min_assignment_{worker_id}")
+            .expression(
+                LXLinearExpression().add_multi_term(
+                    assignment,
+                    coeff=lambda w, t, wid=worker_id: 1 if w.id == wid else 0,
+                )
+            )
+            .ge()
+            .rhs(1)
         )
 
     return model, assignment

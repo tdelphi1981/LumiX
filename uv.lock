@@ -1213,7 +1213,6 @@ name = "lumix-opt"
 version = "0.1.1"
 source = { editable = "." }
 dependencies = [
-    { name = "jupyterlab" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "typing-extensions" },
@@ -1260,6 +1259,7 @@ ortools = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "jupyterlab" },
     { name = "pulp" },
     { name = "pyomo" },
 ]
@@ -1273,7 +1273,6 @@ requires-dist = [
     { name = "furo", marker = "extra == 'docs'", specifier = ">=2024.1.0" },
     { name = "gurobipy", marker = "extra == 'all-solvers'", specifier = ">=11.0.0" },
     { name = "gurobipy", marker = "extra == 'gurobi'", specifier = ">=11.0.0" },
-    { name = "jupyterlab", specifier = ">=4.5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "ortools", marker = "extra == 'all-solvers'", specifier = ">=9.8.0" },
@@ -1292,6 +1291,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "jupyterlab", specifier = ">=4.5.0" },
     { name = "pulp", specifier = ">=3.3.0" },
     { name = "pyomo", specifier = ">=6.9.5" },
 ]
