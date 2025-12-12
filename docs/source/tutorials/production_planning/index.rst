@@ -3,10 +3,6 @@ Manufacturing Production Planning Tutorial
 
 A comprehensive 7-step tutorial demonstrating how to build production planning solutions using LumiX, progressing from basic continuous variable optimization to advanced what-if analysis with database integration.
 
-.. contents:: Table of Contents
-   :local:
-   :depth: 2
-
 Overview
 --------
 
