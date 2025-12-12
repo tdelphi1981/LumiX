@@ -193,3 +193,4 @@ secrets.json
 # Previous implementation directory, used for starting point
 /sample_impl/
 
+/benchmark/results
