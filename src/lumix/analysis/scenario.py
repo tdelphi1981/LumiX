@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 
 from typing_extensions import Self
 
@@ -13,6 +13,9 @@ from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
+
+if TYPE_CHECKING:
+    from ..visualization.scenario import LXScenarioCompare
 
 TModel = TypeVar("TModel")
 
@@ -599,6 +602,36 @@ class LXScenarioAnalyzer(Generic[TModel]):
             variable.lower_bound = float(mod.value)  # type: ignore
         elif mod.modification_type == "bound_upper":
             variable.upper_bound = float(mod.value)  # type: ignore
+
+    def visualize(self) -> "LXScenarioCompare[TModel]":
+        """
+        Create interactive visualization for scenario comparison.
+
+        Requires the visualization extra: pip install lumix-opt[viz]
+
+        Returns:
+            LXScenarioCompare instance
+
+        Examples:
+            Basic usage::
+
+                analyzer = LXScenarioAnalyzer(model, optimizer)
+                analyzer.add_scenario(scenario1)
+                analyzer.add_scenario(scenario2)
+                analyzer.run_all_scenarios()
+                analyzer.visualize().show()
+
+            Comparison chart::
+
+                analyzer.visualize().plot_comparison().show()
+
+            Export to HTML::
+
+                analyzer.visualize().to_html("scenarios.html")
+        """
+        from ..visualization import LXScenarioCompare
+
+        return LXScenarioCompare(self)
 
 
 __all__ = [

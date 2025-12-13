@@ -151,6 +151,17 @@ from .goal_programming import (
     solve_goal_programming,
 )
 
+# Visualization (optional dependency)
+# Import availability flag, actual classes use lazy imports
+try:
+    from .visualization import (
+        _PLOTLY_AVAILABLE as _VIZ_AVAILABLE,
+        LXVisualizationConfig,
+    )
+except ImportError:
+    _VIZ_AVAILABLE = False
+    LXVisualizationConfig = None  # type: ignore
+
 __all__ = [
     # Version
     "__version__",
@@ -221,4 +232,6 @@ __all__ = [
     "relax_constraint",
     "relax_constraints",
     "solve_goal_programming",
+    # Visualization (optional)
+    "LXVisualizationConfig",
 ]

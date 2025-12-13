@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import TYPE_CHECKING, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from ..core.model import LXModel
 from ..solution.solution import LXSolution
+
+if TYPE_CHECKING:
+    from ..visualization.sensitivity import LXSensitivityPlot
 
 TModel = TypeVar("TModel")
 
@@ -539,6 +542,33 @@ class LXSensitivityAnalyzer(Generic[TModel]):
                 lines.append(f"  • {name}: shadow price = {sens.shadow_price:.4f}")
 
         return "\n".join(lines)
+
+    def visualize(self) -> "LXSensitivityPlot[TModel]":
+        """
+        Create interactive visualization for sensitivity analysis.
+
+        Requires the visualization extra: pip install lumix-opt[viz]
+
+        Returns:
+            LXSensitivityPlot instance
+
+        Examples:
+            Basic usage::
+
+                analyzer = LXSensitivityAnalyzer(model, solution)
+                analyzer.visualize().show()
+
+            Tornado chart::
+
+                analyzer.visualize().plot_tornado(top_n=15).show()
+
+            Export to HTML::
+
+                analyzer.visualize().to_html("sensitivity.html")
+        """
+        from ..visualization import LXSensitivityPlot
+
+        return LXSensitivityPlot(self)
 
 
 __all__ = [
