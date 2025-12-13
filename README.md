@@ -19,6 +19,7 @@ LumiX makes mathematical programming accessible, maintainable, and enjoyable by 
 - 📊 **Data-Driven Modeling** — Build models directly from your data with automatic indexing and mapping
 - 🔄 **Automatic Linearization** — Automatically linearize non-linear constraints (bilinear, absolute value, piecewise)
 - 📈 **Advanced Analysis** — Built-in sensitivity analysis, scenario analysis, and what-if analysis tools
+- 📊 **Interactive Visualization** — Plotly-based charts for solutions, sensitivity, scenarios, and Gantt schedules
 - 🎯 **Goal Programming** — Native support for multi-objective optimization with priorities and weights
 - ⚡ **ORM Integration** — Map solutions directly to your ORM models for seamless data flow
 
@@ -248,6 +249,40 @@ optimizer = LXOptimizer().use_solver("gurobi")
 solution = optimizer.solve(model)
 ```
 
+### Interactive Visualization
+
+LumiX includes Plotly-based visualization tools for analyzing optimization results:
+
+```bash
+# Install visualization dependencies
+pip install "lumix-opt[viz]"
+```
+
+```python
+from lumix.visualization import (
+    LXSolutionVisualizer,    # Variable values, constraint utilization
+    LXSensitivityPlot,       # Tornado charts, shadow prices
+    LXScenarioCompare,       # Multi-scenario comparison
+    LXGoalProgressChart,     # Goal achievement gauges
+    LXScheduleGantt,         # Gantt charts for scheduling
+    LXAssignmentMatrix,      # Assignment problem heatmaps
+    LXSpatialMap,            # Facility location maps
+    LXModelGraph,            # Variable-constraint network
+    LXDashboard,             # Combined overview dashboards
+)
+
+# Visualize solution
+viz = LXSolutionVisualizer(solution, model)
+viz.show()  # Opens in browser/Jupyter
+
+# Sensitivity tornado chart
+sens_plot = LXSensitivityPlot(sensitivity_analyzer)
+sens_plot.plot_tornado(top_n=10).show()
+
+# Export to HTML
+viz.to_html("solution.html")
+```
+
 ## 📖 Documentation
 
 - **[Installation Guide](docs/source/getting-started/installation.rst)** — Install LumiX and solvers
@@ -375,6 +410,7 @@ lumix/
 │   ├── indexing/          # Multi-dimensional indexing
 │   ├── nonlinear/         # Non-linear terms
 │   ├── solution/          # Solution handling and mapping
+│   ├── visualization/     # Plotly-based interactive charts
 │   └── utils/             # Utilities (logger, ORM, rational converter)
 ├── examples/              # 11 comprehensive examples
 ├── notebooks/             # 15 Jupyter tutorial notebooks
@@ -422,7 +458,7 @@ LumiX builds upon the excellent work of:
 
 - [ ] Additional solver support (HiGHS, SCIP)
 - [x] Jupyter notebook integration
-- [ ] Interactive visualization tools
+- [x] Interactive visualization tools
 - [ ] Cloud solver integration
 - [x] SQLAlchemy ORM support
 - [ ] Django ORM support
