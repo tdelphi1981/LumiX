@@ -35,6 +35,7 @@ from lumix import (
     LXModel,
     LXOptimizer,
     LXSensitivityAnalyzer,
+    LXSolution,
     LXVariable,
 )
 
@@ -307,6 +308,38 @@ def run_sensitivity_analysis():
     print("SENSITIVITY SUMMARY")
     print("=" * 80)
     print(analyzer.generate_summary())
+
+    # Visualize sensitivity
+    visualize_sensitivity(analyzer)
+
+
+# ==================== VISUALIZATION ====================
+
+
+def visualize_sensitivity(analyzer: LXSensitivityAnalyzer) -> None:
+    """Visualize sensitivity analysis results interactively.
+
+    Creates interactive tornado charts showing shadow prices
+    and binding constraint analysis.
+
+    Args:
+        analyzer: The sensitivity analyzer with analysis results
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXSensitivityPlot
+
+        print("\n" + "=" * 80)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 80)
+
+        viz = LXSensitivityPlot(analyzer)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
 
 
 # ==================== BUSINESS INSIGHTS ====================

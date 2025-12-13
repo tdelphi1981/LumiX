@@ -45,8 +45,8 @@ class LXVisualizationConfig:
     """
 
     theme: str = "lumix"
-    width: int = 800
-    height: int = 500
+    width: int = 900
+    height: int = 600
     title_font_size: int = 16
     show_legend: bool = True
     interactive: bool = True

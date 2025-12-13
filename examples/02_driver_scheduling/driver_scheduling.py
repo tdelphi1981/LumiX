@@ -67,6 +67,7 @@ from lumix import (
     LXLinearExpression,
     LXModel,
     LXOptimizer,
+    LXSolution,
     LXVariable,
 )
 
@@ -290,6 +291,72 @@ def display_solution(model: LXModel):
         print(f"No optimal solution found. Status: {solution.status}")
 
 
+# ==================== VISUALIZATION ====================
+
+
+def visualize_schedule(model: LXModel, solution: LXSolution) -> None:
+    """Visualize driver scheduling results as a Gantt chart.
+
+    Creates an interactive Gantt chart showing driver assignments
+    across the week, with each bar representing a day a driver is scheduled.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXScheduleGantt, LXScheduleTask
+
+        print("\n" + "=" * 70)
+        print("INTERACTIVE SCHEDULE VISUALIZATION")
+        print("=" * 70)
+
+        # Build lookup dictionaries
+        driver_by_id = {d.id: d for d in DRIVERS}
+        date_by_date = {d.date: d for d in DATES}
+
+        # Extract schedule tasks from solution
+        tasks = []
+        for (driver_id, date_val), value in solution.variables.get("duty", {}).items():
+            if value > 0.5:  # Binary variable is "on"
+                driver = driver_by_id.get(driver_id)
+                date_obj = date_by_date.get(date_val)
+
+                if driver and date_obj:
+                    # Each assignment is a 1-day task
+                    # Use day index for x-axis (0-6 for Mon-Sun)
+                    day_index = (date_val - DATES[0].date).days
+                    cost = calculate_cost(driver, date_obj)
+
+                    tasks.append(
+                        LXScheduleTask(
+                            id=f"{driver_id}_{date_val}",
+                            name=f"${cost:.0f}",
+                            resource=driver.name,
+                            start=day_index,
+                            end=day_index + 1,
+                            metadata={
+                                "driver": driver.name,
+                                "date": date_val.strftime("%a %m/%d"),
+                                "cost": cost,
+                            },
+                        )
+                    )
+
+        # Create Gantt chart
+        viz = LXScheduleGantt(tasks)
+        viz.set_time_unit("days")
+
+        # Show the visualization
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
+
+
 # ==================== MAIN ====================
 
 
@@ -368,8 +435,16 @@ def main():
     model = build_scheduling_model()
     print(model.summary())
 
-    # Solve and display solution
+    # Solve the model
+    optimizer = LXOptimizer().use_solver(solver_to_use)
+    solution = optimizer.solve(model)
+
+    # Display solution (text-based)
     display_solution(model)
+
+    # Visualize solution (interactive charts)
+    if solution.is_optimal():
+        visualize_schedule(model, solution)
 
     print()
     print("=" * 70)

@@ -76,6 +76,7 @@ from lumix import (
     LXOptimizer,
     LXScenario,
     LXScenarioAnalyzer,
+    LXSolution,
     LXVariable,
 )
 
@@ -359,6 +360,9 @@ def run_scenario_analysis():
             f"{delta_pct:+.1f}%"
         )
 
+    # Visualize scenarios
+    visualize_scenarios(analyzer)
+
     # Business insights
     print("\n" + "=" * 80)
     print("BUSINESS INSIGHTS")
@@ -380,6 +384,35 @@ def run_scenario_analysis():
     print("   - Material procurement strategy reduces supply chain risks")
 
     print("\n" + "=" * 80)
+
+
+# ==================== VISUALIZATION ====================
+
+
+def visualize_scenarios(analyzer: LXScenarioAnalyzer) -> None:
+    """Visualize scenario comparison results interactively.
+
+    Creates interactive charts showing scenario objective values
+    and comparison with baseline.
+
+    Args:
+        analyzer: The scenario analyzer with solved scenarios
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXScenarioCompare
+
+        print("\n" + "=" * 80)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 80)
+
+        viz = LXScenarioCompare(analyzer)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
 
 
 # ==================== ADVANCED: SCENARIO COMPARISON ====================

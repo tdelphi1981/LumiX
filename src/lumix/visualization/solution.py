@@ -141,7 +141,7 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
             cols=2,
             subplot_titles=(
                 "Variable Values",
-                "Solution Summary",
+                "",  # No subtitle for indicator (it has its own title)
                 "Constraint Status",
                 "Value Distribution",
             ),
@@ -149,6 +149,8 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
                 [{"type": "bar"}, {"type": "indicator"}],
                 [{"type": "bar"}, {"type": "histogram"}],
             ],
+            horizontal_spacing=0.12,
+            vertical_spacing=0.15,
         )
 
         # Add variable values bar chart
@@ -167,9 +169,18 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         title += f" (Objective: {self.solution.objective_value:,.2f})"
 
         fig.update_layout(
-            title=title,
+            title=dict(text=title, x=0.5, xanchor="center"),
             showlegend=False,
+            margin=dict(t=80, b=60, l=60, r=60),
         )
+
+        # Update axis labels for clarity
+        fig.update_xaxes(title_text="Variable", row=1, col=1)
+        fig.update_yaxes(title_text="Value", row=1, col=1)
+        fig.update_xaxes(title_text="Status", row=2, col=1)
+        fig.update_yaxes(title_text="Count", row=2, col=1)
+        fig.update_xaxes(title_text="Value", row=2, col=2)
+        fig.update_yaxes(title_text="Frequency", row=2, col=2)
 
         return self._apply_theme(fig)
 
@@ -359,12 +370,18 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         colors = self._get_colors()
 
         # Limit for readability
-        max_items = 20
+        max_items = 15
+        names = data["names"][:max_items]
+        values = data["values"][:max_items]
+
         fig.add_trace(
             go.Bar(
-                x=data["names"][:max_items],
-                y=data["values"][:max_items],
+                x=names,
+                y=values,
                 marker_color=colors[0],
+                text=[f"{v:.1f}" for v in values],
+                textposition="outside",
+                hovertemplate="<b>%{x}</b><br>Value: %{y:,.2f}<extra></extra>",
             ),
             row=row,
             col=col,
@@ -372,12 +389,23 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
 
     def _add_summary_indicator(self, fig: Any, row: int, col: int) -> None:
         """Add solution summary indicator."""
+        # Format status for display
+        status = self.solution.status.upper() if self.solution.status else "UNKNOWN"
+        status_color = "#2ecc71" if "optimal" in status.lower() else "#e74c3c"
+
         fig.add_trace(
             go.Indicator(
-                mode="number+delta",
+                mode="number",
                 value=self.solution.objective_value,
-                title={"text": f"Objective ({self.solution.status})"},
-                delta={"reference": 0, "relative": False},
+                title={
+                    "text": f"<b>Objective Value</b><br><span style='font-size:14px;color:{status_color}'>{status}</span>",
+                    "font": {"size": 16},
+                },
+                number={
+                    "font": {"size": 40, "color": "#2c3e50"},
+                    "valueformat": ",.2f",
+                },
+                domain={"row": row - 1, "column": col - 1},
             ),
             row=row,
             col=col,
@@ -399,20 +427,35 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
                     x=["Binding", "Non-binding"],
                     y=[binding_count, non_binding_count],
                     marker_color=[colors[3], colors[4]],
+                    text=[binding_count, non_binding_count],
+                    textposition="auto",
                 ),
                 row=row,
                 col=col,
             )
         else:
-            # No shadow prices - show message
+            # No shadow prices - show placeholder bar with message
+            fig.add_trace(
+                go.Bar(
+                    x=["No Data"],
+                    y=[0],
+                    marker_color=["#bdc3c7"],
+                    showlegend=False,
+                ),
+                row=row,
+                col=col,
+            )
+            # Add annotation centered in the subplot area
             fig.add_annotation(
-                text="Enable sensitivity for constraint data",
-                xref="paper",
-                yref="paper",
-                x=0.25,
-                y=0.25,
+                text="<i>Enable sensitivity analysis<br>for constraint data</i>",
+                xref=f"x{3 if row == 2 and col == 1 else ''}",
+                yref=f"y{3 if row == 2 and col == 1 else ''}",
+                x=0.5,
+                y=0.5,
+                xanchor="center",
+                yanchor="middle",
                 showarrow=False,
-                font_size=10,
+                font=dict(size=11, color="#7f8c8d"),
             )
 
     def _add_value_distribution(self, fig: Any, row: int, col: int) -> None:
@@ -421,11 +464,18 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         colors = self._get_colors()
 
         if data["values"]:
+            # Determine appropriate number of bins
+            n_values = len(data["values"])
+            n_bins = min(max(5, n_values // 2), 15)
+
             fig.add_trace(
                 go.Histogram(
                     x=data["values"],
-                    nbinsx=20,
+                    nbinsx=n_bins,
                     marker_color=colors[0],
+                    marker_line_color="#2c3e50",
+                    marker_line_width=1,
+                    hovertemplate="Range: %{x}<br>Count: %{y}<extra></extra>",
                 ),
                 row=row,
                 col=col,

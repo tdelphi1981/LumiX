@@ -27,6 +27,7 @@ from lumix import (
     LXLinearExpression,
     LXModel,
     LXOptimizer,
+    LXSolution,
     LXVariable,
 )
 
@@ -320,7 +321,37 @@ def main():
             f"  Over target:  ${pos_dev:.2f}"
         )
 
+    # Visualize goals
+    visualize_goals(model, solution)
+
     print("\n" + "=" * 70)
+
+
+def visualize_goals(model: LXModel, solution: LXSolution) -> None:
+    """Visualize goal programming results interactively.
+
+    Creates interactive charts showing goal satisfaction status
+    and deviation analysis.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXGoalProgressChart
+
+        print("\n" + "=" * 70)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 70)
+
+        viz = LXGoalProgressChart(solution)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
 
 
 if __name__ == "__main__":

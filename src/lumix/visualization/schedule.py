@@ -183,59 +183,116 @@ class LXScheduleGantt(LXBaseVisualizer[TModel], Generic[TModel]):
         resources = list(set(task.resource for task in self.tasks))
         colors = self._get_colors()
 
+        # Assign consistent colors per resource
+        resource_colors = {res: colors[i % len(colors)] for i, res in enumerate(sorted(resources))}
+
         fig = go.Figure()
 
-        # Add task bars
-        for i, task in enumerate(self.tasks):
-            color = task.color or colors[i % len(colors)]
+        # Group tasks by resource for cleaner legend
+        tasks_by_resource: Dict[str, List[LXScheduleTask]] = {}
+        for task in self.tasks:
+            if task.resource not in tasks_by_resource:
+                tasks_by_resource[task.resource] = []
+            tasks_by_resource[task.resource].append(task)
 
-            # Handle both datetime and numeric
-            if isinstance(task.start, datetime):
-                x_start = task.start
-                x_end = task.end
-                if isinstance(task.end, datetime):
-                    duration = (task.end - task.start).total_seconds() / 3600
+        # Add task bars grouped by resource
+        for resource in sorted(resources):
+            resource_tasks = tasks_by_resource[resource]
+            color = resource_colors[resource]
+
+            for i, task in enumerate(resource_tasks):
+                # Handle both datetime and numeric
+                if isinstance(task.start, datetime):
+                    x_start = task.start
+                    x_end = task.end
+                    if isinstance(task.end, datetime):
+                        duration = (task.end - task.start).total_seconds() / 3600
+                    else:
+                        duration = 0
                 else:
-                    duration = 0
-            else:
-                x_start = task.start
-                x_end = task.end
-                duration = float(task.end) - float(task.start)
+                    x_start = task.start
+                    x_end = task.end
+                    duration = float(task.end) - float(task.start)
 
-            # Width of bar
-            width = float(x_end) - float(x_start) if isinstance(x_start, (int, float)) else duration
+                # Width of bar
+                width = float(x_end) - float(x_start) if isinstance(x_start, (int, float)) else duration
 
-            fig.add_trace(
-                go.Bar(
-                    x=[width],
-                    y=[task.resource],
-                    base=[x_start],
-                    orientation="h",
-                    name=task.name,
-                    marker_color=color,
-                    text=task.name,
-                    textposition="inside",
-                    hovertemplate=(
-                        f"<b>{task.name}</b><br>"
-                        f"Resource: {task.resource}<br>"
-                        f"Start: {x_start}<br>"
-                        f"End: {x_end}<br>"
-                        f"Duration: {duration:.1f} {self._time_unit}<extra></extra>"
-                    ),
-                    showlegend=True,
+                # Build hover text from metadata if available
+                hover_parts = [f"<b>{task.resource}</b>"]
+                if task.metadata:
+                    for key, val in task.metadata.items():
+                        if key != "driver":  # Skip redundant info
+                            hover_parts.append(f"{key.title()}: {val}")
+                else:
+                    hover_parts.extend([
+                        f"Task: {task.name}",
+                        f"Start: {x_start}",
+                        f"End: {x_end}",
+                        f"Duration: {duration:.1f} {self._time_unit}",
+                    ])
+
+                fig.add_trace(
+                    go.Bar(
+                        x=[width],
+                        y=[task.resource],
+                        base=[x_start],
+                        orientation="h",
+                        name=resource,
+                        marker_color=task.color or color,
+                        marker_line_color="#2c3e50",
+                        marker_line_width=1,
+                        text=task.name,
+                        textposition="inside",
+                        textfont=dict(color="white", size=11),
+                        hovertemplate="<br>".join(hover_parts) + "<extra></extra>",
+                        showlegend=(i == 0),  # Only show first task per resource in legend
+                        legendgroup=resource,
+                    )
                 )
+
+        # Determine x-axis tick configuration for day-based schedules
+        x_axis_config: Dict[str, Any] = {"title": f"Time ({self._time_unit})"}
+
+        if self._time_unit == "days" and self.tasks:
+            # Check if we have integer day indices (0-6 typically)
+            all_numeric = all(
+                isinstance(t.start, (int, float)) and isinstance(t.end, (int, float))
+                for t in self.tasks
             )
+            if all_numeric:
+                min_day = int(min(float(t.start) for t in self.tasks))
+                max_day = int(max(float(t.end) for t in self.tasks))
+
+                # Create day labels
+                day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                tick_vals = list(range(min_day, max_day + 1))
+                tick_text = [day_names[i % 7] if i < 7 else f"Day {i}" for i in tick_vals]
+
+                x_axis_config.update({
+                    "tickmode": "array",
+                    "tickvals": [v + 0.5 for v in tick_vals],  # Center ticks
+                    "ticktext": tick_text,
+                    "range": [min_day - 0.1, max_day + 0.1],
+                })
 
         fig.update_layout(
-            title="Schedule Gantt Chart",
-            xaxis_title=f"Time ({self._time_unit})",
-            yaxis_title="Resource",
+            title=dict(text="Schedule Gantt Chart", x=0.5, xanchor="center"),
+            xaxis=x_axis_config,
+            yaxis=dict(
+                title="Resource",
+                categoryorder="array",
+                categoryarray=sorted(resources, reverse=True),  # Alphabetical from top
+            ),
             barmode="overlay",
             showlegend=True,
-            yaxis=dict(
-                categoryorder="array",
-                categoryarray=sorted(resources),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="center",
+                x=0.5,
             ),
+            margin=dict(t=80, b=60, l=100, r=40),
         )
 
         return self._apply_theme(fig)

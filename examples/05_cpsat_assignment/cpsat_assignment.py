@@ -67,7 +67,7 @@ Notes:
 from dataclasses import dataclass
 from typing import Tuple
 
-from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
+from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXSolution, LXVariable
 from lumix.indexing import LXCartesianProduct, LXIndexDimension
 
 from sample_data import TASKS, WORKERS, Task, Worker, get_assignment_cost
@@ -186,6 +186,94 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
         )
 
     return model, assignment
+
+
+# ==================== VISUALIZATION ====================
+
+
+def visualize_assignments(model: LXModel, solution: LXSolution) -> None:
+    """Visualize worker-task assignment results as an assignment matrix.
+
+    Creates an interactive heatmap showing:
+    - Workers on Y-axis
+    - Tasks on X-axis
+    - Colored cells indicating assignments
+    - Cost values displayed in each assigned cell
+    - Worker utilization sidebar
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import (
+            LXAssignmentMatrix,
+            LXAssignmentCell,
+            LXAssignmentRow,
+        )
+
+        print("\n" + "=" * 70)
+        print("INTERACTIVE ASSIGNMENT MATRIX")
+        print("=" * 70)
+
+        # Build row data (workers with utilization)
+        rows = []
+        for worker in WORKERS:
+            # Count assigned tasks
+            assigned_count = sum(
+                1 for task in TASKS
+                if solution.variables.get("assignment", {}).get(
+                    (worker.id, task.id), 0
+                ) > 0.5
+            )
+            rows.append(
+                LXAssignmentRow(
+                    id=str(worker.id),
+                    name=worker.name,
+                    capacity=worker.max_tasks,
+                    assigned_count=assigned_count,
+                    metadata={"Hourly Rate": f"${worker.hourly_rate}/hr"},
+                )
+            )
+
+        # Build cell data (assignments)
+        cells = []
+        for worker in WORKERS:
+            for task in TASKS:
+                assigned = solution.variables.get("assignment", {}).get(
+                    (worker.id, task.id), 0
+                )
+                cost = get_assignment_cost(worker, task)
+                cells.append(
+                    LXAssignmentCell(
+                        row_id=str(worker.id),
+                        col_id=str(task.id),
+                        row_name=worker.name,
+                        col_name=task.name,
+                        is_assigned=(assigned > 0.5),
+                        value=cost if assigned > 0.5 else 0,
+                        metadata={
+                            "Duration": f"{task.duration_hours}h",
+                            "Priority": f"{task.priority}/10",
+                        },
+                    )
+                )
+
+        # Get ordered column names
+        column_names = [t.name for t in TASKS]
+
+        # Create and show the assignment matrix
+        viz = LXAssignmentMatrix(rows, cells, column_names)
+        viz.set_title("Worker-Task Assignment")
+        viz.set_labels("Workers", "Tasks")
+        viz.set_value_format("${:.0f}")
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
 
 
 # ==================== MAIN ====================
@@ -337,6 +425,9 @@ def main():
             print("  ✓ Combinatorial optimization (assignment problem)")
             print("  ✓ Fast for this problem size and structure")
             print("  ✓ Can easily add CP-specific constraints (e.g., AllDifferent)")
+
+            # Visualize solution (interactive charts)
+            visualize_assignments(model, solution)
 
         else:
             print(f"No optimal solution found. Status: {solution.status}")

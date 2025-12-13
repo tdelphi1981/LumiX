@@ -79,6 +79,14 @@ __all__ = [
     # Scheduling
     "LXScheduleGantt",
     "LXScheduleTask",
+    # Spatial/Location
+    "LXSpatialMap",
+    "LXSpatialNode",
+    "LXSpatialEdge",
+    # Assignment
+    "LXAssignmentMatrix",
+    "LXAssignmentCell",
+    "LXAssignmentRow",
     # Model graph
     "LXModelGraph",
     # Dashboard
@@ -135,6 +143,38 @@ def __getattr__(name: str) -> object:
         from .schedule import LXScheduleTask
 
         return LXScheduleTask
+
+    if name == "LXSpatialMap":
+        require_viz_dependencies()
+        from .spatial import LXSpatialMap
+
+        return LXSpatialMap
+
+    if name == "LXSpatialNode":
+        from .spatial import LXSpatialNode
+
+        return LXSpatialNode
+
+    if name == "LXSpatialEdge":
+        from .spatial import LXSpatialEdge
+
+        return LXSpatialEdge
+
+    if name == "LXAssignmentMatrix":
+        require_viz_dependencies()
+        from .assignment import LXAssignmentMatrix
+
+        return LXAssignmentMatrix
+
+    if name == "LXAssignmentCell":
+        from .assignment import LXAssignmentCell
+
+        return LXAssignmentCell
+
+    if name == "LXAssignmentRow":
+        from .assignment import LXAssignmentRow
+
+        return LXAssignmentRow
 
     if name == "LXModelGraph":
         require_viz_dependencies()

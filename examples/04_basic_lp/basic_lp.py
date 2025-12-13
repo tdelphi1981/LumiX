@@ -62,7 +62,7 @@ See Also:
 from dataclasses import dataclass
 from typing import Tuple
 
-from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
+from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXSolution, LXVariable
 
 
 # ==================== DATA DEFINITIONS ====================
@@ -162,6 +162,36 @@ def build_diet_model() -> Tuple[LXModel, LXVariable[Food, float]]:
     return model, servings
 
 
+# ==================== VISUALIZATION ====================
+
+
+def visualize_diet(model: LXModel, solution: LXSolution) -> None:
+    """Visualize diet optimization results interactively.
+
+    Creates interactive charts showing food servings and
+    nutritional breakdown.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXSolutionVisualizer
+
+        print("\n" + "=" * 60)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 60)
+
+        viz = LXSolutionVisualizer(solution, model)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
+
+
 # ==================== MAIN ====================
 
 
@@ -240,6 +270,9 @@ def main():
             print(f"  Calories:      {total_calories:6.1f} (min: {MIN_CALORIES})")
             print(f"  Protein:       {total_protein:6.1f}g (min: {MIN_PROTEIN}g)")
             print(f"  Calcium:       {total_calcium:6.1f}mg (min: {MIN_CALCIUM}mg)")
+
+            # Visualize solution (interactive charts)
+            visualize_diet(model, solution)
 
         else:
             print(f"No optimal solution found. Status: {solution.status}")
