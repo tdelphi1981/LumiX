@@ -141,13 +141,16 @@ production = (
 )
 
 # Multi-dimension indexing
-from lumix import LXCartesianProduct
+from lumix import LXIndexDimension
 
 assignment = (
-    LXVariable[tuple[Driver, Date, Shift], int]("assignment")
+    LXVariable[Tuple[Driver, Date, Shift], int]("assignment")
     .binary()
-    .indexed_by(lambda t: (t[0].id, t[1].id, t[2].id))
-    .from_data(LXCartesianProduct(drivers, dates, shifts))
+    .indexed_by_product(
+        LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
+        LXIndexDimension(Date, lambda dt: dt.id).from_data(dates),
+        LXIndexDimension(Shift, lambda s: s.id).from_data(shifts),
+    )
 )
 ```
 
@@ -217,36 +220,32 @@ print(f"Impact: ${result.delta_objective:,.2f}")
 ### Goal Programming
 
 ```python
-from lumix import (
-    LXGoal,
-    LXGoalMode,
-    solve_goal_programming,
+from lumix import LXConstraint, LXLinearExpression
+
+# Mark constraints as goals with priorities
+model.add_constraint(
+    LXConstraint("profit_goal")
+    .expression(profit_expr)
+    .ge()
+    .rhs(1000)
+    .as_goal(priority=1, weight=1.0)  # Highest priority
 )
 
-# Define multiple goals with priorities
-goals = [
-    LXGoal(
-        name="profit",
-        target=1000,
-        priority=1,
-        weight=1.0,
-        is_minimization=False,
-    ),
-    LXGoal(
-        name="quality",
-        target=95,
-        priority=2,
-        weight=0.8,
-    ),
-]
-
-# Solve with goal programming
-solution = solve_goal_programming(
-    model,
-    goals,
-    mode=LXGoalMode.SEQUENTIAL,
-    solver="gurobi",
+model.add_constraint(
+    LXConstraint("quality_goal")
+    .expression(quality_expr)
+    .ge()
+    .rhs(95)
+    .as_goal(priority=2, weight=0.8)  # Lower priority
 )
+
+# Set goal programming mode and prepare
+model.set_goal_mode("weighted")
+model.prepare_goal_programming()
+
+# Solve with standard optimizer
+optimizer = LXOptimizer().use_solver("gurobi")
+solution = optimizer.solve(model)
 ```
 
 ## 📖 Documentation
@@ -255,6 +254,7 @@ solution = solve_goal_programming(
 - **[Quick Start](docs/source/getting-started/quickstart.rst)** — Build your first model
 - **[Solver Guide](docs/source/getting-started/solvers.rst)** — Choose the right solver
 - **[Examples](examples/)** — 11 comprehensive examples
+- **[Notebooks](notebooks/)** — 15 interactive Jupyter tutorials
 
 ### Examples
 
@@ -271,6 +271,21 @@ The repository includes 11 examples demonstrating various features:
 9. **Sensitivity Analysis** — Parameter sensitivity
 10. **What-If Analysis** — Decision support
 11. **Goal Programming** — Multi-objective optimization
+
+### Jupyter Notebooks
+
+Interactive tutorials are available in the [`notebooks/`](notebooks/) directory:
+
+| Notebook | Topic |
+|----------|-------|
+| 01-11 | Tutorial notebooks covering all example topics above |
+| **12-15** | **High School Timetabling** — Comprehensive case study |
+
+The **High School Timetabling** series (notebooks 12-15) demonstrates:
+- 3D multi-model indexing (Lecture × TimeSlot × Classroom)
+- SQLAlchemy ORM integration with `from_model(session)`
+- Goal programming for teacher preferences
+- Production-ready configuration patterns
 
 ## 🎯 Why LumiX?
 
@@ -362,6 +377,7 @@ lumix/
 │   ├── solution/          # Solution handling and mapping
 │   └── utils/             # Utilities (logger, ORM, rational converter)
 ├── examples/              # 11 comprehensive examples
+├── notebooks/             # 15 Jupyter tutorial notebooks
 ├── tests/                 # Test suite
 └── docs/                  # Sphinx documentation
 ```
@@ -405,10 +421,11 @@ LumiX builds upon the excellent work of:
 ## 🗺️ Roadmap
 
 - [ ] Additional solver support (HiGHS, SCIP)
-- [ ] Jupyter notebook integration
+- [x] Jupyter notebook integration
 - [ ] Interactive visualization tools
 - [ ] Cloud solver integration
-- [ ] Extended ORM support (SQLAlchemy, Django)
+- [x] SQLAlchemy ORM support
+- [ ] Django ORM support
 - [ ] Advanced constraint programming features
 - [ ] Parallel scenario evaluation
 - [ ] Model versioning and serialization
