@@ -67,6 +67,7 @@ from lumix import (
     LXLinearExpression,
     LXModel,
     LXOptimizer,
+    LXSolution,
     LXVariable,
 )
 
@@ -295,6 +296,97 @@ def display_solution(model: LXModel):
         print(f"No optimal solution found. Status: {solution.status}")
 
 
+# ==================== VISUALIZATION ====================
+
+
+def visualize_facilities(model: LXModel, solution: LXSolution) -> None:
+    """Visualize facility location results as a spatial map.
+
+    Creates an interactive X-Y scatter plot showing:
+    - Warehouse locations (open/closed status)
+    - Customer locations
+    - Shipping flows between warehouses and customers
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXSpatialMap, LXSpatialNode, LXSpatialEdge
+
+        print("\n" + "=" * 70)
+        print("INTERACTIVE FACILITY MAP")
+        print("=" * 70)
+
+        nodes = []
+        edges = []
+
+        # Create warehouse nodes
+        for warehouse in WAREHOUSES:
+            is_open = solution.variables["open_warehouse"].get(warehouse.id, 0) > 0.5
+            nodes.append(
+                LXSpatialNode(
+                    id=f"w_{warehouse.id}",
+                    name=warehouse.name.split("(")[0].strip(),  # Short name
+                    x=warehouse.location[1],  # longitude
+                    y=warehouse.location[0],  # latitude
+                    node_type="facility",
+                    is_active=is_open,
+                    value=warehouse.capacity,
+                    metadata={
+                        "Fixed Cost": f"${warehouse.fixed_cost:,}",
+                        "Capacity": f"{warehouse.capacity} units",
+                        "Status": "OPEN" if is_open else "Closed",
+                    },
+                )
+            )
+
+        # Create customer nodes
+        for customer in CUSTOMERS:
+            nodes.append(
+                LXSpatialNode(
+                    id=f"c_{customer.id}",
+                    name=customer.name,
+                    x=customer.location[1],  # longitude
+                    y=customer.location[0],  # latitude
+                    node_type="customer",
+                    is_active=True,
+                    value=customer.demand,
+                    metadata={
+                        "Demand": f"{customer.demand} units",
+                    },
+                )
+            )
+
+        # Create shipping flow edges
+        for warehouse in WAREHOUSES:
+            for customer in CUSTOMERS:
+                qty = solution.variables["ship"].get((warehouse.id, customer.id), 0)
+                if qty > 0.01:
+                    cost = shipping_cost(warehouse, customer) * qty
+                    edges.append(
+                        LXSpatialEdge(
+                            source_id=f"w_{warehouse.id}",
+                            target_id=f"c_{customer.id}",
+                            value=qty,
+                            metadata={
+                                "Shipping Cost": f"${cost:.2f}",
+                            },
+                        )
+                    )
+
+        # Create and show the spatial map
+        viz = LXSpatialMap(nodes, edges)
+        viz.set_title("Facility Location - Warehouse & Customer Network")
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
+
+
 # ==================== MAIN ====================
 
 
@@ -367,8 +459,16 @@ def main():
     model = build_facility_location_model()
     print(model.summary())
 
-    # Display would-be solution
+    # Solve the model
+    optimizer = LXOptimizer().use_solver(solver_to_use)
+    solution = optimizer.solve(model)
+
+    # Display solution (text-based)
     display_solution(model)
+
+    # Visualize solution (interactive charts)
+    if solution.is_optimal():
+        visualize_facilities(model, solution)
 
     print()
     print("Key Concepts:")

@@ -36,6 +36,7 @@ from lumix import (
     LXLinearExpression,
     LXModel,
     LXOptimizer,
+    LXSolution,
     LXVariable,
     LXWhatIfAnalyzer,
 )
@@ -470,6 +471,36 @@ def analyze_variable_bounds():
     print("\n(Bound modification example - would require model variable access)")
 
 
+# ==================== VISUALIZATION ====================
+
+
+def visualize_whatif(whatif: LXWhatIfAnalyzer, baseline: LXSolution) -> None:
+    """Visualize what-if analysis results interactively.
+
+    Creates interactive charts showing the baseline solution
+    and what-if impact analysis.
+
+    Args:
+        whatif: The what-if analyzer
+        baseline: The baseline solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXSolutionVisualizer
+
+        print("\n" + "=" * 80)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 80)
+
+        viz = LXSolutionVisualizer(baseline, whatif.model)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
+
+
 # ==================== MAIN ====================
 
 
@@ -546,6 +577,13 @@ def main():
 
     # Variable bounds
     analyze_variable_bounds()
+
+    # Visualize baseline
+    model = build_production_model()
+    optimizer = LXOptimizer().use_solver(solver_to_use)
+    whatif = LXWhatIfAnalyzer(model, optimizer)
+    baseline = whatif.get_baseline_solution()
+    visualize_whatif(whatif, baseline)
 
     # Summary
     print("\n" + "=" * 80)

@@ -29,6 +29,7 @@ from lumix import (
     LXLinearExpression,
     LXModel,
     LXOptimizer,
+    LXSolution,
     LXVariable,
 )
 
@@ -446,6 +447,36 @@ def main():
     print("\nNote: Higher priorities (P1) dominate lower priorities (P2, P3)")
     print("due to exponential weight scaling (P1=10^6, P2=10^5, P3=10^4)")
     print("=" * 80)
+
+    # Visualize goals
+    visualize_goals(model, solution)
+
+
+def visualize_goals(model: LXModel, solution: LXSolution) -> None:
+    """Visualize goal programming results interactively.
+
+    Creates interactive charts showing goal satisfaction status
+    and deviation analysis by priority level.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXGoalProgressChart
+
+        print("\n" + "=" * 80)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 80)
+
+        viz = LXGoalProgressChart(solution)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
 
 
 if __name__ == "__main__":

@@ -89,6 +89,7 @@ from lumix import (
     LXModel,
     LXNonLinearExpression,
     LXOptimizer,
+    LXSolution,
     LXVariable,
 )
 from lumix.solvers import ORTOOLS_CAPABILITIES
@@ -185,6 +186,36 @@ def build_rectangle_model():
     model.maximize(area_expr)
 
     return model, length, width
+
+
+# ==================== VISUALIZATION ====================
+
+
+def visualize_rectangle(model: LXModel, solution: LXSolution) -> None:
+    """Visualize rectangle optimization results interactively.
+
+    Creates interactive charts showing the optimal dimensions
+    and solution details.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXSolutionVisualizer
+
+        print("\n" + "=" * 70)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 70)
+
+        viz = LXSolutionVisualizer(solution, model)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
 
 
 # ==================== MAIN ====================
@@ -333,6 +364,9 @@ def main():
                 print("  ✓ McCormick envelope linearization is accurate!")
             else:
                 print("  ⚠ Warning: Linearization may not be exact")
+
+            # Visualize solution (interactive charts)
+            visualize_rectangle(model_to_solve, solution)
 
         else:
             print(f"No optimal solution found. Status: {solution.status}")

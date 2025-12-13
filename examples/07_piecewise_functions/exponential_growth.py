@@ -87,6 +87,7 @@ from lumix import (
     LXNonLinearExpression,
     LXNonLinearFunctions,
     LXOptimizer,
+    LXSolution,
     LXVariable,
 )
 from lumix.linearization import LXPiecewiseLinearizer
@@ -293,6 +294,36 @@ def demonstrate_piecewise_approximation():
     print()
 
 
+# ==================== VISUALIZATION ====================
+
+
+def visualize_investment(model: LXModel, solution: LXSolution) -> None:
+    """Visualize investment optimization results interactively.
+
+    Creates interactive charts showing the optimal allocation
+    and investment returns.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+    """
+    try:
+        from lumix.visualization import LXSolutionVisualizer
+
+        print("\n" + "=" * 70)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 70)
+
+        viz = LXSolutionVisualizer(solution, model)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
+
+
 # ==================== MAIN ====================
 
 
@@ -409,6 +440,9 @@ def main():
 
             print(f"✓ Total invested: ${total_invested:.2f}k / ${TOTAL_BUDGET}k")
             print(f"✓ ROI: {(total_return/total_invested - 1)*100:.1f}%")
+
+            # Visualize solution (interactive charts)
+            visualize_investment(model, solution)
 
         else:
             print(f"No optimal solution found. Status: {solution.status}")

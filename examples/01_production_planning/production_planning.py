@@ -49,12 +49,12 @@ See Also:
     - User Guide: Single-Model Indexing section
 """
 
-from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXVariable
+from lumix import LXConstraint, LXLinearExpression, LXModel, LXOptimizer, LXSolution, LXVariable
 
 from sample_data import PRODUCTS, RESOURCES, Product, Resource, get_resource_usage
 
 
-solver_to_use = "cplex"
+solver_to_use = "ortools"
 
 # ==================== MODEL BUILDING ====================
 
@@ -215,6 +215,42 @@ def display_solution(model: LXModel):
         print(f"No optimal solution found. Status: {solution.status}")
 
 
+# ==================== VISUALIZATION ====================
+
+
+def visualize_production(model: LXModel, solution: LXSolution) -> None:
+    """Visualize production planning results interactively.
+
+    Creates interactive charts showing production quantities per product
+    and resource utilization percentages.
+
+    Args:
+        model: The optimization model
+        solution: The solution to visualize
+
+    Requires:
+        pip install lumix-opt[viz]
+
+    Example:
+        >>> model = build_production_model()
+        >>> optimizer = LXOptimizer().use_solver("ortools")
+        >>> solution = optimizer.solve(model)
+        >>> visualize_production(model, solution)
+    """
+    try:
+        from lumix.visualization import LXSolutionVisualizer
+
+        print("\n" + "=" * 60)
+        print("INTERACTIVE VISUALIZATION")
+        print("=" * 60)
+
+        viz = LXSolutionVisualizer(solution, model)
+        viz.show()
+
+    except ImportError:
+        print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
+
+
 # ==================== MAIN ====================
 
 
@@ -274,8 +310,16 @@ def main():
     model = build_production_model()
     print(model.summary())
 
-    # Solve and display solution
+    # Solve the model
+    optimizer = LXOptimizer().use_solver(solver_to_use)
+    solution = optimizer.solve(model)
+
+    # Display solution (text-based)
     display_solution(model)
+
+    # Visualize solution (interactive charts)
+    if solution.is_optimal():
+        visualize_production(model, solution)
 
 
 if __name__ == "__main__":

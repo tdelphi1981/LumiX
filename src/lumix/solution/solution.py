@@ -1,9 +1,15 @@
 """Solution classes for LumiX."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, Generic, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, Generic, Optional, TypeVar, Union
 
 from ..core.variables import LXVariable
+
+if TYPE_CHECKING:
+    from ..core.model import LXModel
+    from ..visualization.solution import LXSolutionVisualizer
 
 TModel = TypeVar("TModel")
 TValue = TypeVar("TValue", int, float)
@@ -229,6 +235,37 @@ class LXSolution(Generic[TModel]):
     def is_feasible(self) -> bool:
         """Check if solution is feasible."""
         return self.status.lower() in ["optimal", "feasible", "opt_optimal"]
+
+    def visualize(
+        self, model: "Optional[LXModel[TModel]]" = None
+    ) -> "LXSolutionVisualizer[TModel]":
+        """
+        Create interactive visualization for this solution.
+
+        Requires the visualization extra: pip install lumix-opt[viz]
+
+        Args:
+            model: Optional optimization model (for constraint info)
+
+        Returns:
+            LXSolutionVisualizer instance
+
+        Examples:
+            Basic usage::
+
+                solution.visualize().show()
+
+            With model for constraint details::
+
+                solution.visualize(model).show()
+
+            Export to HTML::
+
+                solution.visualize(model).to_html("solution.html")
+        """
+        from ..visualization import LXSolutionVisualizer
+
+        return LXSolutionVisualizer(self, model)
 
     def summary(self) -> str:
         """
