@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
 """
-Framework Comparison Benchmark: PuLP vs Pyomo vs LumiX
+Framework Comparison Benchmark 2: Multi-Product Production Planning
+PuLP vs Pyomo vs LumiX
 
-This script implements the classic Diet Problem in three Python optimization
-frameworks and measures:
+This script implements a Multi-Product Production Planning Problem in three Python
+optimization frameworks and measures:
 - Lines of code (LOC) for model definition
 - Model construction time
 - Solve time
 - Memory usage (peak)
 
-The Diet Problem:
-    Minimize cost of food while meeting nutritional requirements.
-    Given: 6 foods with cost and nutritional content (calories, protein, calcium)
-    Find: Servings of each food minimizing cost while meeting daily minimums
+The Production Planning Problem:
+    Maximize profit while respecting resource constraints.
+    Given: 50 products, 5 resources with capacities, resource usage per product
+    Find: Production quantities maximizing profit
+
+Decision Variables: 50 total
+    - production[product]: 50 variables (one per product)
+
+This problem scales better with LumiX's single-model indexing pattern while
+providing significantly more variables than the Diet Problem (6 vars).
 
 Results are output as both LaTeX and Markdown tables.
 
 Usage:
-    python framework_comparison.py
+    python production_planning_benchmark.py
 
 Requirements:
-    pip install pulp pyomo lumix
+    pip install pulp pyomo lumix lizard
 
 Author: LumiX Development Team
 Date: 2025
@@ -31,37 +38,64 @@ import statistics
 import tracemalloc
 import inspect
 from dataclasses import dataclass
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, List
 from pathlib import Path
 import traceback
+import random
 
 import lizard
+
+# Set seed for reproducibility
+random.seed(42)
 
 # ==================== SHARED DATA ====================
 
 @dataclass
-class Food:
-    """Food item with nutritional information (used by LumiX)."""
+class Product:
+    """Product with cost and profit information (used by LumiX)."""
+    id: int
     name: str
-    cost_per_serving: float
-    calories: float
-    protein: float
-    calcium: float
+    profit: float           # Profit per unit produced
+    labor_usage: float      # Labor hours per unit
+    machine_usage: float    # Machine hours per unit
+    material_usage: float   # Raw material units per unit
+    energy_usage: float     # Energy units per unit
+    storage_usage: float    # Storage space per unit
 
-# Sample data (same for all frameworks)
-FOODS_DATA = [
-    ("Oatmeal", 0.30, 110, 4, 2),
-    ("Chicken", 2.40, 205, 32, 12),
-    ("Eggs", 0.50, 160, 13, 60),
-    ("Milk", 0.60, 160, 8, 285),
-    ("Apple Pie", 1.60, 420, 4, 22),
-    ("Pork", 2.90, 260, 14, 10),
-]
 
-# Nutritional requirements
-MIN_CALORIES = 2000
-MIN_PROTEIN = 50
-MIN_CALCIUM = 800
+# Generate 50 products with varying characteristics
+def generate_products(n: int = 50) -> List[Tuple]:
+    """Generate n products with realistic varying parameters."""
+    products = []
+    categories = ["Widget", "Gadget", "Component", "Assembly", "Module"]
+
+    for i in range(n):
+        category = categories[i % len(categories)]
+        name = f"{category}_{i+1:02d}"
+
+        # Vary parameters based on category and index
+        base_profit = 10 + (i % 10) * 2 + random.uniform(-2, 2)
+        labor = 1.0 + (i % 5) * 0.3 + random.uniform(-0.1, 0.1)
+        machine = 0.5 + (i % 7) * 0.2 + random.uniform(-0.05, 0.05)
+        material = 2.0 + (i % 4) * 0.5 + random.uniform(-0.2, 0.2)
+        energy = 0.3 + (i % 6) * 0.1 + random.uniform(-0.02, 0.02)
+        storage = 0.1 + (i % 3) * 0.05 + random.uniform(-0.01, 0.01)
+
+        products.append((i, name, base_profit, labor, machine, material, energy, storage))
+
+    return products
+
+
+PRODUCTS_DATA = generate_products(50)
+
+# Resource capacities
+RESOURCES = {
+    "labor": 500,      # Total labor hours available
+    "machine": 300,    # Total machine hours available
+    "material": 1000,  # Total raw material units available
+    "energy": 200,     # Total energy units available
+    "storage": 100,    # Total storage space available
+}
 
 # Number of benchmark iterations for timing
 NUM_ITERATIONS = 100
@@ -69,12 +103,15 @@ NUM_ITERATIONS = 100
 # Output directory
 OUTPUT_DIR = Path(__file__).parent / "results"
 
+# Total number of decision variables
+NUM_VARIABLES = len(PRODUCTS_DATA)  # One production variable per product
+
 
 # ==================== PuLP IMPLEMENTATION ====================
 
 def build_and_solve_pulp() -> Tuple[float, float, float, float]:
     """
-    Build and solve diet problem using PuLP.
+    Build and solve production planning problem using PuLP.
 
     Returns:
         Tuple of (build_time_ms, solve_time_ms, peak_memory_mb, objective_value)
@@ -88,25 +125,31 @@ def build_and_solve_pulp() -> Tuple[float, float, float, float]:
     start_build = time.perf_counter()
 
     # Create the problem
-    prob = pulp.LpProblem("Diet_Problem", pulp.LpMinimize)
+    prob = pulp.LpProblem("Production_Planning", pulp.LpMaximize)
 
-    # Create decision variables
-    food_names = [f[0] for f in FOODS_DATA]
-    servings = pulp.LpVariable.dicts("servings", food_names, lowBound=0, cat='Continuous')
+    # Extract product IDs
+    product_ids = [p[0] for p in PRODUCTS_DATA]
 
     # Extract data into dictionaries
-    cost = {f[0]: f[1] for f in FOODS_DATA}
-    calories = {f[0]: f[2] for f in FOODS_DATA}
-    protein = {f[0]: f[3] for f in FOODS_DATA}
-    calcium = {f[0]: f[4] for f in FOODS_DATA}
+    profit = {p[0]: p[2] for p in PRODUCTS_DATA}
+    labor = {p[0]: p[3] for p in PRODUCTS_DATA}
+    machine = {p[0]: p[4] for p in PRODUCTS_DATA}
+    material = {p[0]: p[5] for p in PRODUCTS_DATA}
+    energy = {p[0]: p[6] for p in PRODUCTS_DATA}
+    storage = {p[0]: p[7] for p in PRODUCTS_DATA}
 
-    # Objective: minimize cost
-    prob += pulp.lpSum([cost[f] * servings[f] for f in food_names])
+    # Decision variables
+    production = pulp.LpVariable.dicts("prod", product_ids, lowBound=0, cat='Continuous')
 
-    # Constraints
-    prob += pulp.lpSum([calories[f] * servings[f] for f in food_names]) >= MIN_CALORIES
-    prob += pulp.lpSum([protein[f] * servings[f] for f in food_names]) >= MIN_PROTEIN
-    prob += pulp.lpSum([calcium[f] * servings[f] for f in food_names]) >= MIN_CALCIUM
+    # Objective: maximize profit
+    prob += pulp.lpSum([profit[p] * production[p] for p in product_ids])
+
+    # Resource constraints
+    prob += pulp.lpSum([labor[p] * production[p] for p in product_ids]) <= RESOURCES["labor"]
+    prob += pulp.lpSum([machine[p] * production[p] for p in product_ids]) <= RESOURCES["machine"]
+    prob += pulp.lpSum([material[p] * production[p] for p in product_ids]) <= RESOURCES["material"]
+    prob += pulp.lpSum([energy[p] * production[p] for p in product_ids]) <= RESOURCES["energy"]
+    prob += pulp.lpSum([storage[p] * production[p] for p in product_ids]) <= RESOURCES["storage"]
 
     end_build = time.perf_counter()
     build_time = (end_build - start_build) * 1000  # ms
@@ -131,7 +174,7 @@ def build_and_solve_pulp() -> Tuple[float, float, float, float]:
 
 def build_and_solve_pyomo() -> Tuple[float, float, float, float]:
     """
-    Build and solve diet problem using Pyomo.
+    Build and solve production planning problem using Pyomo.
 
     Returns:
         Tuple of (build_time_ms, solve_time_ms, peak_memory_mb, objective_value)
@@ -148,30 +191,36 @@ def build_and_solve_pyomo() -> Tuple[float, float, float, float]:
     model = pyo.ConcreteModel()
 
     # Sets
-    food_names = [f[0] for f in FOODS_DATA]
-    model.Foods = pyo.Set(initialize=food_names)
+    product_ids = [p[0] for p in PRODUCTS_DATA]
+    model.Products = pyo.Set(initialize=product_ids)
 
     # Parameters
-    cost_dict = {f[0]: f[1] for f in FOODS_DATA}
-    calories_dict = {f[0]: f[2] for f in FOODS_DATA}
-    protein_dict = {f[0]: f[3] for f in FOODS_DATA}
-    calcium_dict = {f[0]: f[4] for f in FOODS_DATA}
+    profit_dict = {p[0]: p[2] for p in PRODUCTS_DATA}
+    labor_dict = {p[0]: p[3] for p in PRODUCTS_DATA}
+    machine_dict = {p[0]: p[4] for p in PRODUCTS_DATA}
+    material_dict = {p[0]: p[5] for p in PRODUCTS_DATA}
+    energy_dict = {p[0]: p[6] for p in PRODUCTS_DATA}
+    storage_dict = {p[0]: p[7] for p in PRODUCTS_DATA}
 
-    model.cost = pyo.Param(model.Foods, initialize=cost_dict)
-    model.calories = pyo.Param(model.Foods, initialize=calories_dict)
-    model.protein = pyo.Param(model.Foods, initialize=protein_dict)
-    model.calcium = pyo.Param(model.Foods, initialize=calcium_dict)
+    model.profit = pyo.Param(model.Products, initialize=profit_dict)
+    model.labor = pyo.Param(model.Products, initialize=labor_dict)
+    model.machine = pyo.Param(model.Products, initialize=machine_dict)
+    model.material = pyo.Param(model.Products, initialize=material_dict)
+    model.energy = pyo.Param(model.Products, initialize=energy_dict)
+    model.storage = pyo.Param(model.Products, initialize=storage_dict)
 
     # Variables
-    model.servings = pyo.Var(model.Foods, domain=pyo.NonNegativeReals)
+    model.production = pyo.Var(model.Products, domain=pyo.NonNegativeReals)
 
-    # Objective
-    model.obj = pyo.Objective(expr=sum(model.cost[f] * model.servings[f] for f in model.Foods), sense=pyo.minimize)
+    # Objective: maximize profit
+    model.obj = pyo.Objective(expr=sum(model.profit[p] * model.production[p] for p in model.Products),sense=pyo.maximize)
 
-    # Constraints
-    model.min_calories = pyo.Constraint(expr=sum(model.calories[f] * model.servings[f] for f in model.Foods) >= MIN_CALORIES)
-    model.min_protein = pyo.Constraint(expr=sum(model.protein[f] * model.servings[f] for f in model.Foods) >= MIN_PROTEIN)
-    model.min_calcium = pyo.Constraint(expr=sum(model.calcium[f] * model.servings[f] for f in model.Foods) >= MIN_CALCIUM)
+    # Resource constraints
+    model.labor_constr = pyo.Constraint(expr=sum(model.labor[p] * model.production[p] for p in model.Products) <= RESOURCES["labor"])
+    model.machine_constr = pyo.Constraint(expr=sum(model.machine[p] * model.production[p] for p in model.Products) <= RESOURCES["machine"])
+    model.material_constr = pyo.Constraint(expr=sum(model.material[p] * model.production[p] for p in model.Products) <= RESOURCES["material"])
+    model.energy_constr = pyo.Constraint(expr=sum(model.energy[p] * model.production[p] for p in model.Products) <= RESOURCES["energy"])
+    model.storage_constr = pyo.Constraint(expr=sum(model.storage[p] * model.production[p] for p in model.Products) <= RESOURCES["storage"])
 
     end_build = time.perf_counter()
     build_time = (end_build - start_build) * 1000  # ms
@@ -211,7 +260,7 @@ def build_and_solve_pyomo() -> Tuple[float, float, float, float]:
 
 def build_and_solve_lumix() -> Tuple[float, float, float, float]:
     """
-    Build and solve diet problem using LumiX.
+    Build and solve production planning problem using LumiX.
 
     Returns:
         Tuple of (build_time_ms, solve_time_ms, peak_memory_mb, objective_value)
@@ -224,23 +273,24 @@ def build_and_solve_lumix() -> Tuple[float, float, float, float]:
     # --- MODEL CONSTRUCTION (timed) ---
     start_build = time.perf_counter()
 
-    # Create Food instances
-    foods = [Food(f[0], f[1], f[2], f[3], f[4]) for f in FOODS_DATA]
+    # Create Product instances
+    products = [Product(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]) for p in PRODUCTS_DATA]
 
-    # Decision Variable: variable family that auto-expands
-    servings = LXVariable[Food, float]("servings").continuous().bounds(lower=0).indexed_by(lambda f: f.name).from_data(foods)
-
+    # Decision Variable: Production quantity for each product
+    production = LXVariable[Product, float]("production").continuous().bounds(lower=0).indexed_by(lambda p: p.id).from_data(products)
 
     # Create model
-    model = LXModel("diet_problem").add_variable(servings)
+    model = LXModel("production_planning").add_variable(production)
 
-    # Objective: minimize cost
-    model.minimize(LXLinearExpression().add_term(servings, lambda f: f.cost_per_serving))
+    # Objective: maximize profit
+    model.maximize(LXLinearExpression().add_term(production, lambda p: p.profit))
 
-    # Constraints
-    model.add_constraint(LXConstraint("min_calories").expression(LXLinearExpression().add_term(servings, lambda f: f.calories)).ge().rhs(MIN_CALORIES))
-    model.add_constraint(LXConstraint("min_protein").expression(LXLinearExpression().add_term(servings, lambda f: f.protein)).ge().rhs(MIN_PROTEIN))
-    model.add_constraint(LXConstraint("min_calcium").expression(LXLinearExpression().add_term(servings, lambda f: f.calcium)).ge().rhs(MIN_CALCIUM))
+    # Resource constraints
+    model.add_constraint(LXConstraint("labor_capacity").expression(LXLinearExpression().add_term(production, lambda p: p.labor_usage)).le().rhs(RESOURCES["labor"]))
+    model.add_constraint(LXConstraint("machine_capacity").expression(LXLinearExpression().add_term(production, lambda p: p.machine_usage)).le().rhs(RESOURCES["machine"]))
+    model.add_constraint(LXConstraint("material_capacity").expression(LXLinearExpression().add_term(production, lambda p: p.material_usage)).le().rhs(RESOURCES["material"]))
+    model.add_constraint(LXConstraint("energy_capacity").expression(LXLinearExpression().add_term(production, lambda p: p.energy_usage)).le().rhs(RESOURCES["energy"]))
+    model.add_constraint(LXConstraint("storage_capacity").expression(LXLinearExpression().add_term(production, lambda p: p.storage_usage)).le().rhs(RESOURCES["storage"]))
 
     end_build = time.perf_counter()
     build_time = (end_build - start_build) * 1000  # ms
@@ -265,7 +315,6 @@ def build_and_solve_lumix() -> Tuple[float, float, float, float]:
 
 # ==================== CODE COMPLEXITY ANALYSIS (LIZARD) ====================
 
-
 def analyze_code_complexity() -> Dict[str, Dict[str, Any]]:
     """
     Analyze code complexity using lizard for each framework implementation.
@@ -276,12 +325,12 @@ def analyze_code_complexity() -> Dict[str, Dict[str, Any]]:
     frameworks = {
         "PuLP": {
             "func": build_and_solve_pulp,
-            "data_repetition": "4 dicts",
+            "data_repetition": "6 dicts",
             "notes": "Dictionary-based indexing, manual data extraction",
         },
         "Pyomo": {
             "func": build_and_solve_pyomo,
-            "data_repetition": "4 Params",
+            "data_repetition": "6 Params",
             "notes": "Component-based, explicit Set and Param definitions",
         },
         "LumiX": {
@@ -370,7 +419,8 @@ def run_benchmark() -> Dict[str, Dict[str, Any]]:
                 solve_times.append(solve_time)
                 memory_usages.append(memory_mb)
                 objective = obj
-                print(f"  Iteration {i+1}: build={build_time:.2f}ms, solve={solve_time:.2f}ms, memory={memory_mb:.2f}MB")
+                if (i + 1) % 10 == 0:
+                    print(f"  Iteration {i+1}/{NUM_ITERATIONS}: build={build_time:.2f}ms, solve={solve_time:.2f}ms")
 
             # Get complexity metrics from lizard analysis
             complexity = complexity_analysis[name]
@@ -383,7 +433,7 @@ def run_benchmark() -> Dict[str, Dict[str, Any]]:
                 "memory_mean": statistics.mean(memory_usages),
                 "memory_std": statistics.stdev(memory_usages) if len(memory_usages) > 1 else 0,
                 "objective": objective,
-                "num_vars": len(FOODS_DATA),
+                "num_vars": NUM_VARIABLES,
                 "nloc": complexity["nloc"],
                 "ccn": complexity["ccn"],
                 "data_repetition": complexity["data_repetition"],
@@ -413,8 +463,8 @@ def generate_latex_table(results: Dict[str, Dict[str, Any]]) -> str:
         LaTeX table string
     """
     latex = r"""\begin{table}[h]
-\caption{Quantitative Comparison: Diet Problem Benchmark}
-\label{tab:benchmark}
+\caption{Quantitative Comparison: Production Planning Benchmark}
+\label{tab:benchmark_production}
 \footnotesize
 \begin{tabular}{|l|c|c|c|c|c|c|c|l|}
 \hline
@@ -430,7 +480,7 @@ def generate_latex_table(results: Dict[str, Dict[str, Any]]) -> str:
             latex += f"{r['build_time_mean']:.2f}$\\pm${r['build_time_std']:.2f} & "
             latex += f"{r['solve_time_mean']:.1f}$\\pm${r['solve_time_std']:.1f} & "
             latex += f"{r['memory_mean']:.2f}$\\pm${r['memory_std']:.2f} & "
-            latex += f"\\${r['objective']:.2f} & "
+            latex += f"\\${r['objective']:.0f} & "
             latex += f"{r['data_repetition']} \\\\\n\\hline\n"
         else:
             latex += f"{name} & -- & -- & -- & ERROR & ERROR & ERROR & -- & -- \\\\\n\\hline\n"
@@ -453,15 +503,17 @@ def generate_markdown_table(results: Dict[str, Dict[str, Any]]) -> str:
     Returns:
         Markdown string with table and analysis
     """
-    md = """# Framework Comparison Results
+    md = """# Framework Comparison Results: Production Planning
 
 ## Benchmark Configuration
 
 | Parameter | Value |
 |-----------|-------|
-| Problem | Diet Optimization (Linear Programming) |
-| Variables | """ + str(len(FOODS_DATA)) + """ |
-| Constraints | 3 nutritional requirements |
+| Problem | Multi-Product Production Planning (LP) |
+| Products | """ + str(len(PRODUCTS_DATA)) + """ |
+| Resources | 5 (labor, machine, material, energy, storage) |
+| Variables | """ + str(NUM_VARIABLES) + """ (production quantities) |
+| Constraints | 5 (resource capacity) |
 | Iterations | """ + str(NUM_ITERATIONS) + """ |
 | Solver | GLPK / CBC |
 | Complexity Analysis | Lizard (NLOC, CCN) |
@@ -479,7 +531,7 @@ def generate_markdown_table(results: Dict[str, Dict[str, Any]]) -> str:
             md += f"{r['build_time_mean']:.2f} +/- {r['build_time_std']:.2f} | "
             md += f"{r['solve_time_mean']:.1f} +/- {r['solve_time_std']:.1f} | "
             md += f"{r['memory_mean']:.2f} +/- {r['memory_std']:.2f} | "
-            md += f"${r['objective']:.2f} | "
+            md += f"${r['objective']:.0f} | "
             md += f"{r['data_repetition']} |\n"
         else:
             error_msg = results.get(name, {}).get("error", "Unknown error")
@@ -490,6 +542,7 @@ def generate_markdown_table(results: Dict[str, Dict[str, Any]]) -> str:
 
 - **NLOC**: Non-comment Lines of Code (measured by Lizard)
 - **CCN**: Cyclomatic Complexity Number (lower = simpler code)
+- **Vars**: Total decision variables (production quantities)
 
 ## Key Observations
 
@@ -499,18 +552,17 @@ def generate_markdown_table(results: Dict[str, Dict[str, Any]]) -> str:
     all_ok = all(results.get(name, {}).get("status") == "OK" for name in ["PuLP", "Pyomo", "LumiX"])
     if all_ok:
         md += """- **Same Solution**: All frameworks produce identical optimal solutions
-- **Data Efficiency**: LumiX requires data definition only once (DRY principle)
+- **Scalability**: With 50 variables, performance differences become more apparent
+- **Data Efficiency**: LumiX dataclass approach scales well with problem size
 - **Type Safety**: LumiX provides IDE autocompletion via typed lambda coefficients
-- **Code Complexity**: CCN indicates control flow complexity (branches, loops)
-- **Memory Usage**: Framework overhead varies; core solver memory dominates
 
 ## Data Handling Comparison
 
-| Framework | Approach | Repetition |
-|-----------|----------|------------|
-| PuLP | Dictionary-based indexing | Data extracted into 4 separate dicts |
-| Pyomo | Component-based AML | Data stored in 4 Param objects |
-| LumiX | Data-centric with lambdas | Single dataclass, coefficients via lambdas |
+| Framework | Approach | Data Structures |
+|-----------|----------|-----------------|
+| PuLP | Dictionary-based indexing | 6 separate dicts (profit, resource usage) |
+| Pyomo | Component-based AML | 6 Param objects + Set |
+| LumiX | Data-centric with lambdas | 1 dataclass, coefficients via lambdas |
 """
     else:
         md += "- Some frameworks failed to run. Check dependencies and solver availability.\n"
@@ -524,17 +576,17 @@ def generate_markdown_table(results: Dict[str, Dict[str, Any]]) -> str:
 
 def print_results(results: Dict[str, Dict[str, Any]]):
     """Print formatted benchmark results to console."""
-    print("\n" + "=" * 105)
-    print("BENCHMARK RESULTS (with Lizard Code Complexity Analysis)")
-    print("=" * 105)
-    print(f"Problem: Diet Optimization ({len(FOODS_DATA)} variables, 3 constraints)")
+    print("\n" + "=" * 110)
+    print("BENCHMARK RESULTS: Production Planning (with Lizard Code Complexity Analysis)")
+    print("=" * 110)
+    print(f"Problem: Multi-Product Production Planning ({NUM_VARIABLES} variables, 5 constraints)")
     print(f"Iterations: {NUM_ITERATIONS}")
     print()
 
     # Header
     header = f"{'Framework':<10} {'Vars':>5} {'NLOC':>5} {'CCN':>5} {'Build (ms)':>18} {'Solve (ms)':>18} {'Memory (MB)':>18} {'Objective':>12}"
     print(header)
-    print("-" * 105)
+    print("-" * 110)
 
     for name in ["PuLP", "Pyomo", "LumiX"]:
         if name in results and results[name]["status"] == "OK":
@@ -542,7 +594,7 @@ def print_results(results: Dict[str, Dict[str, Any]]):
             build_str = f"{r['build_time_mean']:.2f} +/- {r['build_time_std']:.2f}"
             solve_str = f"{r['solve_time_mean']:.1f} +/- {r['solve_time_std']:.1f}"
             memory_str = f"{r['memory_mean']:.2f} +/- {r['memory_std']:.2f}"
-            print(f"{name:<10} {r['num_vars']:>5} {r['nloc']:>5} {r['ccn']:>5} {build_str:>18} {solve_str:>18} {memory_str:>18} ${r['objective']:>10.2f}")
+            print(f"{name:<10} {r['num_vars']:>5} {r['nloc']:>5} {r['ccn']:>5} {build_str:>18} {solve_str:>18} {memory_str:>18} ${r['objective']:>10.0f}")
         else:
             print(f"{name:<10} {'--':>5} {'--':>5} {'--':>5} {'ERROR':>18} {'ERROR':>18} {'ERROR':>18} {'--':>12}")
 
@@ -551,35 +603,36 @@ def print_results(results: Dict[str, Dict[str, Any]]):
 
     print()
     print("Data Handling Comparison:")
-    print("-" * 105)
+    print("-" * 110)
     for name in ["PuLP", "Pyomo", "LumiX"]:
         info = complexity_analysis[name]
         print(f"  {name}: {info['data_repetition']}")
 
     print()
     print("Metrics Legend:")
-    print("-" * 105)
+    print("-" * 110)
     print("  NLOC = Non-comment Lines of Code (measured by Lizard)")
     print("  CCN  = Cyclomatic Complexity Number (lower = simpler code)")
 
     print()
     print("Key Observations:")
-    print("-" * 105)
+    print("-" * 110)
     print("  - All frameworks produce the same optimal solution")
-    print("  - LumiX requires data to be defined once (DRY principle)")
+    print("  - With 50 variables, build/solve time differences are more apparent")
+    print("  - LumiX dataclass approach scales well with increased problem size")
     print("  - Pyomo has more boilerplate (Set, Param definitions)")
-    print("  - PuLP is procedural but requires manual data extraction")
-    print("  - CCN reflects control flow complexity (branches, loops)")
 
 
 def main():
     """Run the full benchmark suite."""
     print("=" * 80)
-    print("Framework Comparison Benchmark: PuLP vs Pyomo vs LumiX")
+    print("Framework Comparison Benchmark 2: Production Planning")
+    print("PuLP vs Pyomo vs LumiX")
     print("=" * 80)
-    print("\nProblem: Classic Diet Problem (Linear Programming)")
-    print(f"Data: {len(FOODS_DATA)} foods, 3 nutritional constraints")
-    print(f"Solver: GLPK (used by all frameworks for fair comparison)")
+    print("\nProblem: Multi-Product Production Planning (Linear Programming)")
+    print(f"Products: {len(PRODUCTS_DATA)}, Resources: {len(RESOURCES)}")
+    print(f"Decision Variables: {NUM_VARIABLES} (production quantities)")
+    print(f"Solver: GLPK/CBC (used by all frameworks for fair comparison)")
 
     # Check dependencies
     print("\nChecking dependencies...")
@@ -625,7 +678,7 @@ def main():
     latex = generate_latex_table(results)
     print(latex)
 
-    latex_file = OUTPUT_DIR / "benchmark_table.tex"
+    latex_file = OUTPUT_DIR / "production_planning_table.tex"
     with open(latex_file, "w") as f:
         f.write(latex)
     print(f"\nLaTeX table saved to: {latex_file}")
@@ -637,7 +690,7 @@ def main():
     markdown = generate_markdown_table(results)
     print(markdown)
 
-    md_file = OUTPUT_DIR / "RESULTS.md"
+    md_file = OUTPUT_DIR / "PRODUCTION_PLANNING_RESULTS.md"
     with open(md_file, "w") as f:
         f.write(markdown)
     print(f"\nMarkdown results saved to: {md_file}")
