@@ -12,6 +12,7 @@ This module orchestrates the entire linearization process:
 from typing import Any, List, Optional
 
 from ..core.constraints import LXConstraint
+from ..core.enums import LXObjectiveSense
 from ..core.expressions import LXLinearExpression, LXNonLinearExpression
 from ..core.model import LXModel
 from ..core.variables import LXVariable
@@ -129,13 +130,13 @@ class LXLinearizer:
             if isinstance(self.model.objective_expr, LXNonLinearExpression):
                 linear_objective = self._linearize_expression(self.model.objective_expr)
                 # Set objective with same sense
-                if self.model.objective_sense.value == "maximize":
+                if self.model.objective_sense == LXObjectiveSense.MAXIMIZE:
                     linearized.maximize(linear_objective)
                 else:
                     linearized.minimize(linear_objective)
             else:
                 # Keep original objective
-                if self.model.objective_sense.value == "maximize":
+                if self.model.objective_sense == LXObjectiveSense.MAXIMIZE:
                     linearized.maximize(self.model.objective_expr)
                 else:
                     linearized.minimize(self.model.objective_expr)
