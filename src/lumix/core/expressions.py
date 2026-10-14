@@ -3,13 +3,58 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generic, List, Literal, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Tuple, TypeVar
 
 from typing_extensions import Self
 
 from .variables import LXVariable
 
 TModel = TypeVar("TModel")
+
+
+class LXKeyFilter:
+    """
+    Term filter that keeps the variable instances whose index key is in ``keys``.
+
+    Created by ``keys=`` in :meth:`LXLinearExpression.add_term`,
+    :meth:`LXLinearExpression.add_multi_term` and
+    :meth:`LXLinearExpression.sum_over`. It is callable like a ``where``
+    function, so every component that reads expression terms keeps working.
+    Solver adapters recognise it and look matching instances up by key
+    instead of scanning the whole variable family (see
+    *Performance Considerations* in the user guide).
+
+    Args:
+        var: Variable family the keys belong to
+        keys: Index keys in the form returned by :meth:`LXVariable.index_key`
+    """
+
+    __slots__ = ("var", "keys")
+
+    def __init__(self, var: "LXVariable", keys: Iterable[Any]):
+        if isinstance(keys, (str, bytes)):
+            raise TypeError(
+                "keys must be an iterable of index keys, not a single string; "
+                "wrap a single key in a list: keys=[key]"
+            )
+        self.var = var
+        self.keys = frozenset(keys)
+
+    def __call__(self, *instance: Any) -> bool:
+        item = instance[0] if len(instance) == 1 else instance
+        return self.var.index_key(item) in self.keys
+
+    def __repr__(self) -> str:
+        return f"LXKeyFilter({self.var.name!r}, {len(self.keys)} keys)"
+
+
+def _key_or_where(var: "LXVariable", where: Optional[Callable[..., bool]],
+                  keys: Optional[Iterable[Any]]) -> Optional[Callable[..., bool]]:
+    if keys is None:
+        return where
+    if where is not None:
+        raise ValueError("Pass either where= or keys=, not both")
+    return LXKeyFilter(var, keys)
 
 
 def _call_coeff(coeff_func: Callable[..., float], args: tuple) -> float:
@@ -131,6 +176,7 @@ class LXLinearExpression(Generic[TModel]):
             self, var: LXVariable[TModel, Any],
             coeff: float | Callable[[TModel], float] = 1.0,
             where: Callable[[TModel], bool] | None = None,
+            keys: Iterable[Any] | None = None,
     ) -> Self:
         """
         Add term with coefficient (constant or function).
@@ -139,11 +185,17 @@ class LXLinearExpression(Generic[TModel]):
             var: Variable Family to add
             coeff: Coefficient (constant or function)
             where: Optional filter function
+            keys: Optional index keys of the instances to include, in the form
+                returned by :meth:`LXVariable.index_key`. Equivalent to a
+                ``where`` that tests key membership, but solver adapters look
+                the instances up directly, so large models build much faster.
+                Cannot be combined with ``where``.
 
         Returns:
             Self for chaining
         """
         coeff_func = coeff if callable(coeff) else lambda _: coeff
+        where = _key_or_where(var, where, keys)
         if where is None:
             where = lambda _: True
         term = (var, coeff_func, where)
@@ -157,6 +209,7 @@ class LXLinearExpression(Generic[TModel]):
             var: LXVariable,
             coeff: Callable[..., float] = lambda *args: 1.0,
             where: Optional[Callable[..., bool]] = None,
+            keys: Optional[Iterable[Any]] = None,
     ) -> Self:
         """
         Add multi-indexed variable to expression.
@@ -165,6 +218,10 @@ class LXLinearExpression(Generic[TModel]):
             var: Multi-indexed variable family
             coeff: Coefficient function receiving all dimension models
             where: Optional filter function
+            keys: Optional index keys of the instances to include; for
+                ``indexed_by_product`` families each key is the tuple of the
+                dimension keys, e.g. ``(plant.id, customer.id)``. Cannot be
+                combined with ``where``.
 
         Returns:
             Self for chaining
@@ -176,14 +233,23 @@ class LXLinearExpression(Generic[TModel]):
                 coeff=lambda driver, date: driver.cost * date.multiplier,
                 where=lambda driver, date: date.is_weekend
             )
+
+            # Same terms, looked up by key (fast for large families)
+            weekend = [(d.id, dt.id) for d in drivers for dt in dates if dt.is_weekend]
+            expr.add_multi_term(
+                duty,
+                coeff=lambda driver, date: driver.cost * date.multiplier,
+                keys=weekend
+            )
         """
-        self._multi_terms.append((var, coeff, where))
+        self._multi_terms.append((var, coeff, _key_or_where(var, where, keys)))
         return self
 
     def sum_over(
             self,
             var: LXVariable,
             where: Optional[Callable[..., bool]] = None,
+            keys: Optional[Iterable[Any]] = None,
     ) -> Self:
         """
         Syntactic sugar for summing over all dimensions of a variable.
@@ -191,6 +257,7 @@ class LXLinearExpression(Generic[TModel]):
         Args:
             var: Variable to sum over all its dimensions
             where: Optional filter function to selectively include terms
+            keys: Optional index keys of the instances to include (see add_multi_term)
 
         Returns:
             Self for chaining
@@ -207,7 +274,7 @@ class LXLinearExpression(Generic[TModel]):
             Currently sums over all dimensions. Future enhancement could add
             selective dimension summing (e.g., sum only over drivers, not dates).
         """
-        return self.add_multi_term(var, where=where)
+        return self.add_multi_term(var, where=where, keys=keys)
 
     def add_constant(self, value: float) -> Self:
         """

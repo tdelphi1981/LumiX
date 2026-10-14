@@ -73,6 +73,7 @@ __version__ = "0.1.2"
 from .core import (
     LXConstraint,
     LXConstraintSense,
+    LXKeyFilter,
     LXLinearExpression,
     LXModel,
     LXNonLinearExpression,
@@ -169,6 +170,7 @@ __all__ = [
     "LXModel",
     "LXVariable",
     "LXConstraint",
+    "LXKeyFilter",
     "LXLinearExpression",
     "LXQuadraticExpression",
     "LXQuadraticTerm",
