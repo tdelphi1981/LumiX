@@ -89,6 +89,7 @@ class LXVariable(Generic[TModel, TValue]):
     _cartesian: Optional[LXCartesianProduct] = None
     _multi_cost_func: Optional[Callable[..., float]] = None
     _join_config: Optional[dict] = None
+    _multi_filter: Optional[Callable[..., bool]] = None
 
     def __deepcopy__(self, memo):
         """Custom deepcopy that detaches ORM sessions and handles lambda closures.
@@ -141,6 +142,11 @@ class LXVariable(Generic[TModel, TValue]):
         result._filter = (
             copy_function_detaching_closure(self._filter, memo)
             if self._filter is not None
+            else None
+        )
+        result._multi_filter = (
+            copy_function_detaching_closure(self._multi_filter, memo)
+            if self._multi_filter is not None
             else None
         )
         result._multi_cost_func = (
@@ -293,43 +299,42 @@ class LXVariable(Generic[TModel, TValue]):
         """
         Get the data instances for this variable family.
 
+        ``where()`` filters every instance (for ``indexed_by_product`` the tuple of
+        dimension instances; for ``indexed_by_join`` the primary record) and
+        ``where_multi()`` filters product and join combinations with one argument
+        per part, whatever the order of the calls.
+
         Returns:
             List of model instances
 
         Raises:
             ValueError: If no data source configured
         """
-        # If data provided directly, use it
-        if self._data is not None:
-            instances = self._data
-        # If ORM model configured, query it
-        elif self.model_type is not None and self._session is not None:
-            from ..utils.orm import LXTypedQuery
-            query = LXTypedQuery(self._session, self.model_type)
-            instances = query.all()
-        # If Cartesian product, get from dimensions
-        elif self._cartesian is not None:
-            # Get instances from each dimension
+        if self._cartesian is not None:
             dimension_instances = [dim.get_instances() for dim in self._cartesian.dimensions]
-
-            # Generate cartesian product of all dimensions
-            combinations = list(itertools.product(*dimension_instances))
-
-            # Apply cross-filter if present
+            instances = list(itertools.product(*dimension_instances))
             if self._cartesian._cross_filter is not None:
-                combinations = [combo for combo in combinations if self._cartesian._cross_filter(*combo)]
-
-            return combinations
+                instances = [c for c in instances if self._cartesian._cross_filter(*c)]
         else:
-            raise ValueError(
-                f"Variable '{self.name}' has no data source. "
-                "Use .from_data(data) or .from_model(Model, session)"
-            )
-
-        # Apply filter if present
-        if self._filter is not None:
-            instances = [inst for inst in instances if self._filter(inst)]
-
+            if self._data is not None:
+                instances = list(self._data)
+            elif self.model_type is not None and self._session is not None:
+                from ..utils.orm import LXTypedQuery
+                instances = LXTypedQuery(self._session, self.model_type).all()
+            else:
+                raise ValueError(
+                    f"Variable '{self.name}' has no data source. "
+                    "Use .from_data(data) or .from_model(Model, session)"
+                )
+            if self._join_config is not None:
+                if self._filter is not None:            # where() filters primary records
+                    instances = [p for p in instances if self._filter(p)]
+                join = self._join_config["join_func"]
+                instances = [(p, r) for p in instances for r in join(p)]
+        if self._multi_filter is not None:
+            instances = [i for i in instances if self._multi_filter(*i)]
+        if self._filter is not None and self._join_config is None:
+            instances = [i for i in instances if self._filter(i)]
         return instances
 
     @property
@@ -346,7 +351,8 @@ class LXVariable(Generic[TModel, TValue]):
         """True when instances are tuples of one model per dimension
         (``indexed_by_product``); coefficients and filters then receive one
         argument per dimension."""
-        return self.index_func is None and self._cartesian is not None
+        return self.index_func is None and (self._cartesian is not None
+                                            or self._join_config is not None)
 
     def index_key(self, instance: Any) -> Any:
         """
@@ -367,6 +373,8 @@ class LXVariable(Generic[TModel, TValue]):
         """
         if self.index_func is not None:
             return self.index_func(instance)
+        if self._join_config is not None:
+            return self._join_config["key_func"](*instance)
         if self._cartesian is not None and isinstance(instance, tuple):
             return tuple(
                 dim.key_func(part)
@@ -435,6 +443,12 @@ class LXVariable(Generic[TModel, TValue]):
         Index by a relationship/join between models.
         Only creates variables where relationship exists (sparse).
 
+        The primary records come from ``from_data(...)`` or ``from_model(...)``;
+        instances are ``(primary, related)`` pairs for every ``related`` in
+        ``join_func(primary)``, keyed by ``key_func(primary, related)``. Coefficients
+        and ``where_multi`` filters receive the two records as two arguments;
+        ``where()`` filters the primary records.
+
         Args:
             primary: Primary model type
             related: Related model type
@@ -454,6 +468,7 @@ class LXVariable(Generic[TModel, TValue]):
                     join_func=lambda d: d.qualified_routes,  # ORM relationship
                     key_func=lambda d, r: (d.id, r.id)
                 )
+                .from_data(drivers)
         """
         self._join_config = {
             "primary": primary,
@@ -529,8 +544,7 @@ class LXVariable(Generic[TModel, TValue]):
                 date.weekday() not in driver.days_off
             )
         """
-        if self._cartesian:
-            self._cartesian.where(predicate)
+        self._multi_filter = predicate
         return self
 
 
