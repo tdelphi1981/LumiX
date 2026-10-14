@@ -8,10 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- CONTRIBUTING.md with comprehensive development guidelines
-- CODE_OF_CONDUCT.md with academic-focused community standards
-- SECURITY.md with vulnerability reporting policy
-- This CHANGELOG.md to track project changes
 
 ### Changed
 
@@ -22,6 +18,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.1.2] - 2026-10-14
+
+### Added
+- CONTRIBUTING.md with comprehensive development guidelines
+- CODE_OF_CONDUCT.md with academic-focused community standards
+- SECURITY.md with vulnerability reporting policy
+- This CHANGELOG.md to track project changes
+- Regression tests for the linearizer (both objective senses), the CP-SAT adapter and expression arithmetic
+
+### Fixed
+- **Linearizer kept every objective as a minimization.** `LXLinearizer.linearize_model()`
+  compared the objective sense to `"maximize"` while `LXObjectiveSense` values are
+  `"min"`/`"max"`. Maximized product, min and piecewise objectives returned wrong optima
+  (example 06 reported an area of 16 instead of 100).
+- **`LXOptimizer.enable_linearization()` had no effect.** `solve()` now linearizes the model
+  with the solver's capabilities when linearization is enabled and the model needs it.
+- **CP-SAT crashed the process with OR-Tools ≥ 9.13.** Constraints are now named with
+  `with_name()` instead of writing through `Proto()`.
+- **`priority_to_weight(1)` returned `1e5` instead of the documented `1e6`.**
+- **Adding two expressions that share a variable silently dropped terms.** `e1 + e2` combined
+  the two `where` filters with AND, so instances selected by only one of them were lost.
+  Calling `add_term` twice for the same variable overwrote the first term. Both now keep every
+  term: an instance is included when either term includes it, with the sum of the
+  coefficients that apply to it.
+- **`expr * scalar` always raised `ValueError`.** It now scales every term (including
+  multi-indexed terms) and the constant.
+- Version strings in `lumix.__version__` and the documentation now match the package version.
+- `pytest` coverage now measures `lumix` (was the old `optixng` name).
+
+### Behavior changes
+These fixes intentionally change results of code that relied on the old behavior:
+- Maximized nonlinear objectives solved through the linearizer now return the correct
+  (different) optimum.
+- Goal-programming objective values are 10× larger with the default weights because
+  priority 1 now weighs `1e6`. The ranking of priorities is unchanged; the optimal plan is
+  usually the same.
+- `enable_linearization()` now linearizes. Models that were linearized by hand are not
+  linearized twice: `needs_linearization()` is false for them.
+- Expressions built by adding expressions (or repeated `add_term` calls) on the same variable
+  now contain all of their terms; models that silently lost terms will change.
 
 ## [0.1.1] - 2025-01-XX
 
