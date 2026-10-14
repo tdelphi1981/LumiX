@@ -298,3 +298,93 @@ def test_b6_family_quadratic_without_native_support_raises():
     m = LXModel("m").add_variables(a).maximize(q)
     with pytest.raises(ValueError, match="gurobi"):
         LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+
+
+# --- Görev 7: independent checks (spec §6) ---------------------------------------
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+from solver_matrix import INTEGER_SOLVERS  # noqa: E402
+
+QP_SOLVERS = [s for s in ("gurobi", "cplex") if s in AVAILABLE]
+
+
+@st.composite
+def quadratic_cases(draw):
+    n = draw(st.integers(2, 3))
+    coef = st.integers(-3, 3)
+    diag = [draw(coef) for _ in range(n)]
+    cross = {(i, j): draw(coef) for i in range(n) for j in range(i + 1, n)}
+    linear = [draw(coef) for _ in range(n)]
+    rows = [([draw(coef) for _ in range(n)], draw(st.integers(-2, 6)))
+            for _ in range(draw(st.integers(0, 2)))]
+    return n, diag, cross, linear, rows, draw(st.sampled_from(["min", "max"]))
+
+
+def quadratic_oracle(n, diag, cross, linear, rows, sense):
+    """Optimum by enumeration, written from the raw coefficients (not the canonical model)."""
+    best = None
+    for x in itertools.product(range(4), repeat=n):
+        if any(sum(a * v for a, v in zip(coeffs, x)) > rhs for coeffs, rhs in rows):
+            continue
+        value = (sum(d * v * v for d, v in zip(diag, x)) + sum(l * v for l, v in zip(linear, x))
+                 + sum(c * x[i] * x[j] for (i, j), c in cross.items()))
+        if best is None or (value > best if sense == "max" else value < best):
+            best = value
+    return best
+
+
+@pytest.mark.skipif(not QP_SOLVERS, reason="needs gurobi or cplex")
+@settings(max_examples=40, derandomize=True, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow])
+@given(quadratic_cases())
+def test_quadratic_objectives_match_brute_force(case):
+    n, diag, cross, linear, rows, sense = case
+    xs = [fam(f"x{i}", ["k"], "integer", 0, 3) for i in range(n)]
+    q = LXQuadraticExpression()
+    for x, d in zip(xs, diag):
+        q.add_squared(x, float(d))
+    for (i, j), c in cross.items():
+        q.add_quadratic(xs[i], xs[j], float(c))
+    lin = LXLinearExpression()
+    for x, l in zip(xs, linear):
+        lin.add_term(x, float(l))
+    q = q + lin
+    model = LXModel("qp").add_variables(*xs)
+    for r, (coeffs, rhs) in enumerate(rows):
+        e = LXLinearExpression()
+        for x, a in zip(xs, coeffs):
+            e.add_term(x, float(a))
+        model.add_constraint(LXConstraint(f"r{r}").expression(e).le().rhs(rhs))
+    model.maximize(q) if sense == "max" else model.minimize(q)
+    expected = quadratic_oracle(*case)
+    for solver in QP_SOLVERS:
+        s = solve_with(solver, model)
+        if expected is None:
+            assert s.status == "infeasible", (solver, case)
+        else:
+            assert s.status == "optimal", (solver, case, s.status)
+            assert s.objective_value == pytest.approx(expected, abs=1e-6), (solver, case)
+
+
+@settings(max_examples=25, derandomize=True, deadline=None)
+@given(st.lists(st.integers(-5, 5), min_size=2, max_size=4), st.integers(0, 6))
+def test_cost_objective_equals_explicit_objective(costs, demand):
+    keys = [f"k{i}" for i in range(len(costs))]
+    price = dict(zip(keys, costs))
+
+    def build(explicit):
+        x = fam("x", keys, "integer", 0, 3)
+        if not explicit:
+            x = x.cost(lambda k: price[k])
+        m = LXModel("m").add_variable(x)
+        m.add_constraint(LXConstraint("d").expression(LXLinearExpression().add_term(x, 1.0))
+                         .ge().rhs(demand))
+        return m.minimize(LXLinearExpression().add_term(x, lambda k: price[k])) if explicit \
+            else m.minimize()
+
+    for solver in INTEGER_SOLVERS:
+        a, b = solve_with(solver, build(False)), solve_with(solver, build(True))
+        assert a.status == b.status, solver
+        if a.status == "optimal":
+            assert a.objective_value == pytest.approx(b.objective_value, abs=1e-6), solver
