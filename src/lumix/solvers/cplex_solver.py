@@ -89,6 +89,7 @@ class LXCPLEXSolver(LXSolverInterface):
 
         # Reset internal state
         self._variable_map = {}
+        self._reset_instance_cache()
         self._constraint_map = {}
         self._constraint_list = []
         self._variable_counter = 0
@@ -254,16 +255,7 @@ class LXCPLEXSolver(LXSolverInterface):
         Returns:
             Hashable index key
         """
-        if lx_var.index_func is not None:
-            return lx_var.index_func(instance)
-        elif lx_var._cartesian is not None and isinstance(instance, tuple):
-            # For cartesian products, apply each dimension's key function
-            return tuple(
-                dim.key_func(inst)
-                for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-            )
-        else:
-            return instance
+        return lx_var.index_key(instance)
 
     def _create_single_variable(self, lx_var: LXVariable) -> None:
         """Create single CPLEX variable (not indexed)."""
@@ -507,13 +499,8 @@ class LXCPLEXSolver(LXSolverInterface):
 
             if isinstance(solver_vars, dict):
                 # Indexed variable family
-                instances = lx_var.get_instances()
-
-                # If constraint instance is provided and matches variable type,
-                # filter to only include the matching instance
-                if constraint_instance is not None and constraint_instance in instances:
-                    # Same-type constraint: only use matching instance
-                    instances = [constraint_instance]
+                # A same-type constraint row narrows the family to its own instance
+                instances, where_func = self._candidates(lx_var, where_func, constraint_instance)
 
                 for instance in instances:
                     # Check where clause
@@ -557,7 +544,7 @@ class LXCPLEXSolver(LXSolverInterface):
             solver_vars = self._variable_map[lx_var.name]
 
             if isinstance(solver_vars, dict):
-                instances = lx_var.get_instances()
+                instances, where_func = self._candidates(lx_var, where_func)
 
                 for instance in instances:
                     # Check where clause

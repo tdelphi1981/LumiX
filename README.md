@@ -22,6 +22,7 @@ LumiX makes mathematical programming accessible, maintainable, and enjoyable by 
 - 📊 **Interactive Visualization** — Plotly-based charts for solutions, sensitivity, scenarios, and Gantt schedules
 - 🎯 **Goal Programming** — Native support for multi-objective optimization with priorities and weights
 - ⚡ **ORM Integration** — Map solutions directly to your ORM models for seamless data flow
+- 🚀 **Fast Model Building** — `keys=` looks terms up by index key instead of scanning whole variable families ([Performance Considerations](docs/source/user-guide/performance.rst))
 
 ## 🚀 Quick Start
 
@@ -288,6 +289,7 @@ viz.to_html("solution.html")
 - **[Installation Guide](docs/source/getting-started/installation.rst)** — Install LumiX and solvers
 - **[Quick Start](docs/source/getting-started/quickstart.rst)** — Build your first model
 - **[Solver Guide](docs/source/getting-started/solvers.rst)** — Choose the right solver
+- **[Performance Considerations](docs/source/user-guide/performance.rst)** — Keep large models fast
 - **[Examples](examples/)** — 11 comprehensive examples
 - **[Notebooks](notebooks/)** — 15 interactive Jupyter tutorials
 

@@ -19,6 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.2.0] - 2026-10-14
+
+### Added
+- `keys=` on `LXLinearExpression.add_term`, `add_multi_term` and `sum_over`: select the
+  instances of a term by index key instead of a `where` filter. Builds the same model,
+  much faster for large variable families.
+- `LXKeyFilter`, the callable that stores `keys=` (it works anywhere a `where` works).
+- `LXVariable.index_key(instance)`: the key adapters use for an instance.
+- User guide: *Performance Considerations*.
+
+### Changed
+- Solver adapters fetch each variable family's instances once per build instead of once
+  per constraint row. ORM-backed families are queried once per build. The cache is cleared
+  on every build.
+- Solver adapters no longer re-check terms whose instances were already selected by key.
+
+### Performance
+- Transportation model with 600 rows and 90,000 variables (OR-Tools): build time 4.78 s in
+  0.1.2; 2.88 s with `where` and 0.43 s with `keys=` in 0.2.0.
+
 ## [0.1.2] - 2026-10-14
 
 ### Added

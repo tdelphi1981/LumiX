@@ -25,6 +25,7 @@
       ~LXSensitivityAnalyzer.get_most_sensitive_variables
       ~LXSensitivityAnalyzer.get_non_basic_variables
       ~LXSensitivityAnalyzer.identify_bottlenecks
+      ~LXSensitivityAnalyzer.visualize
    
    
 

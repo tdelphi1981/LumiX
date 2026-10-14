@@ -332,6 +332,32 @@ class LXVariable(Generic[TModel, TValue]):
 
         return instances
 
+    def index_key(self, instance: Any) -> Any:
+        """
+        Return the index key of one instance of this variable family.
+
+        Solver adapters key their variable maps with this value, and
+        ``keys=`` in :meth:`LXLinearExpression.add_term` /
+        :meth:`LXLinearExpression.add_multi_term` must use the same form.
+
+        Args:
+            instance: A data instance (for ``indexed_by_product`` families,
+                the tuple of one instance per dimension)
+
+        Returns:
+            ``index_func(instance)`` when an index function is set; for
+            ``indexed_by_product`` families the tuple of each dimension's key;
+            otherwise the instance itself.
+        """
+        if self.index_func is not None:
+            return self.index_func(instance)
+        if self._cartesian is not None and isinstance(instance, tuple):
+            return tuple(
+                dim.key_func(part)
+                for dim, part in zip(self._cartesian.dimensions, instance)
+            )
+        return instance
+
     def indexed_by(self, func: Callable[[TModel], TIndex]) -> Self:
         """
         Define indexing function with full type inference.

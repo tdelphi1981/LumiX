@@ -1,6 +1,6 @@
 [project]
 name = "lumix-opt"
-version = "0.1.2"
+version = "0.2.0"
 description = "A type-safe, IDE-friendly wrapper for optimization solvers with automatic data-driven modeling"
 authors = [
     {name = "Tolga BERBER", email="tolga.berber@fen.ktu.edu.tr"},
@@ -80,6 +80,7 @@ no_implicit_optional = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --cov=lumix --cov-report=term-missing"
+markers = ["slow: performance benchmarks (deselect with -m 'not slow')"]
 
 [tool.black]
 line-length = 100

@@ -3,6 +3,7 @@
 from .constraints import LXConstraint
 from .enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from .expressions import (
+    LXKeyFilter,
     LXLinearExpression,
     LXNonLinearExpression,
     LXQuadraticExpression,
@@ -17,6 +18,7 @@ __all__ = [
     "LXObjectiveSense",
     "LXVariable",
     "LXConstraint",
+    "LXKeyFilter",
     "LXLinearExpression",
     "LXQuadraticTerm",
     "LXQuadraticExpression",

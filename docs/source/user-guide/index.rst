@@ -16,6 +16,7 @@ Comprehensive guides for using LumiX effectively in your optimization projects.
    solution/index
    analysis/index
    goal_programming/index
+   performance
 
 Core Module
 -----------
@@ -167,3 +168,16 @@ We're actively working on expanding this documentation. Check back soon or:
 - Browse the examples in the repository
 - Read the API documentation
 - Open an issue if you need specific guidance
+
+Performance Considerations
+--------------------------
+
+The :doc:`performance` page explains how model building scales and how to keep
+large models fast.
+
+**Topics Covered:**
+
+- Cost of ``where`` filters on large variable families
+- Selecting instances by key with ``keys=``
+- Per-build instance caching
+- Practical advice and known limitations

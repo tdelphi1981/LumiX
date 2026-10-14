@@ -24,6 +24,7 @@
       ~LXSolution.is_goal_satisfied
       ~LXSolution.is_optimal
       ~LXSolution.summary
+      ~LXSolution.visualize
    
    
 
