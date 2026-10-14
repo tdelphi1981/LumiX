@@ -19,6 +19,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.2.1] - 2026-10-14
+
+### Added
+- `breakpoints=[...]` on `add_piecewise` / `LXPiecewiseLinearTerm`: use explicit,
+  strictly increasing breakpoints instead of generated ones. With a function that is
+  piecewise linear through them the term is exact.
+- The logarithmic (Gray code) piecewise formulation; it raised `NotImplementedError`.
+- A `UserWarning` when a piecewise term's domain is narrower than its variable's bounds.
+
+### Fixed
+- **Nonlinear terms vanished with Gurobi and CPLEX.** The linearizer skipped every term
+  the solver declares native support for (products, abs, min/max, piecewise, indicator),
+  but no adapter translates nonlinear terms, so they were missing from the model
+  (Gurobi: `min 3|x| + x` returned -10 instead of 8). Every term is now linearized.
+- **SOS2 piecewise formulation was a relaxation.** No SOS2 condition was added, so the
+  model was the convex hull of the function; nonconvex objectives could exceed the
+  function (25 instead of 20.67 in a three-point example). Adjacency is now enforced
+  with segment binaries.
+- `x_min=0` / `x_max=0` on piecewise terms were ignored and replaced by the variable's
+  bounds.
+- Two piecewise terms on the same variable created auxiliary variables with the same
+  names.
+
+### Behavior changes
+- Models with nonlinear terms solved with Gurobi or CPLEX now contain those terms;
+  results change (they were wrong before). Products of continuous variables use the
+  McCormick relaxation on these solvers too.
+- The SOS2 piecewise formulation adds one binary per segment; nonconvex piecewise
+  objectives now return the true optimum.
+
 ## [0.2.0] - 2026-10-14
 
 ### Added

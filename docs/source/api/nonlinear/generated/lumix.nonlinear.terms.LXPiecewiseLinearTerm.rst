@@ -24,6 +24,7 @@
    .. autosummary::
    
       ~LXPiecewiseLinearTerm.adaptive
+      ~LXPiecewiseLinearTerm.breakpoints
       ~LXPiecewiseLinearTerm.method
       ~LXPiecewiseLinearTerm.num_segments
       ~LXPiecewiseLinearTerm.x_max

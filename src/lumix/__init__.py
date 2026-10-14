@@ -67,7 +67,7 @@ Quick Start
     print(f"Impact: ${result.delta_objective:,.2f}")
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Core classes
 from .core import (
