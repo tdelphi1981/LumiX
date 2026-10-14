@@ -169,6 +169,12 @@ Constraints can reference multiple variable families:
        .indexed_by(lambda p: p.id)
    )
 
+.. tip::
+
+   For constraints built in a loop over one dimension of a multi-indexed
+   variable, pass ``keys=[(row.id, other.id) for other in others]`` instead of a
+   ``where`` filter. See :doc:`../performance`.
+
 Goal Programming
 ----------------
 

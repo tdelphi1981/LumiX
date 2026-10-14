@@ -22,6 +22,7 @@
       ~LXScenarioAnalyzer.run_all_scenarios
       ~LXScenarioAnalyzer.run_scenario
       ~LXScenarioAnalyzer.sensitivity_to_parameter
+      ~LXScenarioAnalyzer.visualize
    
    
 

@@ -22,6 +22,7 @@
       ~LXVariable.from_data
       ~LXVariable.from_model
       ~LXVariable.get_instances
+      ~LXVariable.index_key
       ~LXVariable.indexed_by
       ~LXVariable.indexed_by_join
       ~LXVariable.indexed_by_product

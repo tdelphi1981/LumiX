@@ -193,6 +193,12 @@ In Constraints
            .rhs(float(date.min_drivers))
        )
 
+.. note::
+
+   The index key of an instance of an ``indexed_by_product`` family is the
+   tuple of its dimension keys, e.g. ``(driver.id, date.id)``. This is the form
+   ``keys=`` expects; :meth:`LXVariable.index_key` returns it for any instance.
+
 Complete Example: Driver Scheduling
 ------------------------------------
 

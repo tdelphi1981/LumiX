@@ -42,6 +42,21 @@ Adding Terms
    # Conditional coefficient
    expr.add_term(production, lambda p: p.profit if p.is_premium else 0)
 
+Selecting Instances by Key
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.2.0
+
+Instead of a ``where`` filter you can list the index keys of the instances a
+term uses. The result is the same model; large models build much faster.
+
+.. code-block:: python
+
+   # Only plants "TRB" and "SAM"
+   expr.add_term(open_plant, coeff=lambda p: p.fixed_cost, keys=["TRB", "SAM"])
+
+See :doc:`../performance` for the key format and the rules.
+
 Quadratic Expressions
 ---------------------
 
