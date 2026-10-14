@@ -209,3 +209,41 @@ def test_duplicate_family_name_raises():
         m.add_variable(fam("x", ["b"]))
     with pytest.raises(ValueError, match="already has a variable family named 'y'"):
         LXModel("m2").add_variables(fam("y", ["a"]), fam("y", ["b"]))
+
+
+from lumix import LXQuadraticExpression, LXQuadraticTerm
+
+
+def test_b6_quadratic_add_keeps_both():
+    x = fam("x", ["a"], upper=10)
+    q1 = LXQuadraticExpression().add_squared(x, 1.0)
+    q2 = LXQuadraticExpression().add_squared(x, 2.0)
+    q2.constant = 5
+    r = q1 + q2
+    assert len(r.quadratic_terms) == 2 and r.constant == 5 and len(q1.quadratic_terms) == 1
+
+
+def test_b6_canonical_quadratic_semantics():
+    w = fam("w", ["a", "b"], lower=0, upper=1)
+    cov = {("a", "a"): 2.0, ("a", "b"): 0.5, ("b", "a"): 0.5, ("b", "b"): 1.0}
+    q = LXQuadraticExpression().add_quadratic(w, w, coeff=lambda i, j: cov[(i, j)])
+    q = q + LXLinearExpression().add_term(w, -1.0)
+    canon = LXModel("m").add_variable(w).minimize(q).to_canonical()
+    assert canon.objective_quadratic == {(0, 0): 2.0, (0, 1): 1.0, (1, 1): 1.0}
+    assert canon.objective == {0: -1.0, 1: -1.0}
+
+
+def test_b6_squared_is_diagonal_and_alias():
+    x = fam("x", ["a", "b"], upper=3)
+    q = LXQuadraticExpression().add_squared(x, 2.0).add_quadratic_term(x, x, coefficient=0.0)
+    q = q.add_quadratic_term(LXQuadraticTerm(x, x, 0.0))
+    canon = LXModel("m").add_variable(x).minimize(q).to_canonical()
+    assert canon.objective_quadratic == {(0, 0): 2.0, (1, 1): 2.0}
+
+
+def test_b6_quadratic_constraint_raises():
+    x = fam("x", ["a"], upper=3)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXQuadraticExpression().add_squared(x)).le().rhs(1))
+    with pytest.raises(ValueError, match="quadratic"):
+        m.to_canonical()

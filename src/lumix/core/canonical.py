@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .enums import LXConstraintSense, LXObjectiveSense, LXVarType
-from .expressions import (LXKeyFilter, LXLinearExpression, LXNonLinearExpression, call_arity,
-                          call_with_row, term_parts)
+from .expressions import (LXKeyFilter, LXLinearExpression, LXNonLinearExpression,
+                          LXQuadraticExpression, call_arity, call_with_row, term_parts)
 
 if TYPE_CHECKING:
     from .model import LXModel
@@ -67,6 +67,8 @@ class LXCanonicalModel:
     objective_nonlinear: Tuple[LXCanonicalNonlinear, ...]
     sense: Optional[LXObjectiveSense]
     scalar_families: Tuple[str, ...] = ()
+    #: ``{(i, j): c}`` with ``i <= j``: the objective term ``c * x_i * x_j``.
+    objective_quadratic: Dict[Tuple[int, int], float] = field(default_factory=dict)
     goal_stages: Tuple[Dict[int, float], ...] = ()
     schema_version: int = SCHEMA_VERSION
 
@@ -157,6 +159,7 @@ class LXCanonicalBuilder:
         self.cache = cache or LXInstanceCache()
         self.families: Dict[str, Dict[Any, int]] = {}
         self.scalars: List[str] = []
+        self.quadratic: Dict[Tuple[int, int], float] = {}
         self._missing_rows: Dict[Tuple[str, str], None] = {}
 
     def build(self) -> LXCanonicalModel:
@@ -179,6 +182,7 @@ class LXCanonicalBuilder:
             objective_nonlinear=(),
             sense=sense,
             scalar_families=tuple(self.scalars),
+            objective_quadratic=self.quadratic,
         )
 
     # ---- variables -------------------------------------------------------
@@ -261,6 +265,10 @@ class LXCanonicalBuilder:
         expr = self.model.objective_expr
         if expr is None:
             return {}, 0.0, None
+        if isinstance(expr, LXQuadraticExpression):
+            coeffs, constant = self.linear_row(expr.linear_terms, None, where="the objective")
+            self.quadratic = self._quadratic(expr)
+            return coeffs, constant + float(expr.constant), self.model.objective_sense
         coeffs, constant = self.linear_row(expr, None, where="the objective")
         return coeffs, constant, self.model.objective_sense
 
@@ -322,8 +330,31 @@ class LXCanonicalBuilder:
             )
         return positions
 
+    def _quadratic(self, expr: LXQuadraticExpression) -> Dict[Tuple[int, int], float]:
+        """Objective products ``{(i, j): c}`` (i <= j, summed, zeros dropped)."""
+        acc: Dict[Tuple[int, int], float] = {}
+        for term in expr.quadratic_terms:
+            p1 = self._positions(term.var1, "the objective")
+            p2 = self._positions(term.var2, "the objective")
+            c = term.coefficient
+            first = self.cache.instances(term.var1)
+            if term.diagonal:
+                pairs = [(i, i, c(i) if callable(c) else c) for i in first]
+            else:
+                second = self.cache.instances(term.var2)
+                pairs = [(i, j, c(i, j) if callable(c) else c) for i in first for j in second]
+            for i, j, value in pairs:
+                a = p1[term.var1.index_key(i)]
+                b = p2[term.var2.index_key(j)]
+                key = (min(a, b), max(a, b))
+                acc[key] = acc.get(key, 0.0) + float(value)
+        return {k: v for k, v in acc.items() if v}
+
     @staticmethod
     def _linear_part(expr: Any, where: str) -> LXLinearExpression:
+        if isinstance(expr, LXQuadraticExpression):
+            raise ValueError(f"{where.capitalize()} is quadratic; quadratic expressions are "
+                             "supported only in the objective")
         if isinstance(expr, LXLinearExpression):
             return expr
         if isinstance(expr, LXNonLinearExpression):

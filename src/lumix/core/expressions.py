@@ -460,7 +460,11 @@ class LXQuadraticTerm:
 
     var1: LXVariable
     var2: LXVariable
-    coefficient: float = 1.0
+    #: A number, or ``callable(instance1, instance2)`` (``callable(instance)`` for a
+    #: diagonal term).
+    coefficient: Any = 1.0
+    #: ``add_squared``: one product per instance (``x_i * x_i``) instead of every pair.
+    diagonal: bool = False
 
     def __deepcopy__(self, memo):
         """Custom deepcopy that handles variables.
@@ -480,6 +484,7 @@ class LXQuadraticTerm:
         result.var1 = deepcopy(self.var1, memo)
         result.var2 = deepcopy(self.var2, memo)
         result.coefficient = self.coefficient
+        result.diagonal = self.diagonal
 
         return result
 
@@ -538,14 +543,18 @@ class LXQuadraticExpression:
 
         return result
 
-    def add_quadratic(self, var1: LXVariable, var2: LXVariable, coeff: float = 1.0) -> Self:
+    def add_quadratic(self, var1: LXVariable, var2: LXVariable, coeff: Any = 1.0) -> Self:
         """
-        Add quadratic term.
+        Add ``sum(coeff(i, j) * var1[i] * var2[j])`` over every instance ``i`` of
+        ``var1`` and ``j`` of ``var2``. For single variables this is
+        ``coeff * var1 * var2``; a numeric ``coeff`` on families gives
+        ``coeff * sum(var1) * sum(var2)``.
 
         Args:
-            var1: First variable
-            var2: Second variable
-            coeff: Coefficient
+            var1: First variable family
+            var2: Second variable family (may be ``var1``)
+            coeff: Number, or ``callable(instance1, instance2)``, e.g.
+                ``lambda a, b: 0.5 * cov[a.id][b.id]``
 
         Returns:
             Self for chaining
@@ -553,9 +562,9 @@ class LXQuadraticExpression:
         self.quadratic_terms.append(LXQuadraticTerm(var1, var2, coeff))
         return self
 
-    def add_squared(self, var: LXVariable, coeff: float = 1.0) -> Self:
+    def add_squared(self, var: LXVariable, coeff: Any = 1.0) -> Self:
         """
-        Add x^2 term.
+        Add ``sum(coeff(i) * var[i] ** 2)`` (one square per instance).
 
         Args:
             var: Variable to square
@@ -564,24 +573,44 @@ class LXQuadraticExpression:
         Returns:
             Self for chaining
         """
-        self.quadratic_terms.append(LXQuadraticTerm(var, var, coeff))
+        self.quadratic_terms.append(LXQuadraticTerm(var, var, coeff, diagonal=True))
         return self
 
-    def __add__(self, other: LXLinearExpression | float) -> Self:
-        """
-        Enable: quad_expr + linear_expr or quad_expr + constant.
+    def add_quadratic_term(self, var1: Any, var2: Optional[LXVariable] = None,
+                           coefficient: Any = 1.0) -> Self:
+        """Add ``coefficient * var1 * var2``, or an :class:`LXQuadraticTerm`.
 
-        Args:
-            other: Linear expression or constant
-
-        Returns:
-            Self for chaining
+        .. versionadded:: 0.3.0
         """
-        if isinstance(other, LXLinearExpression):
-            self.linear_terms = self.linear_terms + other
-        elif isinstance(other, (int, float)):
-            self.constant += other
-        return self
+        if isinstance(var1, LXQuadraticTerm):
+            self.quadratic_terms.append(var1)
+            return self
+        if var2 is None:
+            raise ValueError("add_quadratic_term needs two variables or an LXQuadraticTerm")
+        return self.add_quadratic(var1, var2, coefficient)
+
+    def __add__(self, other: Any) -> "LXQuadraticExpression":
+        """``quad + quad``, ``quad + linear`` or ``quad + constant``: a new expression
+        holding the terms and constants of both operands.
+
+        .. versionchanged:: 0.3.0
+           Returns a new expression and keeps the quadratic terms of both sides.
+        """
+        result = LXQuadraticExpression(self.linear_terms.copy(), list(self.quadratic_terms),
+                                       self.constant)
+        if isinstance(other, LXQuadraticExpression):
+            result.linear_terms += other.linear_terms
+            result.quadratic_terms.extend(other.quadratic_terms)
+            result.constant += other.constant
+        elif isinstance(other, LXLinearExpression):
+            result.linear_terms += other
+        elif isinstance(other, numbers.Real):
+            result.constant += float(other)
+        else:
+            return NotImplemented
+        return result
+
+    __radd__ = __add__
 
 
 @dataclass
