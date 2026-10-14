@@ -60,6 +60,8 @@ class LXCPSATSolver(LXSolverInterface):
     OPEN_BOUND = 2**40
     #: Largest integer coefficient or right-hand side passed to CP-SAT.
     INT_LIMIT = 2**62
+    #: An open bound B of a variable keeps abs(coefficient) * row length * B below this.
+    ROW_BUDGET = 2**60
 
     def __init__(
         self,
@@ -126,11 +128,32 @@ class LXCPSATSolver(LXSolverInterface):
 
         self._model = cp_model.CpModel()
         cm = self._model
-        self._handles, self._scales, self._open = [], [], []
+        self._scales = [self._scaling_factor if v.var_type == LXVarType.CONTINUOUS else 1
+                        for v in canon.variables]
+        # Integer rows first: open bounds are sized so that no row can overflow int64.
+        rows = [(row, *self._integer_row(row.coeffs, row.rhs, f"constraint '{row.name}'")[:2])
+                for row in canon.rows]
+        self._objective_constant = canon.objective_constant
+        self._has_objective = canon.sense is not None and bool(canon.objective)
+        self._objective_scale = 1
+        objective: Dict[int, int] = {}
+        if self._has_objective:
+            objective, _, self._objective_scale = self._integer_row(
+                canon.objective, 0.0, "the objective")
+        weight = [1] * len(canon.variables)        # largest |coefficient| x row length
+        for ints in [r[1] for r in rows] + [objective]:
+            for pos, c in ints.items():
+                weight[pos] = max(weight[pos], abs(c) * len(ints))
+        self._grid_equalities = any(
+            row.sense == LXConstraintSense.EQ and any(self._scales[p] > 1 for p in ints)
+            for row, ints, _ in rows)
+
+        self._handles, self._open = [], {}
         for pos, v in enumerate(canon.variables):
-            scale = self._scaling_factor if v.var_type == LXVarType.CONTINUOUS else 1
-            lo = self._int_bound(v.lower * scale, math.ceil, pos)
-            hi = self._int_bound(v.upper * scale, math.floor, pos)
+            scale = self._scales[pos]
+            open_bound = max(1, min(self.OPEN_BOUND, self.ROW_BUDGET // weight[pos]))
+            lo = self._int_bound(v.lower * scale, math.ceil, pos, open_bound)
+            hi = self._int_bound(v.upper * scale, math.floor, pos, open_bound)
             if lo > hi:
                 raise ValueError(f"Variable '{v.name}' has no value on the CP-SAT grid "
                                  f"1/{scale} within [{v.lower}, {v.upper}]")
@@ -139,11 +162,9 @@ class LXCPSATSolver(LXSolverInterface):
             else:
                 handle = cm.NewIntVar(lo, hi, v.name)
             self._handles.append(handle)
-            self._scales.append(scale)
         self._variable_map = self._family_map(canon, self._handles)
 
-        for row in canon.rows:
-            ints, rhs, _ = self._integer_row(row.coeffs, row.rhs, f"constraint '{row.name}'")
+        for row, ints, rhs in rows:
             expr = self._expr(ints)
             if row.sense == LXConstraintSense.LE:
                 ct = cm.Add(expr <= rhs)
@@ -154,15 +175,11 @@ class LXCPSATSolver(LXSolverInterface):
             ct.with_name(row.name)
             self._register_row(row, ct)
 
-        self._objective_constant = canon.objective_constant
-        self._has_objective = canon.sense is not None and bool(canon.objective)
-        self._objective_scale = 1
         if self._has_objective:
-            ints, _, self._objective_scale = self._integer_row(canon.objective, 0.0, "the objective")
             if canon.sense == LXObjectiveSense.MAXIMIZE:
-                cm.Maximize(self._expr(ints))
+                cm.Maximize(self._expr(objective))
             else:
-                cm.Minimize(self._expr(ints))
+                cm.Minimize(self._expr(objective))
 
         if self._approximation_error:
             self.logger.logger.warning(
@@ -173,11 +190,11 @@ class LXCPSATSolver(LXSolverInterface):
             raise ValueError(f"CP-SAT rejected the model: {problem}")
         return cm
 
-    def _int_bound(self, value: float, rounding: Any, pos: int) -> int:
+    def _int_bound(self, value: float, rounding: Any, pos: int, open_bound: int) -> int:
         if math.isfinite(value):
             return int(rounding(value - 1e-9 if rounding is math.ceil else value + 1e-9))
-        self._open.append(pos)
-        return self.OPEN_BOUND if value > 0 else -self.OPEN_BOUND
+        self._open[pos] = open_bound
+        return open_bound if value > 0 else -open_bound
 
     def _expr(self, ints: Dict[int, int]) -> Any:
         if not ints:
@@ -188,7 +205,7 @@ class LXCPSATSolver(LXSolverInterface):
         frac = Fraction(value).limit_denominator(self._max_denom)
         if value == 0:
             return frac
-        error = abs(float(frac) - value) / max(1.0, abs(value))
+        error = abs(float(frac) - value) / abs(value)
         if frac != 0 and error <= 1e-9:
             return frac
         if self._approximate and frac != 0:
@@ -275,7 +292,10 @@ class LXCPSATSolver(LXSolverInterface):
         if enable_sensitivity:
             self.logger.logger.info("CP-SAT provides no sensitivity data")
         self._approximate = approximate_coefficients
-        cpsat_model = self.build_model(model)
+        try:
+            cpsat_model = self.build_model(model)
+        finally:
+            self._approximate = False
 
         # Create solver instance
         solver = cp_model.CpSolver()
@@ -407,15 +427,20 @@ class LXCPSATSolver(LXSolverInterface):
                 obj_value += solver.ObjectiveValue() / self._objective_scale
                 bound = solver.BestObjectiveBound() / self._objective_scale + self._objective_constant
                 gap = abs(obj_value - bound) / max(abs(obj_value), 1e-10)
-            for pos in self._open:
-                if abs(solver.Value(self._handles[pos])) >= self.OPEN_BOUND:
+            for pos, bound in self._open.items():
+                if abs(solver.Value(self._handles[pos])) >= bound:
                     var = self._canonical.variables[pos]
                     self.logger.logger.warning(
-                        f"Variable '{var.name}' reached the CP-SAT bound ±2^40 used for an open "
-                        "bound; the true optimum may lie beyond it or the model may be unbounded")
-                    if lx_status == "optimal" and self._canonical.objective.get(pos):
-                        lx_status = "feasible"     # optimality is only proven within ±2^40
-
+                        f"Variable '{var.name}' reached ±{bound}, the bound CP-SAT uses for an "
+                        "open bound; the true optimum may lie beyond it or the model may be "
+                        "unbounded")
+                    if lx_status == "optimal":
+                        lx_status = "feasible"     # optimality is only proven inside the box
+        elif status == cp_model.INFEASIBLE and self._grid_equalities:
+            self.logger.logger.warning(
+                f"CP-SAT solves continuous variables on a 1/{self._scaling_factor} grid; an "
+                "equality on them can be infeasible on the grid although the continuous model "
+                "is feasible. Increase scaling_factor or use a linear solver.")
         # CP-SAT doesn't provide sensitivity analysis
         # TODO: Could compute reduced costs for feasibility/bound analysis
         shadow_prices: Dict[str, float] = {}

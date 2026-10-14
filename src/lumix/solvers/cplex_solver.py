@@ -184,6 +184,12 @@ class LXCPLEXSolver(LXSolverInterface):
         start_time = time.time()
         try:
             cplex_model.solve()
+            st = cplex_model.solution.status
+            if cplex_model.solution.get_status() in (st.infeasible_or_unbounded,
+                                                     st.MIP_infeasible_or_unbounded):
+                # Presolve could not tell infeasible from unbounded; ask once more.
+                cplex_model.parameters.preprocessing.presolve.set(0)
+                cplex_model.solve()
         except CplexError as e:
             self.logger.logger.error(f"CPLEX solve error: {e}")
             # Continue to parse solution even if error (may have partial solution)
@@ -363,7 +369,10 @@ class LXCPLEXSolver(LXSolverInterface):
 
         sol = cplex_model.solution
         code = sol.get_status()
-        has_solution = sol.get_solution_type() != sol.type.none
+        st = sol.status
+        has_solution = sol.get_solution_type() != sol.type.none and code not in (
+            st.unbounded, st.MIP_unbounded, st.infeasible_or_unbounded,
+            st.MIP_infeasible_or_unbounded, st.infeasible, st.MIP_infeasible)
         lx_status = self._status_name(sol.status, code, has_solution)
         obj_value = sol.get_objective_value() if has_solution else 0.0
         if has_solution:

@@ -66,6 +66,7 @@ class LXORToolsSolver(LXSolverInterface):
         canon = self._canonicalize(model)
         has_integer = any(v.var_type != LXVarType.CONTINUOUS for v in canon.variables)
         solver_type = "SCIP" if has_integer else "GLOP"
+        self._is_mip = has_integer
         self._solver = pywraplp.Solver.CreateSolver(solver_type)
         if self._solver is None:
             raise RuntimeError(f"Failed to create OR-Tools solver ({solver_type})")
@@ -140,7 +141,13 @@ class LXORToolsSolver(LXSolverInterface):
             self.logger.logger.warning(f"Unknown OR-Tools parameter '{name}' ignored")
 
         start_time = time.time()
-        status = solver.Solve(self._solver_parameters(gap_tolerance))
+        params = self._solver_parameters(gap_tolerance)
+        status = solver.Solve(params)
+        if status == pywraplp.Solver.INFEASIBLE and not self._is_mip:
+            # GLOP's presolve reports some unbounded LPs as infeasible; ask once more.
+            params.SetIntegerParam(pywraplp.MPSolverParameters.PRESOLVE,
+                                   pywraplp.MPSolverParameters.PRESOLVE_OFF)
+            status = solver.Solve(params)
         solve_time = time.time() - start_time
 
         # Parse and return solution
@@ -331,7 +338,7 @@ class LXORToolsSolver(LXSolverInterface):
         # Extract sensitivity data if enabled
         shadow_prices: Dict[str, float] = {}
         reduced_costs: Dict[str, float] = {}
-        if enable_sensitivity:
+        if enable_sensitivity and not self._is_mip:   # SCIP has no duals
             shadow_prices, reduced_costs = self._extract_sensitivity_data(
                 model, solver, status
             )

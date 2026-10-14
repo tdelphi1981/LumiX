@@ -98,6 +98,27 @@ class LXGLPKSolver(LXSolverInterface):
                                  else glpk.GLP_MIN)
         return gm
 
+    #: Time budget of the feasibility check that settles an unbounded MIP relaxation.
+    FEASIBILITY_CHECK_MS = 2000
+
+    def _has_integer_point(self, glpk_model: Any, smcp: Any) -> Optional[bool]:
+        """Feasibility of the integer problem, found with a zero objective."""
+        for col in range(1, glpk.glp_get_num_cols(glpk_model) + 1):
+            glpk.glp_set_obj_coef(glpk_model, col, 0.0)
+        if glpk.glp_simplex(glpk_model, smcp) != 0:
+            return None
+        if glpk.glp_get_status(glpk_model) == glpk.GLP_NOFEAS:
+            return False
+        iocp = glpk.glp_iocp()
+        glpk.glp_init_iocp(iocp)
+        iocp.msg_lev = smcp.msg_lev
+        # An infeasible MIP can keep branch-and-bound busy forever (2a - 2b = 1).
+        iocp.tm_lim = min(smcp.tm_lim, self.FEASIBILITY_CHECK_MS)
+        if glpk.glp_intopt(glpk_model, iocp) != 0:
+            return None
+        status = glpk.glp_mip_status(glpk_model)
+        return {glpk.GLP_OPT: True, glpk.GLP_FEAS: True, glpk.GLP_NOFEAS: False}.get(status)
+
     def _set_bounds(self, setter: Any, index: int, lower: float, upper: float) -> None:
         lo_open, hi_open = not math.isfinite(lower), not math.isfinite(upper)
         if lo_open and hi_open:
@@ -169,6 +190,14 @@ class LXGLPKSolver(LXSolverInterface):
             status = glpk.glp_get_status(glpk_model)
         solve_time = time.time() - start_time
         self._return_code = ret
+        # A MIP whose LP relaxation did not solve: its relaxation status says nothing
+        # definite about the integer problem except infeasibility.
+        self._relaxation_only = has_integer and not is_mip
+        self._mip_feasible: Optional[bool] = None
+        if self._relaxation_only and (ret == glpk.GLP_ENODFS
+                                      or glpk.glp_get_status(glpk_model) == glpk.GLP_UNBND):
+            # The relaxation is unbounded, so the MIP is unbounded if it is feasible at all.
+            self._mip_feasible = self._has_integer_point(glpk_model, smcp)
 
         # Parse and return solution
         solution = self._parse_solution(
@@ -334,8 +363,14 @@ class LXGLPKSolver(LXSolverInterface):
             }
 
         ret = getattr(self, "_return_code", 0)
+        relaxation_only = getattr(self, "_relaxation_only", False)
         if ret == glpk.GLP_ENOPFS:
             lx_status = "infeasible"
+        elif relaxation_only and (ret == glpk.GLP_ENODFS or status == glpk.GLP_UNBND):
+            feasible = getattr(self, "_mip_feasible", None)
+            lx_status = {True: "unbounded", False: "infeasible"}.get(feasible, "inf_or_unbounded")
+        elif relaxation_only and status not in (glpk.GLP_NOFEAS, glpk.GLP_INFEAS):
+            lx_status = "time_limit" if ret == glpk.GLP_ETMLIM else "undefined"
         elif ret == glpk.GLP_ENODFS:
             lx_status = "unbounded"
         elif ret == glpk.GLP_ETMLIM and status not in (glpk.GLP_OPT, glpk.GLP_FEAS):
@@ -352,7 +387,7 @@ class LXGLPKSolver(LXSolverInterface):
                 obj_value = glpk.glp_get_obj_val(glpk_model)
 
         # Extract variable values
-        if status in (glpk.GLP_OPT, glpk.GLP_FEAS):
+        if status in (glpk.GLP_OPT, glpk.GLP_FEAS) and not relaxation_only:
             read = glpk.glp_mip_col_val if is_mip else glpk.glp_get_col_prim
             variables, mapped = self._solution_values(
                 lambda pos: read(glpk_model, self._handles[pos]))

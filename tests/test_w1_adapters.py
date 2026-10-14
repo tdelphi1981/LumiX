@@ -344,7 +344,7 @@ def test_cpsat_open_bound_reached_is_not_reported_optimal(caplog):
     with caplog.at_level(logging.WARNING):
         s = LXOptimizer().use_solver("cpsat").solve(m)
     assert s.status == "feasible"
-    assert "2^40" in caplog.text
+    assert "open bound" in caplog.text
 
 
 @pytest.mark.parametrize("solver", AVAILABLE + ["cpsat"])

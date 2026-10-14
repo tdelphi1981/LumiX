@@ -62,10 +62,23 @@ class LXGurobiSolver(LXSolverInterface):
         self._constraint_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
         self._constraint_list: List[Any] = []
 
+    _env: Optional["gp.Env"] = None
+
+    @classmethod
+    def _quiet_env(cls) -> "gp.Env":
+        """A Gurobi environment with output off (pass ``verbose=True`` to see the log).
+        Shared by all models: starting an environment checks the license."""
+        if cls._env is None:
+            env = gp.Env(empty=True)
+            env.setParam("OutputFlag", 0)
+            env.start()
+            cls._env = env
+        return cls._env
+
     def build_model(self, model: LXModel) -> gp.Model:
         """Build a Gurobi model from the canonical form of ``model``."""
         canon = self._canonicalize(model)
-        self._model = gp.Model(model.name)
+        self._model = gp.Model(model.name, env=self._quiet_env())
         gm = self._model
         vtype = {LXVarType.CONTINUOUS: GRB.CONTINUOUS, LXVarType.INTEGER: GRB.INTEGER,
                  LXVarType.BINARY: GRB.BINARY}
@@ -129,6 +142,9 @@ class LXGurobiSolver(LXSolverInterface):
         # Set MIP gap tolerance
         if gap_tolerance is not None:
             gurobi_model.setParam(GRB.Param.MIPGap, gap_tolerance)
+
+        if solver_params.pop("verbose", False):
+            gurobi_model.setParam(GRB.Param.OutputFlag, 1)
 
         # Set additional solver parameters
         for param_name, param_value in solver_params.items():
