@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Sequence, Tuple, TypeVar
 
@@ -72,15 +73,41 @@ def _key_or_where(var: "LXVariable", where: Optional[Callable[..., bool]],
     return LXKeyFilter(var, keys)
 
 
+def call_arity(func: Callable[..., Any]) -> int:
+    """How many positional arguments a coefficient or filter takes: 1 (the
+    variable instance) or 2 (the instance and the constraint row instance).
+
+    Wrappers built by LumiX (merged and scaled terms) carry ``_lumix_arity``;
+    ``*args`` callables count as 2."""
+    explicit = getattr(func, "_lumix_arity", None)
+    if explicit is not None:
+        return explicit
+    if isinstance(func, LXKeyFilter):
+        return 1
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return 1
+    positional = 0
+    for p in params:
+        if p.kind == p.VAR_POSITIONAL:
+            return 2
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD):
+            positional += 1
+    return 2 if positional >= 2 else 1
+
+
+def call_with_row(func: Callable[..., Any], instance: Any, row: Any) -> Any:
+    """Call ``func`` with the constraint row instance when it takes two arguments."""
+    if row is not None and call_arity(func) > 1:
+        return func(instance, row)
+    return func(instance)
+
+
 def _call_coeff(coeff_func: Callable[..., float], args: tuple) -> float:
     """Call a coefficient with (instance, constraint_instance) when it accepts two
-    arguments, else with the instance only -- the same fallback adapters use."""
-    if len(args) > 1:
-        try:
-            return coeff_func(*args)
-        except TypeError:
-            return coeff_func(args[0])
-    return coeff_func(*args)
+    arguments, else with the instance only."""
+    return call_with_row(coeff_func, args[0], args[1] if len(args) > 1 else None)
 
 
 def _merge_terms(first: tuple, second: tuple) -> tuple:
@@ -91,24 +118,31 @@ def _merge_terms(first: tuple, second: tuple) -> tuple:
     """
     var, coeff1, where1 = first
     _, coeff2, where2 = second
+    row_aware = max(call_arity(coeff1), call_arity(where1),
+                    call_arity(coeff2), call_arity(where2))
 
     def merged_coeff(*args: Any) -> float:
+        row = args[1] if len(args) > 1 else None
         total = 0.0
-        if where1(args[0]):
-            total += _call_coeff(coeff1, args)
-        if where2(args[0]):
-            total += _call_coeff(coeff2, args)
+        if call_with_row(where1, args[0], row):
+            total += call_with_row(coeff1, args[0], row)
+        if call_with_row(where2, args[0], row):
+            total += call_with_row(coeff2, args[0], row)
         return total
 
-    def merged_where(instance: Any) -> bool:
-        return bool(where1(instance) or where2(instance))
+    def merged_where(*args: Any) -> bool:
+        row = args[1] if len(args) > 1 else None
+        return bool(call_with_row(where1, args[0], row) or call_with_row(where2, args[0], row))
 
+    merged_coeff._lumix_arity = row_aware  # type: ignore[attr-defined]
+    merged_where._lumix_arity = max(call_arity(where1), call_arity(where2))  # type: ignore[attr-defined]
     return (var, merged_coeff, merged_where)
 
 
 def _scaled(coeff_func: Callable[..., float], scalar: float) -> Callable[..., float]:
     def scaled(*args: Any) -> float:
         return coeff_func(*args) * scalar
+    scaled._lumix_arity = call_arity(coeff_func)  # type: ignore[attr-defined]
     return scaled
 
 
