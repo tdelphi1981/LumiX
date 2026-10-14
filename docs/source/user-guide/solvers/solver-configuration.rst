@@ -131,7 +131,13 @@ OR-Tools
 Gurobi
 ~~~~~~
 
-Gurobi has the most extensive parameter set. Use Gurobi parameter names directly:
+Gurobi has the most extensive parameter set. Use Gurobi parameter names directly.
+
+.. versionchanged:: 0.3.0
+   Gurobi's log is off by default; pass ``verbose=True`` (to ``solve()`` or
+   ``use_solver("gurobi", ...)``) to print it.
+
+Parameter names:
 
 **Threading:**
 

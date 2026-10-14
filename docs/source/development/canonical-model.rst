@@ -32,10 +32,16 @@ Adding fields keeps the schema version; changing or removing fields increments i
 Row semantics
 -------------
 
-- Terms on the same variable instance are summed (``x + x`` is ``2x``).
+- Terms on the same variable instance are summed (``x + x`` is ``2x``); a sum
+  that cancels to floating-point noise (``0.1 + 0.2 - 0.3``) is 0, and so is a
+  right-hand side that differs from the constant only by such noise.
+- Index keys must be unique within a variable family and within a constraint
+  family; a repeated key raises ``ValueError``.
 - A constraint family defined over the variable's own data narrows a term to the
   row's own instance only when the term's coefficient and filter take **one**
-  argument. A coefficient or filter that takes two arguments
+  required argument (parameters with a default value, as in
+  ``lambda item, g=g: ...``, do not count). The rule is applied to every
+  ``add_term`` separately, also after expressions are added or scaled. A coefficient or filter that takes two arguments
   (``lambda var_instance, row_instance: ...``) sees the whole family, which is what
   balance equations such as ``inv[t] - inv[t-1]`` need.
 - For ``add_multi_term`` / ``sum_over`` on ``indexed_by_product`` families,

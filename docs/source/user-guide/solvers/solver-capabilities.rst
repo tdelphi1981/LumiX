@@ -300,9 +300,13 @@ CP-SAT
 
 - With rational conversion enabled, continuous variables are represented as
   x * scaling_factor integers (default 1000).
-- Open variable bounds become ±2**40. When a variable with an objective
-  coefficient ends at that bound, the status is "feasible" (optimality is not
-  proven) and a warning is logged.
+- Open variable bounds become at most ±2**40, smaller when a large coefficient
+  would let a row overflow 64-bit integers. When a variable ends at such a bound,
+  the status is ``"feasible"`` (optimality is only proven inside the bounds; the
+  model may be unbounded) and a warning is logged.
+- Equalities on scaled continuous variables are solved on the 1/scaling_factor
+  grid and can be infeasible there although the continuous model is feasible
+  (``3 * x == 1``); a warning is logged when such a model is infeasible.
 
 Querying Capabilities
 ---------------------

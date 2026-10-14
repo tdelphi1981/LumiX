@@ -14,12 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CP-SAT: `approximate_coefficients=True` (on `solve()` or `use_solver("cpsat", ...)`) accepts coefficients that cannot be represented exactly.
 
 ### Changed
-- Same-type constraint narrowing applies only to one-argument coefficients and filters.
-- A variable family whose instances repeat an index key raises `ValueError`.
+- Same-type constraint narrowing applies only to one-argument coefficients and filters, decided for each `add_term` separately (also after `e1 + e2` or `expr * 2`). Parameters with a default value do not count, so `lambda item, g=g: ...` is a one-argument filter.
+- A variable or constraint family whose instances repeat an index key raises `ValueError`.
+- Sums that cancel to floating-point noise (`0.1 + 0.2 - 0.3`) are treated as 0 in rows and right-hand sides.
 - A variable family with empty data has no variables and logs a warning (it used to become one unindexed variable).
 - Gurobi returns `feasible` with the incumbent when a limit stops the search.
-- CP-SAT: open variable bounds become ±2^40, and a solution that reaches that bound on an objective variable is `feasible`, not `optimal`; coefficients that `max_denom` cannot represent within 1e-9 relative error, or rows whose common denominator exceeds 64 bits, raise `ValueError` unless `approximate_coefficients=True`; `scale_objective` has no effect.
-- A solve without a solution returns `variables == {}` on every adapter (OR-Tools returned zeros).
+- CP-SAT: open variable bounds become at most ±2^40 (smaller when large coefficients would overflow a row), and a solution that reaches such a bound is `feasible`, not `optimal`; an infeasible result with equalities on scaled continuous variables logs a grid warning; coefficients that `max_denom` cannot represent within 1e-9 relative error, or rows whose common denominator exceeds 64 bits, raise `ValueError` unless `approximate_coefficients=True`; `scale_objective` has no effect.
+- A solve without a solution (infeasible, unbounded) returns `variables == {}` on every adapter (OR-Tools returned zeros, CPLEX returned values for unbounded MIPs).
+- Gurobi no longer prints its log; pass `verbose=True` to `solve()` or `use_solver("gurobi", ...)` to see it.
+- OR-Tools (GLOP) and CPLEX re-solve once without presolve when presolve cannot tell an infeasible LP from an unbounded one; GLPK settles a MIP with an unbounded relaxation by a feasibility check (at most 2 s) and reports `inf_or_unbounded` when that does not finish.
+- OR-Tools returns no duals or reduced costs for MIPs (SCIP has none; they were reported as 0).
 
 ### Deprecated
 
