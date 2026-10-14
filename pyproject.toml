@@ -80,6 +80,7 @@ no_implicit_optional = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --cov=lumix --cov-report=term-missing"
+markers = ["slow: performance benchmarks (deselect with -m 'not slow')"]
 
 [tool.black]
 line-length = 100

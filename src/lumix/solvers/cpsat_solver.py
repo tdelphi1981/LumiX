@@ -556,7 +556,7 @@ class LXCPSATSolver(LXSolverInterface):
 
             if isinstance(solver_vars, dict):
                 # Indexed variable family
-                instances = self._candidates(lx_var, where_func)
+                instances, where_func = self._candidates(lx_var, where_func)
 
                 for instance in instances:
                     # Check where clause
@@ -603,7 +603,7 @@ class LXCPSATSolver(LXSolverInterface):
             solver_vars = self._variable_map[lx_var.name]
 
             if isinstance(solver_vars, dict):
-                instances = self._candidates(lx_var, where_func)
+                instances, where_func = self._candidates(lx_var, where_func)
 
                 for instance in instances:
                     # Check where clause
@@ -689,7 +689,7 @@ class LXCPSATSolver(LXSolverInterface):
         for var_name, (lx_var, coeff_func, where_func) in model.objective_expr.terms.items():
             solver_vars = self._variable_map[var_name]
             if isinstance(solver_vars, dict):
-                instances = self._candidates(lx_var, where_func)
+                instances, where_func = self._candidates(lx_var, where_func)
                 for instance in instances:
                     if not where_func(instance):
                         continue
@@ -708,7 +708,7 @@ class LXCPSATSolver(LXSolverInterface):
         for lx_var, coeff_func, where_func in model.objective_expr._multi_terms:
             solver_vars = self._variable_map[lx_var.name]
             if isinstance(solver_vars, dict):
-                instances = self._candidates(lx_var, where_func)
+                instances, where_func = self._candidates(lx_var, where_func)
                 for instance in instances:
                     if where_func is not None:
                         if isinstance(instance, tuple):

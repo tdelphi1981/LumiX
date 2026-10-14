@@ -1,7 +1,7 @@
 """Base solver interface for LumiX."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, Tuple, TypeVar
 
 from typing_extensions import Self
 
@@ -15,6 +15,11 @@ from ..utils.rational import LXRationalConverter
 from .capabilities import LXSolverCapability
 
 TModel = TypeVar("TModel")
+
+
+def _accept_all(*instance: Any) -> bool:
+    """Filter used for terms whose instances were already selected by key."""
+    return True
 
 
 class LXSolverInterface(ABC, Generic[TModel]):
@@ -44,7 +49,7 @@ class LXSolverInterface(ABC, Generic[TModel]):
         self._instance_cache: Dict[str, List[Any]] = {}
         self._key_positions: Dict[str, Dict[Any, List[int]]] = {}
 
-    def _candidates(self, lx_var: Any, where_func: Any) -> List[Any]:
+    def _candidates(self, lx_var: Any, where_func: Any) -> Tuple[List[Any], Any]:
         """
         Instances of ``lx_var`` that a term has to examine, in instance order.
 
@@ -55,6 +60,11 @@ class LXSolverInterface(ABC, Generic[TModel]):
         the number of keys rather than to the size of the family. The order is
         the instance order, which makes ``keys=`` build exactly the same model
         as the equivalent ``where``.
+
+        Returns:
+            ``(instances, where_func)``. For a key filter the returned filter
+            accepts everything, because the instances were already selected
+            by key; otherwise ``where_func`` is returned unchanged.
         """
         if not hasattr(self, "_instance_cache"):
             self._reset_instance_cache()
@@ -63,7 +73,7 @@ class LXSolverInterface(ABC, Generic[TModel]):
             instances = lx_var.get_instances()
             self._instance_cache[lx_var.name] = instances
         if not isinstance(where_func, LXKeyFilter):
-            return instances
+            return instances, where_func
         positions = self._key_positions.get(lx_var.name)
         if positions is None:
             positions = {}
@@ -71,7 +81,7 @@ class LXSolverInterface(ABC, Generic[TModel]):
                 positions.setdefault(lx_var.index_key(instance), []).append(i)
             self._key_positions[lx_var.name] = positions
         hits = sorted(i for key in where_func.keys for i in positions.get(key, ()))
-        return [instances[i] for i in hits]
+        return [instances[i] for i in hits], _accept_all
 
     @abstractmethod
     def build_model(self, model: LXModel[TModel]) -> Any:

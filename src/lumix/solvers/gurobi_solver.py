@@ -400,7 +400,7 @@ class LXGurobiSolver(LXSolverInterface):
 
             if isinstance(solver_vars, dict):
                 # Indexed variable family
-                instances = self._candidates(lx_var, where_func)
+                instances, where_func = self._candidates(lx_var, where_func)
 
                 # If constraint instance is provided and matches variable type,
                 # filter to only include the matching instance
@@ -448,7 +448,7 @@ class LXGurobiSolver(LXSolverInterface):
             solver_vars = self._variable_map[lx_var.name]
 
             if isinstance(solver_vars, dict):
-                instances = self._candidates(lx_var, where_func)
+                instances, where_func = self._candidates(lx_var, where_func)
 
                 for instance in instances:
                     # Check where clause
