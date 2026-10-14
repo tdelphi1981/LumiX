@@ -105,6 +105,8 @@ class LXCPSATSolver(LXSolverInterface):
         self._has_objective = False
         self._approximate = False
         self._approximation_error = 0.0
+        self._relax_grid = 0          # equalities on scaled continuous variables as bands
+        self._grid_relaxed = False
 
     def build_model(self, model: LXModel) -> cp_model.CpModel:
         """Build a CP-SAT model from the canonical form of ``model``. Every row and
@@ -171,7 +173,8 @@ class LXCPSATSolver(LXSolverInterface):
             elif row.sense == LXConstraintSense.GE:
                 ct = cm.Add(expr >= rhs)
             else:
-                ct = cm.Add(expr == rhs)
+                band = self._grid_band(ints) if self._relax_grid else 0
+                ct = cm.AddLinearConstraint(expr, rhs - band, rhs + band) if band else cm.Add(expr == rhs)
             ct.with_name(row.name)
             self._register_row(row, ct)
 
@@ -195,6 +198,14 @@ class LXCPSATSolver(LXSolverInterface):
             return int(rounding(value - 1e-9 if rounding is math.ceil else value + 1e-9))
         self._open[pos] = open_bound
         return open_bound if value > 0 else -open_bound
+
+    def _grid_band(self, ints: Dict[int, int]) -> int:
+        """Half-width of an equality row's band when its continuous variables live on
+        the 1/scaling_factor grid. Rounding each of them to the nearest grid point moves
+        the row by at most half the sum of their integer coefficients (``_relax_grid``
+        == 1); a bound that is itself off the grid can cost a whole step (== 2)."""
+        total = sum(abs(c) for pos, c in ints.items() if self._scales[pos] > 1)
+        return total if self._relax_grid > 1 else (total + 1) // 2
 
     def _expr(self, ints: Dict[int, int]) -> Any:
         if not ints:
@@ -292,10 +303,7 @@ class LXCPSATSolver(LXSolverInterface):
         if enable_sensitivity:
             self.logger.logger.info("CP-SAT provides no sensitivity data")
         self._approximate = approximate_coefficients
-        try:
-            cpsat_model = self.build_model(model)
-        finally:
-            self._approximate = False
+        self._relax_grid, self._grid_relaxed = 0, False
 
         # Create solver instance
         solver = cp_model.CpSolver()
@@ -331,10 +339,25 @@ class LXCPSATSolver(LXSolverInterface):
                     f"Failed to set CP-SAT parameter '{param_name}': {e}"
                 )
 
-        # Solve
-        start_time = time.time()
-        status = solver.Solve(cpsat_model)
-        solve_time = time.time() - start_time
+        try:
+            cpsat_model = self.build_model(model)
+            start_time = time.time()
+            status = solver.Solve(cpsat_model)
+            if status == cp_model.INFEASIBLE and self._grid_equalities:
+                # An equality on continuous variables can miss the 1/scaling_factor grid
+                # (3x == 1). Solve again with each such equality as a band one grid step
+                # wide per variable (as CP-SAT's own MIP import does).
+                for steps in (1, 2):           # half a grid step, then a whole one
+                    self._relax_grid = steps
+                    cpsat_model = self.build_model(model)
+                    status = solver.Solve(cpsat_model)
+                    if status != cp_model.INFEASIBLE:
+                        break
+                self._grid_relaxed = True
+            solve_time = time.time() - start_time
+        finally:
+            self._approximate = False
+            self._relax_grid = 0
 
         # Parse and return solution
         solution = self._parse_solution(model, solver, status, solve_time)
@@ -420,8 +443,8 @@ class LXCPSATSolver(LXSolverInterface):
         obj_value = 0.0
         gap: Optional[float] = None
         if has_solution:
-            variables, mapped = self._solution_values(
-                lambda pos: solver.Value(self._handles[pos]) / self._scales[pos])
+            values = [solver.Value(h) / sc for h, sc in zip(self._handles, self._scales)]
+            variables, mapped = self._solution_values(lambda pos: values[pos])
             obj_value = self._objective_constant
             if self._has_objective:
                 obj_value += solver.ObjectiveValue() / self._objective_scale
@@ -436,11 +459,15 @@ class LXCPSATSolver(LXSolverInterface):
                         "unbounded")
                     if lx_status == "optimal":
                         lx_status = "feasible"     # optimality is only proven inside the box
-        elif status == cp_model.INFEASIBLE and self._grid_equalities:
-            self.logger.logger.warning(
-                f"CP-SAT solves continuous variables on a 1/{self._scaling_factor} grid; an "
-                "equality on them can be infeasible on the grid although the continuous model "
-                "is feasible. Increase scaling_factor or use a linear solver.")
+            if self._grid_relaxed:
+                worst = max((abs(sum(c * values[p] for p, c in row.coeffs.items()) - row.rhs)
+                             for row in self._canonical.rows
+                             if row.sense == LXConstraintSense.EQ
+                             and any(self._scales[p] > 1 for p in row.coeffs)), default=0.0)
+                self.logger.logger.warning(
+                    f"CP-SAT: no solution satisfies the equalities on continuous variables "
+                    f"exactly on the 1/{self._scaling_factor} grid; they hold within {worst:.3g} "
+                    "(increase scaling_factor for a finer grid, or use a linear solver)")
         # CP-SAT doesn't provide sensitivity analysis
         # TODO: Could compute reduced costs for feasibility/bound analysis
         shadow_prices: Dict[str, float] = {}

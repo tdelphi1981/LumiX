@@ -131,15 +131,36 @@ def test_i4_cpsat_open_bound_with_large_coefficient():
     assert s.status == "optimal" and s.objective_value == pytest.approx(50)
 
 
-def test_i5_cpsat_off_grid_equality_warns(caplog):
+def off_grid_model(rhs, coeff=3.0, sense="min"):
     x = fam("x", ["k"], lower=0, upper=10)
     m = LXModel("m").add_variable(x)
-    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 3.0)).eq().rhs(1))
-    m.minimize(LXLinearExpression().add_term(x, 1.0))
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, coeff)).eq().rhs(rhs))
+    e = LXLinearExpression().add_term(x, 1.0)
+    return m.minimize(e) if sense == "min" else m.maximize(e)
+
+
+@pytest.mark.parametrize("coeff, rhs", [(3.0, 1), (1.0, 0.3333), (7.0, 2)])
+def test_i5_cpsat_off_grid_equality_is_solved_within_the_grid_tolerance(coeff, rhs, caplog):
     with caplog.at_level(logging.WARNING):
-        s = LXOptimizer().use_solver("cpsat").enable_rational_conversion().solve(m)
+        s = LXOptimizer().use_solver("cpsat").enable_rational_conversion().solve(
+            off_grid_model(rhs, coeff))
+    assert s.status == "optimal"
+    exact = rhs / coeff
+    assert s.variables["x"]["k"] == pytest.approx(exact, abs=coeff / 1000)
+    assert "within" in caplog.text
+
+
+def test_i5_cpsat_on_grid_equalities_stay_exact(caplog):
+    with caplog.at_level(logging.WARNING):
+        s = LXOptimizer().use_solver("cpsat").enable_rational_conversion().solve(
+            off_grid_model(1.5, 3.0, "max"))
+    assert s.variables["x"]["k"] == 0.5 and "within" not in caplog.text
+
+
+def test_i5_cpsat_truly_infeasible_continuous_model_stays_infeasible():
+    m = off_grid_model(40, 3.0)            # 3x == 40 needs x = 13.3 > 10
+    s = LXOptimizer().use_solver("cpsat").enable_rational_conversion().solve(m)
     assert s.status == "infeasible"
-    assert "grid" in caplog.text
 
 
 def test_i6_from_model_without_session_is_not_scalar():

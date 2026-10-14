@@ -304,9 +304,13 @@ CP-SAT
   would let a row overflow 64-bit integers. When a variable ends at such a bound,
   the status is ``"feasible"`` (optimality is only proven inside the bounds; the
   model may be unbounded) and a warning is logged.
-- Equalities on scaled continuous variables are solved on the 1/scaling_factor
-  grid and can be infeasible there although the continuous model is feasible
-  (``3 * x == 1``); a warning is logged when such a model is infeasible.
+- Continuous variables live on the 1/scaling_factor grid, so an equality on them
+  can have no exact grid solution although the continuous model is feasible
+  (``3 * x == 1``). CP-SAT then solves again with each such equality widened to a
+  band of half a grid step per variable (a whole step if that is still
+  infeasible), as CP-SAT's own MIP import does, and logs how far the equalities
+  are from exact. A model that is infeasible with the bands is infeasible.
+  Equalities that hold exactly on the grid are never widened.
 
 Querying Capabilities
 ---------------------
