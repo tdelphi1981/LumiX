@@ -436,8 +436,9 @@ class LXCPSATSolver(LXSolverInterface):
         else:
             raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
 
-        # Set constraint name (for debugging)
-        ct.Proto().name = lx_constraint.name
+        # Set constraint name (for debugging). ct.Proto() returns a temporary
+        # proxy in OR-Tools 9.13+; writing through it crashes the process.
+        ct.with_name(lx_constraint.name)
 
         self._constraint_list.append(ct)
 
@@ -498,8 +499,8 @@ class LXCPSATSolver(LXSolverInterface):
             else:
                 raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
 
-            # Set constraint name
-            ct.Proto().name = ct_name
+            # Set constraint name (with_name: see _create_single_constraint)
+            ct.with_name(ct_name)
 
             self._constraint_list.append(ct)
 
