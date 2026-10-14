@@ -45,7 +45,9 @@ Approximating f(x) with Linear Segments
 Formulation Methods
 -------------------
 
-LumiX supports three PWL formulation methods:
+LumiX supports three PWL formulation methods. All three are exact for the
+piecewise-linear function through the breakpoints, also when it is nonconvex
+(n = number of segments):
 
 .. list-table::
    :header-rows: 1
@@ -56,17 +58,23 @@ LumiX supports three PWL formulation methods:
      - Constraints
      - Best For
    * - SOS2
-     - n+1 continuous
-     - 3
-     - Solvers with SOS2 support
+     - n+1 continuous + n binary
+     - n+5
+     - Default; general use
    * - Incremental
      - n binary + n continuous
      - 3n+1
      - Standard MILP solvers
    * - Logarithmic
-     - log₂(n) binary
-     - Complex
-     - Many segments (>100)
+     - n'+1 continuous + log₂(n') binary (n' = n rounded up to a power of two)
+     - 2·log₂(n')+3
+     - Many segments
+
+.. versionchanged:: 0.2.1
+   SOS2 enforces adjacency with segment binaries and is exact. Earlier versions
+   added no SOS2 condition at all, so the model was only the convex hull of the
+   function: maximizing a convex function could return a value above it. The
+   logarithmic method is implemented (it raised ``NotImplementedError``).
 
 SOS2 Formulation
 ----------------
@@ -119,16 +127,11 @@ At most 2 adjacent λ variables can be non-zero.
        method="sos2"
    )
 
-**Advantages:**
+**Adjacency:**
 
-- Fewest variables (n+1 continuous)
-- Fastest when solver has native SOS2 support
-- Recommended for Gurobi, CPLEX
-
-**Disadvantages:**
-
-- Requires SOS2 support in solver
-- Not available in GLPK
+No solver adapter passes SOS2 sets to the solver yet, so LumiX enforces the SOS2
+property with one binary z per segment: Σz = 1, λ₀ ≤ z₀, λᵢ ≤ zᵢ₋₁ + zᵢ,
+λₙ ≤ zₙ₋₁. The formulation works on every MILP solver.
 
 Incremental Formulation
 -----------------------
@@ -196,25 +199,49 @@ Use log₂(n) binary variables to encode which segment is active.
 
 **Variables:**
 
-- b₀, b₁, ..., b_{log₂(n)-1}: Binary encoding variables
-- y: Output variable
+- λ₀, ..., λₙ': Convex-combination weights (as in SOS2)
+- y₀, ..., y_{log₂(n')-1}: Binary Gray-code variables
+- Output variable
 
-**Status in LumiX:**
+Segment s gets the Gray code g(s) = s XOR (s >> 1). For every bit l, the λ of
+breakpoints whose adjacent segments all have bit l set sum to at most yₗ, and those
+whose adjacent segments all have it clear sum to at most 1 − yₗ (Vielma and
+Nemhauser, 2011). The segment count is padded to a power of two with zero-width
+segments at the last breakpoint.
 
-.. note::
+**When to Use:**
 
-   Logarithmic formulation is **not yet implemented**. Use SOS2 or incremental instead.
-
-   See :class:`lumix.linearization.techniques.piecewise.LXPiecewiseLinearizer._logarithmic_formulation`
-
-**When to Use (Future):**
-
-- Very many segments (>100)
-- Memory-constrained environments
-- Balanced variable/constraint trade-off
+- Many segments (the binary count grows with log₂ of the segment count)
 
 Breakpoint Generation
 ---------------------
+
+Explicit Breakpoints
+~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.2.1
+
+Pass ``breakpoints`` to use your own x-coordinates instead of generated ones. For a
+function defined by data points this makes the term exact:
+
+.. code-block:: python
+
+   points = [(0, 10), (5, 2), (20, 30)]
+   f = lambda x: np.interp(x, [p[0] for p in points], [p[1] for p in points])
+   expr.add_piecewise(x, f, breakpoints=[0, 5, 20])
+
+``breakpoints`` must contain at least two strictly increasing values and replaces
+``num_segments``, ``adaptive``, ``x_min`` and ``x_max`` (combining it with
+``x_min``/``x_max`` raises ``ValueError``).
+
+The Domain Constrains the Variable
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The input variable is written as a combination of the breakpoints, so it cannot
+leave ``[x_min, x_max]`` (or ``[breakpoints[0], breakpoints[-1]]``). When that range
+is narrower than the variable's bounds, LumiX issues a ``UserWarning``. Cover the
+variable's whole range unless you mean to restrict it.
+
 
 Uniform Breakpoints
 ~~~~~~~~~~~~~~~~~~~

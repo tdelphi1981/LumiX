@@ -20,11 +20,16 @@ Approximate any univariate nonlinear function f(x) with a piecewise-linear funct
 Linearization Methods
 ---------------------
 
-Three formulation methods available:
+Three formulation methods available, all exact for the piecewise-linear function
+through the breakpoints:
 
-1. **SOS2**: Special Ordered Set Type 2 (best when solver supports)
+1. **SOS2**: Convex-combination weights, adjacency enforced with segment binaries
 2. **Incremental**: Binary selection variables
-3. **Logarithmic**: Gray code encoding (efficient for many segments)
+3. **Logarithmic**: Gray code encoding (log₂ binaries, efficient for many segments)
+
+Pass ``breakpoints=[...]`` to use your own breakpoints (for a function given by
+data points), and note that the domain constrains the variable; see
+:doc:`/user-guide/linearization/piecewise`.
 
 Basic Usage
 -----------

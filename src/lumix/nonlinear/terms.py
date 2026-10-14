@@ -283,6 +283,8 @@ class LXPiecewiseLinearTerm:
         x_max: Maximum value of the input domain (default: use variable upper bound).
         adaptive: If True, use adaptive segmentation based on function curvature (default: True).
         method: Formulation method - "sos2", "incremental", or "logarithmic" (default: "sos2").
+        breakpoints: Explicit, strictly increasing breakpoints; when set, num_segments,
+            adaptive, x_min and x_max are not used (default: None).
 
     Example:
         Exponential growth function::
@@ -380,6 +382,7 @@ class LXPiecewiseLinearTerm:
     x_max: Optional[float] = None
     adaptive: bool = True
     method: Literal["sos2", "incremental", "logarithmic"] = "sos2"
+    breakpoints: Optional[List[float]] = None
 
 
 __all__ = [

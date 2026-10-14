@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Sequence, Tuple, TypeVar
 
 from typing_extensions import Self
 
@@ -673,9 +673,15 @@ class LXNonLinearExpression:
         x_max: Optional[float] = None,
         adaptive: bool = True,
         method: Literal["sos2", "incremental", "logarithmic"] = "sos2",
+        breakpoints: Optional[Sequence[float]] = None,
     ) -> Self:
         """
         Add piecewise-linear approximation of arbitrary function.
+
+        The approximation domain ``[x_min, x_max]`` (or the first and last
+        breakpoint) constrains ``var``: the variable cannot take values outside
+        it. A ``UserWarning`` is issued when the domain is narrower than the
+        variable's bounds.
 
         Args:
             var: Input variable
@@ -684,7 +690,13 @@ class LXNonLinearExpression:
             x_min: Minimum domain value (default: var.lower_bound)
             x_max: Maximum domain value (default: var.upper_bound)
             adaptive: Use adaptive breakpoint generation
-            method: Linearization method ("sos2", "incremental", "logarithmic")
+            method: Linearization method ("sos2", "incremental", "logarithmic");
+                all three are exact for the piecewise-linear function through
+                the breakpoints
+            breakpoints: Strictly increasing x-coordinates to use instead of
+                generated ones (``num_segments``, ``adaptive``, ``x_min`` and
+                ``x_max`` are then not used). With a ``func`` that is itself
+                piecewise linear through these points, the term is exact.
 
         Returns:
             Self for chaining
@@ -704,7 +716,8 @@ class LXNonLinearExpression:
         from ..nonlinear.terms import LXPiecewiseLinearTerm
 
         self.nonlinear_terms.append(
-            LXPiecewiseLinearTerm(var, func, num_segments, x_min, x_max, adaptive, method)
+            LXPiecewiseLinearTerm(var, func, num_segments, x_min, x_max, adaptive, method,
+                                  None if breakpoints is None else list(breakpoints))
         )
         return self
 

@@ -216,6 +216,7 @@ class LXLinearizer:
                     term.x_max,
                     term.method,
                     term.adaptive,
+                    breakpoints=term.breakpoints,
                 )
                 linear_expr = linear_expr + LXLinearExpression().add_term(aux_var, 1.0)
                 self._num_piecewise_terms += 1
