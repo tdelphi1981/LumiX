@@ -81,6 +81,12 @@ Variables with a single value:
    cost = solution.get_variable(total_cost)
    print(f"Total cost: ${cost:.2f}")
 
+.. versionchanged:: 0.3.0
+   Scalar variables (no data source) are supported by every solver. Before 0.3.0
+   they raised "has no data source" at solve time, and from_data([]) was
+   sometimes used as a workaround; an empty family now has no variables (a
+   warning is logged), so use the scalar form above.
+
 Single-Indexed Variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 

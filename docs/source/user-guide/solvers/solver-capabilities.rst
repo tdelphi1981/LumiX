@@ -283,6 +283,27 @@ CP-SAT
 - ✗ Quadratic programming
 - ✗ Callbacks
 
+**Coefficients and bounds** (0.3.0):
+
+- Each row and the objective are converted to integers exactly: every coefficient
+  and right-hand side becomes a fraction with a denominator up to max_denom
+  (enable_rational_conversion(max_denom=...), default 10000), and the row is
+  multiplied by the least common multiple of the denominators.
+- A value that no such fraction matches within a relative error of 1e-9 (for
+  example 0.12345), or a row whose common denominator exceeds the 64-bit
+  range, raises ValueError. Pass approximate_coefficients=True to accept
+  the nearest fraction instead; a warning reports the largest relative error:
+
+  .. code-block:: python
+
+     LXOptimizer().use_solver("cpsat", approximate_coefficients=True).solve(model)
+
+- With rational conversion enabled, continuous variables are represented as
+  x * scaling_factor integers (default 1000).
+- Open variable bounds become ±2**40. When a variable with an objective
+  coefficient ends at that bound, the status is "feasible" (optimality is not
+  proven) and a warning is logged.
+
 Querying Capabilities
 ---------------------
 

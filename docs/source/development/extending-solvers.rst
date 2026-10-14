@@ -3,6 +3,31 @@ Extending Solvers
 
 How to add new solver implementations to LumiX.
 
+.. versionchanged:: 0.3.0
+   Built-in adapters no longer walk ``LXLinearExpression`` terms themselves. They
+   build from :doc:`the canonical model <canonical-model>`, which already sums
+   repeated terms, moves expression constants to the right-hand side and applies
+   the row-narrowing rule. A new adapter should do the same:
+
+   .. code-block:: python
+
+      def build_model(self, model):
+          canon = self._canonicalize(model)          # resets per-build state
+          handles = [make_var(v.name, v.var_type, v.lower, v.upper)
+                     for v in canon.variables]       # bounds are floats, ±inf when open
+          self._handles = handles
+          self._variable_map = self._family_map(canon, handles)
+          for row in canon.rows:
+              handle = make_row(row.name, row.coeffs, row.sense, row.rhs)  # coeffs: {position: value}
+              self._register_row(row, handle)
+          if canon.sense is not None:
+              set_objective(canon.objective, canon.objective_constant, canon.sense)
+
+      # in _parse_solution, when a solution exists:
+      variables, mapped = self._solution_values(lambda pos: value_of(self._handles[pos]))
+
+   The term-walking walkthrough below describes the 0.2 pattern.
+
 Overview
 --------
 

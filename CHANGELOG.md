@@ -8,14 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `LXModel.to_canonical()` and `LXCanonicalModel`: a solver-independent form of a model that every adapter builds from.
+- Coefficients and filters of `add_term` may take the constraint row instance as a second argument.
+- Scalar variables: an `LXVariable` without a data source is one variable whose solution value is a number (documented before, but it raised "has no data source").
+- CP-SAT: `approximate_coefficients=True` (on `solve()` or `use_solver("cpsat", ...)`) accepts coefficients that cannot be represented exactly.
 
 ### Changed
+- Same-type constraint narrowing applies only to one-argument coefficients and filters.
+- A variable family whose instances repeat an index key raises `ValueError`.
+- A variable family with empty data has no variables and logs a warning (it used to become one unindexed variable).
+- Gurobi returns `feasible` with the incumbent when a limit stops the search.
+- CP-SAT: open variable bounds become ±2^40, and a solution that reaches that bound on an objective variable is `feasible`, not `optimal`; coefficients that `max_denom` cannot represent within 1e-9 relative error, or rows whose common denominator exceeds 64 bits, raise `ValueError` unless `approximate_coefficients=True`; `scale_objective` has no effect.
+- A solve without a solution returns `variables == {}` on every adapter (OR-Tools returned zeros).
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- A1: a constant in a constraint's left-hand side was ignored by OR-Tools, CP-SAT, CPLEX and GLPK.
+- A2: repeated terms on one variable overwrote each other (OR-Tools rows/objective, CPLEX/GLPK objective; GLPK aborted the process).
+- A3: binary bounds were ignored and fractional integer bounds truncated (OR-Tools, CP-SAT).
+- A4: an empty data family became one phantom variable or one constraint row.
+- A5: same-type constraint rows dropped other instances even when the coefficient referenced the row; CP-SAT did not narrow at all.
+- A6: CP-SAT scaled coefficients without scaling the right-hand side, rounded the objective constant, corrupted rows mixing integer and scaled continuous variables, kept scaling state between solves, capped open bounds at INT32 and rounded tiny coefficients to 0.
+- A7: Gurobi discarded the incumbent on time, node and solution limits.
+- A8: CPLEX status codes were mapped from wrong literals (infeasible MIPs reported as feasible).
+- B1: OR-Tools crashed on integer variables with an open bound.
+- B2: OR-Tools ignored `gap_tolerance` and `threads`; `use_solver(**kwargs)` and later `use_solver()` / `enable_*()` calls after a solve were ignored.
+- B3: CP-SAT gap used an unscaled bound; CP-SAT warned about `enable_sensitivity` on every solve.
+- B4: NamedTuple data was unpacked into several arguments in `sum_over`.
+- B10: GLPK reported infeasible/unbounded problems as "undefined" and printed solver output for MIPs.
+- Gurobi INF_OR_UNBD is resolved to infeasible or unbounded; CPLEX `output_clonelog` works.
 
 ### Security
 

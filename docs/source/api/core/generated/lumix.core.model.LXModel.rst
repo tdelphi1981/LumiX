@@ -27,6 +27,7 @@
       ~LXModel.prepare_goal_programming
       ~LXModel.set_goal_mode
       ~LXModel.summary
+      ~LXModel.to_canonical
    
    
 

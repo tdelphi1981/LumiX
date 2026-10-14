@@ -122,6 +122,14 @@ One constraint per data instance:
 
 This creates one constraint per resource.
 
+.. versionchanged:: 0.3.0
+   When a constraint family is defined over the same data as a variable, a term
+   on that variable is narrowed to the row's own instance only if its coefficient
+   and filter take one argument. Give the coefficient two arguments
+   (``lambda var_instance, row_instance: ...``) to reach other instances, for
+   example ``inv[t-1]`` in an inventory balance. See :doc:`/development/canonical-model`.
+
+
 Right-Hand Side (RHS)
 ---------------------
 

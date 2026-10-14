@@ -40,6 +40,8 @@
    
       ~LXVariable.cost_func
       ~LXVariable.index_func
+      ~LXVariable.is_multi_indexed
+      ~LXVariable.is_scalar
       ~LXVariable.lower_bound
       ~LXVariable.model_type
       ~LXVariable.upper_bound

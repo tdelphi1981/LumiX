@@ -22,4 +22,11 @@
 
    
    
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~LXCPSATSolver.INT_LIMIT
+      ~LXCPSATSolver.OPEN_BOUND
+   
    
