@@ -1,11 +1,11 @@
 """Base solver interface for LumiX."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, List, Literal, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Literal, Optional, Tuple, TypeVar
 
 from typing_extensions import Self
 
-from ..core.canonical import LXInstanceCache
+from ..core.canonical import LXCanonicalBuilder, LXCanonicalModel, LXInstanceCache
 from ..core.model import LXModel
 from ..linearization.config import LXLinearizerConfig
 from ..solution.solution import LXSolution
@@ -51,6 +51,39 @@ class LXSolverInterface(ABC, Generic[TModel]):
             self._reset_instance_cache()
         return self._instance_cache.candidates(lx_var, where_func, constraint_instance)
 
+
+    # ---- canonical build helpers (0.3.0) ----------------------------------
+    def _canonicalize(self, model: LXModel) -> LXCanonicalModel:
+        """Canonical form of ``model`` for this build; resets per-build state."""
+        self._reset_instance_cache()
+        self._constraint_map = {}
+        self._constraint_list = []
+        self._canonical = LXCanonicalBuilder(model, self._instance_cache).build()
+        return self._canonical
+
+    @staticmethod
+    def _family_map(canon: LXCanonicalModel, handles: List[Any]) -> Dict[str, Dict[Any, Any]]:
+        """``{family: {index_key: solver handle}}``; empty families map to ``{}``."""
+        return {family: {key: handles[pos] for key, pos in keys.items()}
+                for family, keys in canon.families.items()}
+
+    def _register_row(self, row: Any, handle: Any) -> None:
+        """Store a row handle in ``_constraint_map`` with the 0.2 shapes:
+        ``{name: handle}`` for a single constraint, ``{family: {key: handle}}``
+        for an indexed family."""
+        if row.indexed:
+            self._constraint_map.setdefault(row.family, {})[row.key] = handle
+        else:
+            self._constraint_map[row.family] = handle
+        self._constraint_list.append(handle)
+
+    def _solution_values(self, read: Callable[[int], float]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """``(variables, mapped)`` for LXSolution from a reader of canonical positions."""
+        canon = self._canonical
+        variables: Dict[str, Dict[Any, float]] = {family: {} for family in canon.families}
+        for pos, var in enumerate(canon.variables):
+            variables[var.family][var.key] = read(pos)
+        return variables, {family: dict(values) for family, values in variables.items()}
 
     @abstractmethod
     def build_model(self, model: LXModel[TModel]) -> Any:
