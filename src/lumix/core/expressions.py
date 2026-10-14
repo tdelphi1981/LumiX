@@ -12,6 +12,46 @@ from .variables import LXVariable
 TModel = TypeVar("TModel")
 
 
+def _call_coeff(coeff_func: Callable[..., float], args: tuple) -> float:
+    """Call a coefficient with (instance, constraint_instance) when it accepts two
+    arguments, else with the instance only -- the same fallback adapters use."""
+    if len(args) > 1:
+        try:
+            return coeff_func(*args)
+        except TypeError:
+            return coeff_func(args[0])
+    return coeff_func(*args)
+
+
+def _merge_terms(first: tuple, second: tuple) -> tuple:
+    """Combine two terms on the same variable into one equivalent term.
+
+    An instance is included when either term includes it, and its coefficient
+    is the sum of the coefficients of the terms that include it.
+    """
+    var, coeff1, where1 = first
+    _, coeff2, where2 = second
+
+    def merged_coeff(*args: Any) -> float:
+        total = 0.0
+        if where1(args[0]):
+            total += _call_coeff(coeff1, args)
+        if where2(args[0]):
+            total += _call_coeff(coeff2, args)
+        return total
+
+    def merged_where(instance: Any) -> bool:
+        return bool(where1(instance) or where2(instance))
+
+    return (var, merged_coeff, merged_where)
+
+
+def _scaled(coeff_func: Callable[..., float], scalar: float) -> Callable[..., float]:
+    def scaled(*args: Any) -> float:
+        return coeff_func(*args) * scalar
+    return scaled
+
+
 @dataclass
 class LXLinearExpression(Generic[TModel]):
     """
@@ -106,7 +146,10 @@ class LXLinearExpression(Generic[TModel]):
         coeff_func = coeff if callable(coeff) else lambda _: coeff
         if where is None:
             where = lambda _: True
-        self.terms[var.name] = (var, coeff_func, where)
+        term = (var, coeff_func, where)
+        if var.name in self.terms:
+            term = _merge_terms(self.terms[var.name], term)
+        self.terms[var.name] = term
         return self
 
     def add_multi_term(
@@ -183,6 +226,10 @@ class LXLinearExpression(Generic[TModel]):
         """
         Enable expr1 + expr2 or expr + constant.
 
+        Terms on the same variable are merged: an instance is included when
+        either expression includes it, with the sum of the coefficients that
+        apply to it.
+
         Args:
             other: Expression or constant to add
 
@@ -195,19 +242,7 @@ class LXLinearExpression(Generic[TModel]):
         # Merge expressions
         for var_name, term in other.terms.items():
             if var_name in self.terms:
-                # Combine coefficients when same variable appears in both expressions
-                var1, coeff_func1, where1 = self.terms[var_name]
-                var2, coeff_func2, where2 = term
-
-                # Create combined coefficient function that sums both
-                def combined_coeff(m, cf1=coeff_func1, cf2=coeff_func2):
-                    return cf1(m) + cf2(m)
-
-                # Combine where clauses with AND logic
-                def combined_where(m, w1=where1, w2=where2):
-                    return w1(m) and w2(m)
-
-                self.terms[var_name] = (var1, combined_coeff, combined_where)
+                self.terms[var_name] = _merge_terms(self.terms[var_name], term)
             else:
                 self.terms[var_name] = term
         self.constant += other.constant
@@ -225,9 +260,12 @@ class LXLinearExpression(Generic[TModel]):
         Returns:
             Self for chaining
         """
-        for var_name in self.terms:
-            var, old_coeff = self.terms[var_name]
-            self.terms[var_name] = (var, lambda m, c=old_coeff, s=scalar: c(m) * s)
+        for var_name, (var, coeff_func, where) in list(self.terms.items()):
+            self.terms[var_name] = (var, _scaled(coeff_func, scalar), where)
+        self._multi_terms = [
+            (var, _scaled(coeff_func, scalar), where)
+            for var, coeff_func, where in self._multi_terms
+        ]
         self.constant *= scalar
         return self
 
