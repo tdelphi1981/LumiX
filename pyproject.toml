@@ -79,7 +79,7 @@ no_implicit_optional = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --cov=optixng --cov-report=term-missing"
+addopts = "-v --cov=lumix --cov-report=term-missing"
 
 [tool.black]
 line-length = 100
