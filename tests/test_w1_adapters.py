@@ -154,3 +154,21 @@ def test_cplex_maps_named_status_constants():
     assert m(st, st.MIP_infeasible_or_unbounded, False) == "inf_or_unbounded"
     assert m(st, st.MIP_time_limit_feasible, True) == "feasible"
     assert m(st, st.MIP_time_limit_infeasible, False) == "time_limit"
+
+
+def test_b10_glpk_infeasible_and_unbounded_lp():
+    pytest.importorskip("swiglpk")
+    x = fam("x", ["k"], lower=0, upper=None)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 1.0)).le().rhs(-1))
+    m.minimize(LXLinearExpression().add_term(x, 1.0))
+    assert solve_with("glpk", m).status == "infeasible"
+    u = LXModel("u").add_variable(fam("x", ["k"], lower=0))
+    u.maximize(LXLinearExpression().add_term(u.variables[0], 1.0))
+    assert solve_with("glpk", u).status == "unbounded"
+
+
+def test_glpk_mip_respects_message_level(capfd):
+    pytest.importorskip("swiglpk")
+    solve_with("glpk", knapsack())
+    assert "GLPK Simplex Optimizer" not in capfd.readouterr().out
