@@ -332,6 +332,13 @@ class LXVariable(Generic[TModel, TValue]):
 
         return instances
 
+    @property
+    def is_multi_indexed(self) -> bool:
+        """True when instances are tuples of one model per dimension
+        (``indexed_by_product``); coefficients and filters then receive one
+        argument per dimension."""
+        return self.index_func is None and self._cartesian is not None
+
     def index_key(self, instance: Any) -> Any:
         """
         Return the index key of one instance of this variable family.
