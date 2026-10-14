@@ -99,3 +99,14 @@ def test_linearized_model_keeps_objective_sense(sense):
         sense, lambda X, Y: LXNonLinearExpression().add_product(X, Y), sum_at_least=10)
     expected = LXObjectiveSense.MAXIMIZE if sense == "max" else LXObjectiveSense.MINIMIZE
     assert linearized.objective_sense == expected
+
+
+def test_enable_linearization_linearizes_during_solve():
+    X, Y = scalar("x", 2, 10), scalar("y", 2, 10)
+    model = LXModel("auto")
+    model.add_variable(X)
+    model.add_variable(Y)
+    model.maximize(LXNonLinearExpression().add_product(X, Y))
+    solution = LXOptimizer().use_solver("ortools").enable_linearization().solve(model)
+    assert solution.status == "optimal"
+    assert solution.objective_value == pytest.approx(100, abs=1e-6)
