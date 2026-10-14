@@ -184,6 +184,12 @@ Multi-Priority Goals
    #   Priority 3: weight = 0.5 × 10^4 =     5,000
    # Priority 1 goals dominate the objective
 
+.. versionchanged:: 0.1.2
+
+   ``priority_to_weight(1)`` returns ``1e6`` as documented here. Version 0.1.1
+   returned ``1e5`` (one power of ten lower for every priority), so objective
+   values are now 10× larger; the relative order of priorities is unchanged.
+
 Using Weights
 -------------
 

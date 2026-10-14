@@ -138,6 +138,12 @@ Linearizing the Model
       # Linearized model has suffix
       assert linearized_model.name == "original_linearized"
 
+.. note::
+
+   The linearized model keeps the objective sense of the original model.
+   Before 0.1.2 every linearized model was minimized, so maximized nonlinear
+   objectives returned wrong optima.
+
 Getting Statistics
 ~~~~~~~~~~~~~~~~~~
 

@@ -245,9 +245,20 @@ class LXOptimizer(Generic[TModel]):
             model.name, len(model.variables), len(model.constraints)
         )
 
+        # Linearize nonlinear terms the solver cannot handle natively
+        solve_model = model
+        if self.use_linearization:
+            from ..linearization.engine import LXLinearizer
+
+            linearizer = LXLinearizer(model, self._solver.capability, self.linearizer_config)
+            if linearizer.needs_linearization():
+                solve_model = linearizer.linearize_model()
+
         # Solve
         self.logger.log_solve_start(self.solver_name)
-        solution = self._solver.solve(model, enable_sensitivity=self.enable_sens, **solver_params)
+        solution = self._solver.solve(
+            solve_model, enable_sensitivity=self.enable_sens, **solver_params
+        )
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
 
         # Populate goal deviations if model has prepared goal programming

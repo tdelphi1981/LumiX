@@ -149,6 +149,13 @@ Automatically linearize nonlinear terms:
 
 **Why?** Not all solvers support nonlinear terms (bilinear products, absolute values, min/max). This feature automatically linearizes them.
 
+.. versionchanged:: 0.1.2
+
+   ``solve()`` now performs the linearization. Earlier versions only stored the
+   setting, so nonlinear objectives reached the solver unchanged and failed. You no
+   longer need to call :class:`~lumix.linearization.LXLinearizer` yourself; doing
+   so is still supported and the model is not linearized twice.
+
 **Signature:**
 
 .. code-block:: python
