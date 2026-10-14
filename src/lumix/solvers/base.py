@@ -63,8 +63,10 @@ class LXSolverInterface(ABC, Generic[TModel]):
 
     @staticmethod
     def _family_map(canon: LXCanonicalModel, handles: List[Any]) -> Dict[str, Dict[Any, Any]]:
-        """``{family: {index_key: solver handle}}``; empty families map to ``{}``."""
-        return {family: {key: handles[pos] for key, pos in keys.items()}
+        """``{family: {index_key: solver handle}}``; empty families map to ``{}``
+        and a scalar variable maps directly to its handle (0.2 shape)."""
+        return {family: (handles[keys[None]] if family in canon.scalar_families
+                         else {key: handles[pos] for key, pos in keys.items()})
                 for family, keys in canon.families.items()}
 
     def _register_row(self, row: Any, handle: Any) -> None:
@@ -80,10 +82,15 @@ class LXSolverInterface(ABC, Generic[TModel]):
     def _solution_values(self, read: Callable[[int], float]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """``(variables, mapped)`` for LXSolution from a reader of canonical positions."""
         canon = self._canonical
-        variables: Dict[str, Dict[Any, float]] = {family: {} for family in canon.families}
+        variables: Dict[str, Any] = {family: {} for family in canon.families}
         for pos, var in enumerate(canon.variables):
-            variables[var.family][var.key] = read(pos)
-        return variables, {family: dict(values) for family, values in variables.items()}
+            if var.family in canon.scalar_families:
+                variables[var.family] = read(pos)
+            else:
+                variables[var.family][var.key] = read(pos)
+        mapped = {family: dict(values) for family, values in variables.items()
+                  if family not in canon.scalar_families}
+        return variables, mapped
 
     @abstractmethod
     def build_model(self, model: LXModel[TModel]) -> Any:

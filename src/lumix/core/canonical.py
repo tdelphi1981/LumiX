@@ -6,6 +6,7 @@ outside LumiX (for example lumix-sezgi) can read it through
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from .variables import LXVariable
 
 SCHEMA_VERSION = 1
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ class LXCanonicalModel:
     objective_constant: float
     objective_nonlinear: Tuple[LXCanonicalNonlinear, ...]
     sense: Optional[LXObjectiveSense]
+    scalar_families: Tuple[str, ...] = ()
     goal_stages: Tuple[Dict[int, float], ...] = ()
     schema_version: int = SCHEMA_VERSION
 
@@ -105,7 +109,7 @@ class LXInstanceCache:
         slot = id(var)
         found = self._instances.get(slot)
         if found is None:
-            found = list(var.get_instances())
+            found = [None] if var.is_scalar else list(var.get_instances())
             self._instances[slot] = found
         return found
 
@@ -139,6 +143,7 @@ class LXCanonicalBuilder:
         self.model = model
         self.cache = cache or LXInstanceCache()
         self.families: Dict[str, Dict[Any, int]] = {}
+        self.scalars: List[str] = []
 
     def build(self) -> LXCanonicalModel:
         variables = self._variables()
@@ -155,6 +160,7 @@ class LXCanonicalBuilder:
             objective_constant=constant,
             objective_nonlinear=(),
             sense=sense,
+            scalar_families=tuple(self.scalars),
         )
 
     # ---- variables -------------------------------------------------------
@@ -165,7 +171,17 @@ class LXCanonicalBuilder:
                 raise ValueError(f"Two variable families are named '{var.name}'")
             lower, upper = canonical_bounds(var)
             positions: Dict[Any, int] = {}
-            for instance in self.cache.instances(var):
+            if var.is_scalar:
+                self.scalars.append(var.name)
+                self.families[var.name] = {None: len(out)}
+                out.append(LXCanonicalVariable(var.name, None, var.name, var.var_type, lower, upper))
+                continue
+            instances = self.cache.instances(var)
+            if not instances:
+                logger.warning(
+                    "Variable '%s' has no instances (its data is empty); it adds no "
+                    "variables and its terms contribute nothing", var.name)
+            for instance in instances:
                 key = var.index_key(instance)
                 if key in positions:
                     raise ValueError(

@@ -240,3 +240,24 @@ def test_nonlinear_objective_requires_linearization():
     m.minimize(LXNonLinearExpression().add_abs(x))
     with pytest.raises(ValueError, match="enable_linearization"):
         m.to_canonical()
+
+
+def test_a4_scalar_variable_without_data_source():
+    """Documented scalar form (user-guide/solution/accessing-solutions.rst)."""
+    t = LXVariable[None, float]("total_cost").continuous().bounds(lower=0)
+    assert t.is_scalar and not fam("x", ["k"]).is_scalar
+    m = LXModel("m").add_variable(t)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(t, 2.0)).ge().rhs(5))
+    m.minimize(LXLinearExpression().add_term(t, 1.0))
+    canon = m.to_canonical()
+    assert [(v.name, v.key) for v in canon.variables] == [("total_cost", None)]
+    assert canon.families == {"total_cost": {None: 0}} and canon.scalar_families == ("total_cost",)
+    assert row_map(canon, "c")[0] == {"total_cost": 2.0}
+
+
+def test_a4_empty_family_warns(caplog):
+    import logging
+    m = LXModel("m").add_variable(fam("x", []))
+    with caplog.at_level(logging.WARNING):
+        m.to_canonical()
+    assert "'x' has no instances" in caplog.text

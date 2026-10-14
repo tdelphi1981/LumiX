@@ -333,6 +333,14 @@ class LXVariable(Generic[TModel, TValue]):
         return instances
 
     @property
+    def is_scalar(self) -> bool:
+        """True for a single variable without a data source (no ``from_data``,
+        ``from_model``, ``indexed_by``, ``indexed_by_product`` or join); it has one
+        instance, ``None``, and its solution value is a number, not a dict."""
+        return (self._data is None and self._session is None and self._cartesian is None
+                and self._join_config is None and self.index_func is None)
+
+    @property
     def is_multi_indexed(self) -> bool:
         """True when instances are tuples of one model per dimension
         (``indexed_by_product``); coefficients and filters then receive one
