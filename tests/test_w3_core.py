@@ -388,3 +388,59 @@ def test_cost_objective_equals_explicit_objective(costs, demand):
         assert a.status == b.status, solver
         if a.status == "optimal":
             assert a.objective_value == pytest.approx(b.objective_value, abs=1e-6), solver
+
+
+# --- Final review fixes ------------------------------------------------------------
+def test_final_objective_assigned_after_costless_minimize_is_used():
+    x = fam("x", ["k"], "integer", 0, 5).cost(lambda k: 1.0)
+    z = fam("z", ["k"], "integer", 1, 5)
+    m = LXModel("m").add_variables(x, z).minimize()
+    m.objective_expr = LXLinearExpression().add_term(z, 1.0)
+    assert solve_with("ortools", m).objective_value == pytest.approx(1.0)
+
+
+def test_final_to_canonical_does_not_change_the_model():
+    x = fam("x", ["k"], "integer", 0, 5).cost(lambda k: 3.0)
+    m = LXModel("m").add_variable(x).minimize()
+    before = m.objective_expr
+    m.to_canonical()
+    assert m.objective_expr is before
+
+
+def test_final_sequential_goals_after_costless_minimize():
+    g = fam("g", ["k"], "integer", 0, 10).cost(lambda k: 1.0)
+    m = LXModel("m").add_variable(g).minimize()
+    m.add_constraint(LXConstraint("goal").expression(LXLinearExpression().add_term(g, 1.0))
+                     .ge().rhs(8).as_goal(priority=1))
+    m.set_goal_mode("sequential")
+    m.prepare_goal_programming()
+    from lumix.goal_programming.solver import LXGoalProgrammingSolver
+    s = LXGoalProgrammingSolver(LXOptimizer().use_solver("ortools")).solve_sequential(m, m._relaxed_constraints)
+    # The goal is met (it was ignored: g = 0). Keeping the user objective as a lower
+    # priority (g = 8) is A21/A25, goal programming in W5.
+    assert s.variables["g"]["k"] >= 8 - 1e-6
+
+
+def test_final_deepcopy_keeps_cost_objective():
+    import copy
+    m = LXModel("m").minimize()
+    m.add_variable(fam("x", ["k"], "integer", 1, 5).cost(lambda k: 3.0))
+    c = copy.deepcopy(m)
+    m.add_variable(fam("y", ["k"], "integer", 1, 5).cost(lambda k: 5.0))
+    assert c.to_canonical().objective == {0: 3.0}
+    assert copy.deepcopy(m).to_canonical().objective == {0: 3.0, 1: 5.0}
+
+
+@pytest.mark.parametrize("kind", ["continuous", "integer"])
+def test_final_nonbinary_square_is_not_relaxed(kind):
+    x = fam("x", ["k"], kind, 0, 4)
+    q = LXQuadraticExpression().add_squared(x, 1.0) + LXLinearExpression().add_term(x, -4.0)
+    m = LXModel("m").add_variable(x).minimize(q)
+    with pytest.raises(ValueError, match="binary"):
+        LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+
+
+def test_final_where_multi_on_single_index_raises_clearly():
+    x = fam("x", ["ab", "c"]).where_multi(lambda k: True)
+    with pytest.raises(ValueError, match="where_multi"):
+        x.get_instances()

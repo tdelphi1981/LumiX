@@ -152,7 +152,7 @@ class LXModel(Generic[TModel]):
         # multiple families (e.g., production, inventory, transportation).
         self.variables: List[LXVariable] = []
         self.constraints: List[LXConstraint] = []
-        self.objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
+        self._objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
         self.objective_sense: LXObjectiveSense = LXObjectiveSense.MAXIMIZE
         self._objective_from_costs = False
 
@@ -216,6 +216,7 @@ class LXModel(Generic[TModel]):
             if self.objective_expr is not None
             else None
         )
+        result._objective_from_costs = self._objective_from_costs
 
         # Deep copy relaxed constraints (for goal programming)
         result._relaxed_constraints = [
@@ -327,8 +328,8 @@ class LXModel(Generic[TModel]):
            ``expr`` is optional.
         """
         self.objective_sense = LXObjectiveSense.MINIMIZE
-        self._objective_from_costs = expr is None
         self.objective_expr = self.cost_objective() if expr is None else expr
+        self._objective_from_costs = expr is None
         return self
 
     def maximize(self, expr: Optional[LXLinearExpression | LXQuadraticExpression] = None) -> Self:
@@ -348,9 +349,20 @@ class LXModel(Generic[TModel]):
            ``expr`` is optional.
         """
         self.objective_sense = LXObjectiveSense.MAXIMIZE
-        self._objective_from_costs = expr is None
         self.objective_expr = self.cost_objective() if expr is None else expr
+        self._objective_from_costs = expr is None
         return self
+
+    @property
+    def objective_expr(self) -> Optional[LXLinearExpression | LXQuadraticExpression]:
+        """The objective expression. Assigning one replaces an objective taken from
+        the variables' costs (``minimize()`` / ``maximize()`` without an argument)."""
+        return self._objective_expr
+
+    @objective_expr.setter
+    def objective_expr(self, expr: Optional[LXLinearExpression | LXQuadraticExpression]) -> None:
+        self._objective_expr = expr
+        self._objective_from_costs = False
 
     def cost_objective(self) -> Optional[LXLinearExpression]:
         """Sum of the cost expressions of all variable families (``None`` if no

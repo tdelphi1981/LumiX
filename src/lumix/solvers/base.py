@@ -24,6 +24,7 @@ def _quadratic_to_products(model: LXModel) -> LXModel:
     between single variables (one instance each)."""
     import copy
 
+    from ..core.enums import LXVarType
     from ..core.expressions import LXNonLinearExpression
 
     quad = model.objective_expr
@@ -39,6 +40,11 @@ def _quadratic_to_products(model: LXModel) -> LXModel:
                     "only products of single variables can be linearized; use 'gurobi' or "
                     "'cplex' for quadratic objectives over families")
             sides.append(instances[0])
+        if LXVarType.BINARY not in (term.var1.var_type, term.var2.var_type):
+            raise ValueError(
+                f"Quadratic term {term.var1.name} * {term.var2.name}: products are "
+                "linearized exactly only when one side is binary; use 'gurobi' or "
+                "'cplex' for this quadratic objective")
         c = term.coefficient
         if callable(c):
             c = c(sides[0]) if term.diagonal else c(sides[0], sides[1])

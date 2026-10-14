@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CP-SAT: `approximate_coefficients=True` (on `solve()` or `use_solver("cpsat", ...)`) accepts coefficients that cannot be represented exactly.
 - `LXVariable.cost_expression()`, `LXModel.cost_objective()`, and `minimize()` / `maximize()` without an argument, which use the variables' `cost()` / `cost_multi()`.
 - `indexed_by_join(...)` builds the `(first, second)` pairs returned by `join_func`, keyed by `key_func`.
-- Quadratic objectives: Gurobi and CPLEX solve them natively (nonconvex included); `add_quadratic` covers every instance pair of two families with a numeric or `coeff(a, b)` coefficient, `add_squared` the diagonal; `add_quadratic_term` is an alias of `add_quadratic`. Other solvers raise a clear error, or linearize products of single variables with `enable_linearization()`.
+- Quadratic objectives: Gurobi and CPLEX solve them natively (nonconvex included); `add_quadratic` covers every instance pair of two families with a numeric or `coeff(a, b)` coefficient, `add_squared` the diagonal; `add_quadratic_term` is an alias of `add_quadratic`. Other solvers raise a clear error, or, with `enable_linearization()`, linearize products of two single variables when one of them is binary.
 - Expression arithmetic: `-`, unary `-`, `+=`, `*=`, `sum([...])`, right-hand `+`/`*`, and any real constant (NumPy scalars included).
 
 ### Changed
@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adding a second variable family with an existing name raises `ValueError` (it crashed with `KeyError` at solve).
 - A constraint with data but no `indexed_by(...)` raises `ValueError` (it built one combined row).
 - A quadratic expression in a constraint raises `ValueError`.
+- `where_multi()` on a variable with a single index raises `ValueError` (it was ignored); use `where()`.
+- Assigning `model.objective_expr` replaces an objective set by `minimize()` / `maximize()` without an argument.
 
 ### Deprecated
 

@@ -91,8 +91,8 @@ For quadratic objectives (risk, portfolio optimization):
    Quadratic expressions are allowed **only in the objective**; a quadratic
    constraint raises ``ValueError``. Gurobi and CPLEX solve quadratic objectives
    natively, including nonconvex ones. OR-Tools, CP-SAT and GLPK raise a clear
-   error; with ``LXOptimizer().enable_linearization()`` products of single
-   variables (one instance each) are linearized instead.
+   error; with ``LXOptimizer().enable_linearization()`` a product of two single
+   variables (one instance each) is linearized exactly when one of them is binary.
 
 Non-Linear Expressions
 ----------------------

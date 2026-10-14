@@ -261,8 +261,8 @@ class LXCanonicalBuilder:
                 raise ValueError(
                     "minimize()/maximize() was called without an objective, but no "
                     "variable defines a cost (.cost() or .cost_multi())")
-            self.model.objective_expr = expr
-        expr = self.model.objective_expr
+        else:
+            expr = self.model.objective_expr
         if expr is None:
             return {}, 0.0, None
         if isinstance(expr, LXQuadraticExpression):

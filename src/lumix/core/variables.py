@@ -335,6 +335,11 @@ class LXVariable(Generic[TModel, TValue]):
                 join = self._join_config["join_func"]
                 instances = [(p, r) for p in instances for r in join(p)]
         if self._multi_filter is not None:
+            if not self.is_multi_indexed:
+                raise ValueError(
+                    f"Variable '{self.name}': where_multi() filters the parts of a "
+                    "multi-index (indexed_by_product / indexed_by_join); use where() "
+                    "on a single index")
             instances = [i for i in instances if self._multi_filter(*i)]
         if self._filter is not None and self._join_config is None:
             instances = [i for i in instances if self._filter(i)]

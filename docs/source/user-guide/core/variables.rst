@@ -152,6 +152,7 @@ Multi-Model Filter
    ``where_multi`` may be called before or after ``indexed_by_product``, and
    ``.where(...)`` on a product variable filters the ``(driver, date)`` pairs
    (it receives both instances). Both were silently ignored before.
+   ``where_multi`` on a variable with a single index raises ``ValueError``.
 
 Joined Index
 ~~~~~~~~~~~~
