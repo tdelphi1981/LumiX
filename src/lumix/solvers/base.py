@@ -1,10 +1,11 @@
 """Base solver interface for LumiX."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar
+from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 from typing_extensions import Self
 
+from ..core.expressions import LXKeyFilter
 from ..core.model import LXModel
 from ..linearization.config import LXLinearizerConfig
 from ..solution.solution import LXSolution
@@ -36,6 +37,41 @@ class LXSolverInterface(ABC, Generic[TModel]):
         """
         self.capability = capability
         self.logger = LXModelLogger(f"lumix.{capability.name}")
+
+    def _reset_instance_cache(self) -> None:
+        """Forget cached variable instances. Adapters call this at the start of
+        every ``build_model`` so data changed between solves is picked up."""
+        self._instance_cache: Dict[str, List[Any]] = {}
+        self._key_positions: Dict[str, Dict[Any, List[int]]] = {}
+
+    def _candidates(self, lx_var: Any, where_func: Any) -> List[Any]:
+        """
+        Instances of ``lx_var`` that a term has to examine, in instance order.
+
+        ``get_instances()`` runs once per variable family per build instead of
+        once per constraint row. For an :class:`~lumix.core.expressions.LXKeyFilter`
+        only the instances whose index key is in the filter are returned,
+        looked up through a key index, so the work per row is proportional to
+        the number of keys rather than to the size of the family. The order is
+        the instance order, which makes ``keys=`` build exactly the same model
+        as the equivalent ``where``.
+        """
+        if not hasattr(self, "_instance_cache"):
+            self._reset_instance_cache()
+        instances = self._instance_cache.get(lx_var.name)
+        if instances is None:
+            instances = lx_var.get_instances()
+            self._instance_cache[lx_var.name] = instances
+        if not isinstance(where_func, LXKeyFilter):
+            return instances
+        positions = self._key_positions.get(lx_var.name)
+        if positions is None:
+            positions = {}
+            for i, instance in enumerate(instances):
+                positions.setdefault(lx_var.index_key(instance), []).append(i)
+            self._key_positions[lx_var.name] = positions
+        hits = sorted(i for key in where_func.keys for i in positions.get(key, ()))
+        return [instances[i] for i in hits]
 
     @abstractmethod
     def build_model(self, model: LXModel[TModel]) -> Any:
