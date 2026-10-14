@@ -78,7 +78,8 @@ def call_arity(func: Callable[..., Any]) -> int:
     variable instance) or 2 (the instance and the constraint row instance).
 
     Wrappers built by LumiX (merged and scaled terms) carry ``_lumix_arity``;
-    ``*args`` callables count as 2."""
+    other ``*args`` callables count as 2. Parameters with a default value do not
+    count, so ``lambda item, g=g: ...`` (loop-variable capture) takes one argument."""
     explicit = getattr(func, "_lumix_arity", None)
     if explicit is not None:
         return explicit
@@ -92,7 +93,7 @@ def call_arity(func: Callable[..., Any]) -> int:
     for p in params:
         if p.kind == p.VAR_POSITIONAL:
             return 2
-        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD):
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty:
             positional += 1
     return 2 if positional >= 2 else 1
 
@@ -108,6 +109,13 @@ def _call_coeff(coeff_func: Callable[..., float], args: tuple) -> float:
     """Call a coefficient with (instance, constraint_instance) when it accepts two
     arguments, else with the instance only."""
     return call_with_row(coeff_func, args[0], args[1] if len(args) > 1 else None)
+
+
+def term_parts(coeff: Callable[..., Any], where: Callable[..., Any]) -> List[Tuple[Any, Any]]:
+    """The ``(coeff, where)`` terms a term was combined from (itself when it was not
+    combined). The canonical builder applies the row-narrowing rule to each part,
+    so ``add_term(x, 1.0)`` merged with a two-argument term on ``x`` still narrows."""
+    return list(getattr(coeff, "_lumix_parts", None) or [(coeff, where)])
 
 
 def _merge_terms(first: tuple, second: tuple) -> tuple:
@@ -135,6 +143,7 @@ def _merge_terms(first: tuple, second: tuple) -> tuple:
         return bool(call_with_row(where1, args[0], row) or call_with_row(where2, args[0], row))
 
     merged_coeff._lumix_arity = row_aware  # type: ignore[attr-defined]
+    merged_coeff._lumix_parts = term_parts(coeff1, where1) + term_parts(coeff2, where2)  # type: ignore[attr-defined]
     merged_where._lumix_arity = max(call_arity(where1), call_arity(where2))  # type: ignore[attr-defined]
     return (var, merged_coeff, merged_where)
 
@@ -143,6 +152,9 @@ def _scaled(coeff_func: Callable[..., float], scalar: float) -> Callable[..., fl
     def scaled(*args: Any) -> float:
         return coeff_func(*args) * scalar
     scaled._lumix_arity = call_arity(coeff_func)  # type: ignore[attr-defined]
+    parts = getattr(coeff_func, "_lumix_parts", None)
+    if parts:
+        scaled._lumix_parts = [(_scaled(c, scalar), w) for c, w in parts]  # type: ignore[attr-defined]
     return scaled
 
 

@@ -12,13 +12,17 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .enums import LXConstraintSense, LXObjectiveSense, LXVarType
-from .expressions import LXKeyFilter, LXLinearExpression, LXNonLinearExpression, call_arity, call_with_row
+from .expressions import (LXKeyFilter, LXLinearExpression, LXNonLinearExpression, call_arity,
+                          call_with_row, term_parts)
 
 if TYPE_CHECKING:
     from .model import LXModel
     from .variables import LXVariable
 
 SCHEMA_VERSION = 1
+#: A sum smaller than NOISE times the magnitude of its summands is floating-point
+#: cancellation (0.1 + 0.2 - 0.3) and becomes 0.
+NOISE = 1e-12
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,12 @@ def canonical_bounds(var: "LXVariable") -> Tuple[float, float]:
             f"Variable '{var.name}' has lower bound {lower} above upper bound {upper}"
         )
     return lower, upper
+
+
+def _difference(a: float, b: float) -> float:
+    """``a - b`` with cancellation noise (0.3 - (0.1 + 0.2)) snapped to 0."""
+    d = a - b
+    return 0.0 if abs(d) <= NOISE * max(abs(a), abs(b)) else d
 
 
 def _accept_all(*instance: Any) -> bool:
@@ -201,8 +211,15 @@ class LXCanonicalBuilder:
         indexed = constraint.index_func is not None
         instances = constraint.get_instances() if indexed else [None]
         rows: List[LXCanonicalRow] = []
+        seen: set = set()
         for instance in instances:
             key = constraint.index_func(instance) if indexed else None
+            if indexed:
+                if key in seen:
+                    raise ValueError(
+                        f"Constraint '{constraint.name}' has a duplicate index key {key!r}; "
+                        "index keys must be unique within a family")
+                seen.add(key)
             coeffs, constant = self.linear_row(constraint.lhs, instance,
                                                where=f"constraint '{constraint.name}'")
             if constraint.rhs_value is not None:
@@ -213,7 +230,7 @@ class LXCanonicalBuilder:
                 raise ValueError(f"Constraint '{constraint.name}' has no RHS value")
             rows.append(LXCanonicalRow(
                 name=f"{constraint.name}[{key}]" if indexed else constraint.name,
-                coeffs=coeffs, sense=constraint.sense, rhs=float(rhs) - constant,
+                coeffs=coeffs, sense=constraint.sense, rhs=_difference(float(rhs), constant),
                 family=constraint.name, key=key, indexed=indexed))
         return rows
 
@@ -229,17 +246,21 @@ class LXCanonicalBuilder:
         """Coefficients per canonical variable position (summed) and the constant."""
         expr = self._linear_part(expr, where)
         acc: Dict[int, float] = {}
-        for _, (var, coeff, keep) in expr.terms.items():
+        size: Dict[int, float] = {}   # sum of |value| per slot, to recognise cancellation noise
+        for _, (var, merged_coeff, merged_keep) in expr.terms.items():
             positions = self._positions(var, where)
-            row_aware = row is not None and (call_arity(coeff) > 1 or call_arity(keep) > 1)
-            instances, keep = self.cache.candidates(var, keep, None if row_aware else row)
-            for instance in instances:
-                if not call_with_row(keep, instance, row):
-                    continue
-                value = float(call_with_row(coeff, instance, row))
-                if value:
-                    slot = positions[var.index_key(instance)]
-                    acc[slot] = acc.get(slot, 0.0) + value
+            # Narrowing is decided per added term, not per merged term (spec §3 rule 3).
+            for coeff, keep in term_parts(merged_coeff, merged_keep):
+                row_aware = row is not None and (call_arity(coeff) > 1 or call_arity(keep) > 1)
+                instances, keep = self.cache.candidates(var, keep, None if row_aware else row)
+                for instance in instances:
+                    if not call_with_row(keep, instance, row):
+                        continue
+                    value = float(call_with_row(coeff, instance, row))
+                    if value:
+                        slot = positions[var.index_key(instance)]
+                        acc[slot] = acc.get(slot, 0.0) + value
+                        size[slot] = size.get(slot, 0.0) + abs(value)
         for var, coeff, keep in expr._multi_terms:
             positions = self._positions(var, where)
             instances, keep = self.cache.candidates(var, keep)
@@ -252,7 +273,9 @@ class LXCanonicalBuilder:
                 if value:
                     slot = positions[var.index_key(instance)]
                     acc[slot] = acc.get(slot, 0.0) + value
-        return {k: v for k, v in acc.items() if v != 0.0}, float(expr.constant)
+                    size[slot] = size.get(slot, 0.0) + abs(value)
+        return ({k: v for k, v in acc.items() if abs(v) > NOISE * size[k]},
+                float(expr.constant))
 
     def _positions(self, var: "LXVariable", where: str) -> Dict[Any, int]:
         positions = self.families.get(var.name)
