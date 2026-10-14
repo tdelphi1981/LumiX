@@ -447,12 +447,12 @@ Performance Tips
       # Problem-specific, not default
       config = LXLinearizerConfig(big_m_value=1000)  # Not 1e6!
 
-4. **Prefer Native Quadratic When Available**
+4. **McCormick Envelopes Are a Relaxation**
 
-   .. code-block:: python
-
-      # For Gurobi/CPLEX with quadratic support,
-      # solver may handle bilinear natively without linearization
+   A continuous × continuous product is replaced by its McCormick envelope on every
+   solver (native quadratic objectives are not passed to Gurobi or CPLEX yet), so the
+   linearized optimum is a bound, not necessarily the true optimum. Tight variable
+   bounds make the envelope tighter.
 
 See Also
 --------

@@ -406,7 +406,8 @@ Best Practices
 
 3. **Linearization**
 
-   - Enable only when needed (solver lacks native support)
+   - Enable it for models with nonlinear terms; every solver needs it, because
+     adapters do not translate nonlinear terms natively
    - Tune ``big_m`` based on your problem's value ranges
    - Increase ``pwl_segments`` for better nonlinear function approximations
 

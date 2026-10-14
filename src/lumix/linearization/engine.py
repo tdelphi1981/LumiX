@@ -196,73 +196,45 @@ class LXLinearizer:
         # Start with linear terms
         linear_expr = expr.linear_terms
 
-        # Process each nonlinear term
+        # Process each nonlinear term. Every term is linearized, whatever the solver's
+        # capabilities: no solver adapter translates nonlinear terms natively yet, so a
+        # term skipped here would silently vanish from the model.
         for term in expr.nonlinear_terms:
             if isinstance(term, LXBilinearTerm):
-                # Linearize bilinear product
-                if self.capability.needs_linearization_for_bilinear():
-                    aux_var = self._bilinear_linearizer.linearize_bilinear(term)
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, term.coefficient
-                    )
-                    self._num_bilinear_terms += 1
-                else:
-                    # Solver has native support, keep as-is
-                    # TODO: Convert to solver-specific quadratic form
-                    pass
+                aux_var = self._bilinear_linearizer.linearize_bilinear(term)
+                linear_expr = linear_expr + LXLinearExpression().add_term(
+                    aux_var, term.coefficient
+                )
+                self._num_bilinear_terms += 1
 
             elif isinstance(term, LXPiecewiseLinearTerm):
-                # Linearize piecewise function
-                if self.capability.needs_linearization_for_nonlinear():
-                    aux_var = self._piecewise_linearizer.approximate_function(
-                        term.func,
-                        term.var,
-                        term.num_segments,
-                        term.x_min,
-                        term.x_max,
-                        term.method,
-                        term.adaptive,
-                    )
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, 1.0
-                    )
-                    self._num_piecewise_terms += 1
-                else:
-                    # Solver has native support
-                    pass
+                aux_var = self._piecewise_linearizer.approximate_function(
+                    term.func,
+                    term.var,
+                    term.num_segments,
+                    term.x_min,
+                    term.x_max,
+                    term.method,
+                    term.adaptive,
+                )
+                linear_expr = linear_expr + LXLinearExpression().add_term(aux_var, 1.0)
+                self._num_piecewise_terms += 1
 
             elif isinstance(term, LXAbsoluteTerm):
-                # Linearize absolute value
-                if self.capability.needs_linearization_for_abs():
-                    aux_var = self._linearize_absolute(term)
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, term.coefficient
-                    )
-                    self._num_abs_terms += 1
-                else:
-                    # Solver has native support
-                    pass
+                aux_var = self._linearize_absolute(term)
+                linear_expr = linear_expr + LXLinearExpression().add_term(
+                    aux_var, term.coefficient
+                )
+                self._num_abs_terms += 1
 
             elif isinstance(term, LXMinMaxTerm):
-                # Linearize min/max
-                if self.capability.needs_linearization_for_minmax():
-                    aux_var = self._linearize_minmax(term)
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, 1.0
-                    )
-                    self._num_minmax_terms += 1
-                else:
-                    # Solver has native support
-                    pass
+                aux_var = self._linearize_minmax(term)
+                linear_expr = linear_expr + LXLinearExpression().add_term(aux_var, 1.0)
+                self._num_minmax_terms += 1
 
             elif isinstance(term, LXIndicatorTerm):
-                # Linearize indicator constraint
-                if not self.capability.can_use_indicator():
-                    self._linearize_indicator(term)
-                    self._num_indicator_terms += 1
-                else:
-                    # Solver has native support
-                    pass
+                self._linearize_indicator(term)
+                self._num_indicator_terms += 1
 
             else:
                 raise ValueError(f"Unsupported nonlinear term type: {type(term)}")

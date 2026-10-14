@@ -273,36 +273,19 @@ Indicator Constraints
 
 - Big-M method to convert conditional constraints
 
-Solver Capability Awareness
-----------------------------
+Solver Capabilities
+-------------------
 
-The engine checks solver capabilities and adapts accordingly:
+.. versionchanged:: 0.2.1
+   Every nonlinear term is linearized, whatever the solver. Earlier versions skipped
+   the terms Gurobi and CPLEX declare native support for (products, absolute values,
+   min/max, piecewise-linear functions), but no solver adapter translates those terms,
+   so they silently disappeared from the objective.
 
-Native Quadratic Support
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   # For Gurobi/CPLEX with quadratic support
-   if not solver_capability.needs_linearization_for_bilinear():
-       # Keep bilinear terms as-is (solver handles natively)
-       pass
-   else:
-       # Linearize bilinear terms
-       linearize_bilinear_term(term)
-
-Native SOS2 Support
-~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   # For solvers with SOS2 support
-   if solver_capability.supports_sos2():
-       # Use SOS2 formulation (most efficient)
-       formulation = "sos2"
-   else:
-       # Fall back to incremental
-       formulation = "incremental"
+The engine linearizes every bilinear, piecewise-linear, absolute-value, min/max and
+indicator term, so the linearized model is purely linear and solves the same way on
+every solver. Passing native quadratic, SOS2 or general constraints to the solver is
+not supported yet.
 
 Complete Examples
 -----------------

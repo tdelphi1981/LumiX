@@ -19,7 +19,7 @@ from lumix import (
     LXVariable,
 )
 from lumix.core.enums import LXObjectiveSense
-from lumix.solvers import ORTOOLS_CAPABILITIES
+from lumix.solvers import CPLEX_CAPABILITIES, GUROBI_CAPABILITIES, ORTOOLS_CAPABILITIES
 
 
 def scalar(name, lower, upper):
@@ -32,7 +32,8 @@ def scalar(name, lower, upper):
     )
 
 
-def solve_linearized(sense, objective, x=(2, 10), y=(2, 10), sum_at_least=None):
+def solve_linearized(sense, objective, x=(2, 10), y=(2, 10), sum_at_least=None,
+                     capability=ORTOOLS_CAPABILITIES):
     X, Y = scalar("x", *x), scalar("y", *y)
     model = LXModel("nl")
     model.add_variable(X)
@@ -49,7 +50,7 @@ def solve_linearized(sense, objective, x=(2, 10), y=(2, 10), sum_at_least=None):
         model.maximize(expr)
     else:
         model.minimize(expr)
-    linearized = LXLinearizer(model, ORTOOLS_CAPABILITIES).linearize_model()
+    linearized = LXLinearizer(model, capability).linearize_model()
     return linearized, LXOptimizer().use_solver("ortools").solve(linearized)
 
 
@@ -91,6 +92,37 @@ def test_linearized_objective_reaches_known_optimum(label, sense, expected, boun
     _, solution = solve_linearized(sense, objective, **bounds)
     assert solution.status == "optimal"
     assert solution.objective_value == pytest.approx(expected, abs=1e-6)
+
+
+# Gurobi and CPLEX declare native support for these terms, but no adapter translates
+# nonlinear terms, so the linearizer must not skip them (they used to vanish).
+NATIVE_CASES = CASES
+
+
+@pytest.mark.parametrize("capability", [GUROBI_CAPABILITIES, CPLEX_CAPABILITIES],
+                         ids=["gurobi", "cplex"])
+@pytest.mark.parametrize("label,sense,expected,bounds,objective", NATIVE_CASES,
+                         ids=[c[0] for c in NATIVE_CASES])
+def test_native_capabilities_keep_every_term(capability, label, sense, expected, bounds,
+                                            objective):
+    _, solution = solve_linearized(sense, objective, capability=capability, **bounds)
+    assert solution.status == "optimal"
+    assert solution.objective_value == pytest.approx(expected, abs=1e-6)
+
+
+def test_gurobi_solves_nonlinear_objective_with_linearization():
+    pytest.importorskip("gurobipy")
+    X, Y = scalar("x", 2, 10), scalar("y", 2, 10)
+    model = LXModel("gurobi_nl")
+    model.add_variable(X)
+    model.add_variable(Y)
+    model.add_constraint(
+        LXConstraint("sum").expression(LXLinearExpression().add_term(X, 1).add_term(Y, 1))
+        .le().rhs(8))
+    model.maximize(LXNonLinearExpression().add_min(X, Y))
+    solution = LXOptimizer().use_solver("gurobi").enable_linearization().solve(model)
+    assert solution.status == "optimal"
+    assert solution.objective_value == pytest.approx(4, abs=1e-6)
 
 
 @pytest.mark.parametrize("sense", ["min", "max"])

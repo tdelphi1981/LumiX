@@ -78,7 +78,7 @@ LumiX handles linearization automatically:
 - ✓ Optimal technique selection based on variable types
 - ✓ No manual constraint creation
 - ✓ Configurable accuracy vs. complexity trade-offs
-- ✓ Solver-aware (uses native features when available)
+- ✓ Same linear model on every solver
 
 Supported Nonlinear Terms
 --------------------------
