@@ -112,7 +112,7 @@ def test_a7_gurobi_returns_incumbent_on_solution_limit():
     pytest.importorskip("gurobipy")
     s = solve_with("gurobi", knapsack(), SolutionLimit=1)
     assert s.status == "feasible"
-    assert s.objective_value > 0 and len(s.variables["x"]) == 30
+    assert s.objective_value >= 0 and len(s.variables["x"]) == 30
 
 
 def test_gurobi_resolves_inf_or_unbounded():
@@ -125,3 +125,32 @@ def test_gurobi_resolves_inf_or_unbounded():
         LXLinearExpression().add_term(x, 1.0).add_term(y, -1.0)).le().rhs(1))
     m.maximize(LXLinearExpression().add_term(x, 1.0).add_term(y, 1.0))
     assert solve_with("gurobi", m).status == "unbounded"
+
+
+def test_a8_cplex_status_mapping():
+    pytest.importorskip("cplex")
+    x = fam("x", ["k"], "integer", 0, 3)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 1.0)).ge().rhs(5))
+    m.minimize(LXLinearExpression().add_term(x, 1.0))
+    assert solve_with("cplex", m).status == "infeasible"
+    s = solve_with("cplex", knapsack(), solution_limit=1)
+    # the first incumbent may be the all-zero packing; what matters is that it is returned
+    assert s.status in ("feasible", "optimal") and s.objective_value >= 0 and len(s.variables["x"]) == 30
+    y = fam("y", ["k"], "integer", 0, None)
+    u = LXModel("u").add_variable(y)
+    u.maximize(LXLinearExpression().add_term(y, 1.0))
+    assert solve_with("cplex", u).status in ("unbounded", "inf_or_unbounded")
+
+
+def test_cplex_maps_named_status_constants():
+    cplex = pytest.importorskip("cplex")
+    from lumix.solvers.cplex_solver import LXCPLEXSolver
+    st = cplex.Cplex().solution.status
+    m = LXCPLEXSolver._status_name
+    assert m(st, st.optimal_tolerance, True) == "optimal"
+    assert m(st, st.MIP_infeasible, False) == "infeasible"
+    assert m(st, st.MIP_unbounded, False) == "unbounded"
+    assert m(st, st.MIP_infeasible_or_unbounded, False) == "inf_or_unbounded"
+    assert m(st, st.MIP_time_limit_feasible, True) == "feasible"
+    assert m(st, st.MIP_time_limit_infeasible, False) == "time_limit"
