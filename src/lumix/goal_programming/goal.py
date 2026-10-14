@@ -172,7 +172,7 @@ def priority_to_weight(priority: int, base: float = 10.0, exponent_offset: int =
     if priority == 0:
         # Custom objectives use weight 1.0 by default
         return 1.0
-    return base ** (exponent_offset - priority)
+    return base ** (exponent_offset - priority + 1)
 
 
 __all__ = [
