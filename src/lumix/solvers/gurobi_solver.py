@@ -96,6 +96,11 @@ class LXGurobiSolver(LXSolverInterface):
             expr = gp.LinExpr([c for c in canon.objective.values()],
                               [handles[p] for p in canon.objective])
             expr.addConstant(canon.objective_constant)
+            if canon.objective_quadratic:
+                expr = gp.QuadExpr(expr)
+                for (i, j), c in canon.objective_quadratic.items():
+                    expr.add(handles[i] * handles[j], c)
+                gm.Params.NonConvex = 2          # nonconvex products are solved globally
             gm.setObjective(expr, GRB.MAXIMIZE if canon.sense == LXObjectiveSense.MAXIMIZE
                             else GRB.MINIMIZE)
         gm.update()

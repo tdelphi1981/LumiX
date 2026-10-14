@@ -247,3 +247,54 @@ def test_b6_quadratic_constraint_raises():
     m.add_constraint(LXConstraint("c").expression(LXQuadraticExpression().add_squared(x)).le().rhs(1))
     with pytest.raises(ValueError, match="quadratic"):
         m.to_canonical()
+
+
+import itertools
+
+
+def quad_model():
+    """min (x - 2)^2 + (y - 1)^2 + x*y over integers 0..3 (convex)."""
+    x = fam("x", ["k"], "integer", 0, 3)
+    y = fam("y", ["k"], "integer", 0, 3)
+    q = (LXQuadraticExpression().add_squared(x).add_squared(y).add_quadratic(x, y, 1.0)
+         + LXLinearExpression().add_term(x, -4.0).add_term(y, -2.0).add_constant(5))
+    return LXModel("q").add_variables(x, y).minimize(q)
+
+
+def brute(model):
+    canon = model.to_canonical()
+    best = None
+    for point in itertools.product(*(range(int(v.lower), int(v.upper) + 1) for v in canon.variables)):
+        val = canon.objective_constant + sum(c * point[i] for i, c in canon.objective.items())
+        val += sum(c * point[i] * point[j] for (i, j), c in canon.objective_quadratic.items())
+        best = val if best is None else min(best, val)
+    return best
+
+
+@pytest.mark.parametrize("solver", [s for s in ("gurobi", "cplex") if s in AVAILABLE])
+def test_b6_native_quadratic_objective(solver):
+    s = solve_with(solver, quad_model())
+    assert s.status == "optimal" and s.objective_value == pytest.approx(brute(quad_model()))
+
+
+@pytest.mark.parametrize("solver", ["ortools", "glpk", "cpsat"])
+def test_b6_quadratic_needs_linearization(solver):
+    with pytest.raises(ValueError, match="enable_linearization"):
+        solve_with(solver, quad_model())
+
+
+def test_b6_binary_quadratic_through_linearization():
+    a = fam("a", ["k"], "binary")
+    b = fam("b", ["k"], "binary")
+    q = LXQuadraticExpression().add_quadratic(a, b, 3.0) + LXLinearExpression().add_term(a, 1.0)
+    m = LXModel("m").add_variables(a, b).maximize(q)
+    s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.objective_value == pytest.approx(4.0)
+
+
+def test_b6_family_quadratic_without_native_support_raises():
+    a = fam("a", ["k", "l"], "binary")
+    q = LXQuadraticExpression().add_squared(a, 1.0)
+    m = LXModel("m").add_variables(a).maximize(q)
+    with pytest.raises(ValueError, match="gurobi"):
+        LXOptimizer().use_solver("ortools").enable_linearization().solve(m)

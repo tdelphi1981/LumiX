@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Generic, List, Literal, Optional, Tuple,
 from typing_extensions import Self
 
 from ..core.canonical import LXCanonicalBuilder, LXCanonicalModel, LXInstanceCache
+from ..core.expressions import LXQuadraticExpression
 from ..core.model import LXModel
 from ..linearization.config import LXLinearizerConfig
 from ..solution.solution import LXSolution
@@ -15,6 +16,36 @@ from ..utils.rational import LXRationalConverter
 from .capabilities import LXSolverCapability
 
 TModel = TypeVar("TModel")
+
+
+def _quadratic_to_products(model: LXModel) -> LXModel:
+    """A shallow copy of ``model`` whose quadratic objective is written as products
+    (``LXNonLinearExpression.add_product``) for the linearizer. Products are taken
+    between single variables (one instance each)."""
+    import copy
+
+    from ..core.expressions import LXNonLinearExpression
+
+    quad = model.objective_expr
+    objective = LXNonLinearExpression()
+    objective.add_linear(quad.linear_terms + quad.constant)
+    for term in quad.quadratic_terms:
+        sides = []
+        for var in (term.var1, term.var2):
+            instances = [None] if var.is_scalar else var.get_instances()
+            if len(instances) != 1:
+                raise ValueError(
+                    f"Quadratic term on family '{var.name}' with {len(instances)} instances: "
+                    "only products of single variables can be linearized; use 'gurobi' or "
+                    "'cplex' for quadratic objectives over families")
+            sides.append(instances[0])
+        c = term.coefficient
+        if callable(c):
+            c = c(sides[0]) if term.diagonal else c(sides[0], sides[1])
+        objective.add_product(term.var1, term.var2, float(c))
+    result = copy.copy(model)
+    result.objective_expr = objective
+    return result
 
 
 class LXSolverInterface(ABC, Generic[TModel]):
@@ -59,6 +90,11 @@ class LXSolverInterface(ABC, Generic[TModel]):
         self._constraint_map = {}
         self._constraint_list = []
         self._canonical = LXCanonicalBuilder(model, self._instance_cache).build()
+        if self._canonical.objective_quadratic and not self.capability.can_solve_quadratic():
+            raise ValueError(
+                f"{self.capability.name} has no quadratic objective; call "
+                "enable_linearization() to turn the products into linear constraints, or "
+                "use 'gurobi' or 'cplex'")
         return self._canonical
 
     @staticmethod
@@ -307,10 +343,13 @@ class LXOptimizer(Generic[TModel]):
 
         # Linearize nonlinear terms the solver cannot handle natively
         solve_model = model
+        if (self.use_linearization and isinstance(model.objective_expr, LXQuadraticExpression)
+                and not self._solver.capability.can_solve_quadratic()):
+            solve_model = _quadratic_to_products(model)
         if self.use_linearization:
             from ..linearization.engine import LXLinearizer
 
-            linearizer = LXLinearizer(model, self._solver.capability, self.linearizer_config)
+            linearizer = LXLinearizer(solve_model, self._solver.capability, self.linearizer_config)
             if linearizer.needs_linearization():
                 solve_model = linearizer.linearize_model()
 

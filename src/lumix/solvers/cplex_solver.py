@@ -101,6 +101,11 @@ class LXCPLEXSolver(LXSolverInterface):
             if canon.objective:
                 cm.objective.set_linear(list(canon.objective.items()))
             cm.objective.set_offset(canon.objective_constant)
+            if canon.objective_quadratic:
+                # CPLEX minimizes c'x + 1/2 x'Qx: Q_ii = 2c for c*x_i^2, Q_ij = c for c*x_i*x_j.
+                cm.objective.set_quadratic_coefficients(
+                    [(i, j, 2 * c if i == j else c) for (i, j), c in canon.objective_quadratic.items()])
+                cm.parameters.optimalitytarget.set(3)   # global optimum, also when nonconvex
             cm.objective.set_sense(cm.objective.sense.maximize
                                    if canon.sense == LXObjectiveSense.MAXIMIZE
                                    else cm.objective.sense.minimize)
