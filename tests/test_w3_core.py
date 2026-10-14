@@ -176,3 +176,34 @@ def test_a12_no_costs_raises():
 def test_a12_cost_expression():
     e = costed().cost_expression()
     assert isinstance(e, LXLinearExpression) and fam("y", ["k"]).cost_expression() is None
+
+
+def test_add_does_not_mutate_operands():
+    x = fam("x", ["a"], upper=5)
+    y = fam("y", ["a"], upper=5)
+    base = LXLinearExpression().add_term(x, 1.0).add_constant(1)
+    a = base + LXLinearExpression().add_term(y, 2.0)
+    b = base * 3
+    assert set(base.terms) == {"x"} and base.constant == 1
+    assert set(a.terms) == {"x", "y"} and b.constant == 3
+    base += LXLinearExpression().add_term(y, 1.0)
+    assert set(base.terms) == {"x", "y"}
+
+
+def test_sum_and_numpy_scalars():
+    np = pytest.importorskip("numpy")
+    x = fam("x", ["a"], upper=5)
+    e = sum([LXLinearExpression().add_term(x, 1.0), LXLinearExpression().add_term(x, 2.0)])
+    e = e * np.float64(2) + np.int64(1)
+    e = 2 * e - LXLinearExpression().add_term(x, 1.0)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(e).le().rhs(100))
+    coeffs, row = row_map(m.to_canonical(), "c")
+    assert coeffs == {"x[a]": 11.0} and row.rhs == 98.0
+    assert (-e).constant == -2
+
+
+def test_duplicate_family_name_raises():
+    m = LXModel("m").add_variable(fam("x", ["a"]))
+    with pytest.raises(ValueError, match="already has a variable family named 'x'"):
+        m.add_variable(fam("x", ["b"]))

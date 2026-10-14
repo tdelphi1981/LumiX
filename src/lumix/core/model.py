@@ -253,6 +253,9 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
         """
+        if any(v.name == var.name for v in self.variables):
+            raise ValueError(f"Model '{self.name}' already has a variable family named "
+                             f"'{var.name}'")
         self.variables.append(var)
         return self
 

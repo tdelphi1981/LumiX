@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import numbers
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Sequence, Tuple, TypeVar
 
@@ -350,44 +351,68 @@ class LXLinearExpression(Generic[TModel]):
         self.constant += value
         return self
 
-    def __add__(self, other: float | Self) -> Self:
-        """
-        Enable expr1 + expr2 or expr + constant.
+    def __iadd__(self, other: "numbers.Real | LXLinearExpression") -> Self:
+        """``expr += other``: add terms (or a constant) to this expression in place.
 
         Terms on the same variable are merged: an instance is included when
         either expression includes it, with the sum of the coefficients that
         apply to it.
-
-        Args:
-            other: Expression or constant to add
-
-        Returns:
-            Self for chaining
         """
-        if isinstance(other, (int, float)):
-            self.constant += other
+        if isinstance(other, numbers.Real):
+            self.constant += float(other)
             return self
-        # Merge expressions
+        if not isinstance(other, LXLinearExpression):
+            return NotImplemented
         for var_name, term in other.terms.items():
             if var_name in self.terms:
                 self.terms[var_name] = _merge_terms(self.terms[var_name], term)
             else:
                 self.terms[var_name] = term
         self.constant += other.constant
-        # Also merge multi-terms
         self._multi_terms.extend(other._multi_terms)
         return self
 
-    def __mul__(self, scalar: float) -> Self:
-        """
-        Enable scalar * expression.
+    def __add__(self, other: Any) -> Any:
+        """``expr1 + expr2`` or ``expr + constant``: a new expression; the operands
+        are not changed.
 
-        Args:
-            scalar: Scalar multiplier
-
-        Returns:
-            Self for chaining
+        .. versionchanged:: 0.3.0
+           Returns a new expression (``+`` used to change ``expr1``); use ``+=``
+           to add in place.
         """
+        if isinstance(other, LXQuadraticExpression):
+            return other + self
+        if not isinstance(other, (numbers.Real, LXLinearExpression)):
+            return NotImplemented
+        result = self.copy()
+        result += other
+        return result
+
+    def __radd__(self, other: Any) -> Any:
+        """``constant + expr``; makes ``sum([e1, e2, ...])`` work."""
+        return self + other
+
+    def __sub__(self, other: Any) -> Any:
+        """``expr1 - expr2`` or ``expr - constant`` (a new expression)."""
+        if isinstance(other, numbers.Real):
+            return self + (-float(other))
+        if isinstance(other, LXLinearExpression):
+            return self + other * -1
+        return NotImplemented
+
+    def __rsub__(self, other: Any) -> Any:
+        """``constant - expr``."""
+        return self * -1 + other
+
+    def __neg__(self) -> Self:
+        """``-expr`` (a new expression)."""
+        return self * -1
+
+    def __imul__(self, scalar: "numbers.Real") -> Self:
+        """``expr *= scalar`` in place."""
+        if not isinstance(scalar, numbers.Real):
+            return NotImplemented
+        scalar = float(scalar)
         for var_name, (var, coeff_func, where) in list(self.terms.items()):
             self.terms[var_name] = (var, _scaled(coeff_func, scalar), where)
         self._multi_terms = [
@@ -396,6 +421,20 @@ class LXLinearExpression(Generic[TModel]):
         ]
         self.constant *= scalar
         return self
+
+    def __mul__(self, scalar: "numbers.Real") -> Self:
+        """``expr * scalar`` or ``scalar * expr`` (a new expression).
+
+        .. versionchanged:: 0.3.0
+           Returns a new expression; use ``*=`` to scale in place.
+        """
+        if not isinstance(scalar, numbers.Real):
+            return NotImplemented
+        result = self.copy()
+        result *= scalar
+        return result
+
+    __rmul__ = __mul__
 
     def copy(self) -> Self:
         """
