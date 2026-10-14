@@ -108,3 +108,64 @@ def test_cache_is_reset_between_builds():
             .ge().rhs(5.0))
     second = optimizer.solve(model)
     assert second.objective_value > first.objective_value
+
+
+@dataclass(frozen=True)
+class Item:
+    id: str
+
+
+ITEMS = [Item("a"), Item("b"), Item("c")]
+
+
+def item_var(data=ITEMS):
+    return (
+        LXVariable[Item, float]("x").continuous().bounds(lower=0, upper=5)
+        .indexed_by(lambda p: p.id).from_data(data)
+    )
+
+
+def same_type_family_model(keyed: bool):
+    """A data-driven constraint family over the variable's own type: adapters
+    narrow each row to its own instance before applying the term filter."""
+    x = item_var()
+    model = LXModel("family")
+    model.add_variable(x)
+    expr = LXLinearExpression()
+    if keyed:
+        expr.add_term(x, keys=["a", "b"])
+    else:
+        expr.add_term(x, where=lambda p: p.id in ("a", "b"))
+    model.add_constraint(
+        LXConstraint[Item]("cap").expression(expr).le().rhs(3)
+        .from_data(ITEMS).indexed_by(lambda p: p.id)
+    )
+    model.maximize(LXLinearExpression().add_term(x))
+    return model
+
+
+def test_keys_match_where_in_same_type_constraint_family():
+    assert lp_text(same_type_family_model(True)) == lp_text(same_type_family_model(False))
+
+
+@pytest.mark.parametrize("solver", ["ortools", "gurobi"])
+def test_same_type_constraint_family_solves_alike(solver):
+    if solver == "gurobi":
+        pytest.importorskip("gurobipy")
+    a = LXOptimizer().use_solver(solver).solve(same_type_family_model(True))
+    b = LXOptimizer().use_solver(solver).solve(same_type_family_model(False))
+    assert a.objective_value == pytest.approx(b.objective_value) == pytest.approx(11)
+
+
+def test_variable_objects_sharing_a_name_use_their_own_instances():
+    full, subset = item_var(), item_var(ITEMS[:1])
+    model = LXModel("shared_name")
+    model.add_variable(full)
+    model.add_constraint(LXConstraint("first")
+                         .expression(LXLinearExpression().add_term(subset)).le().rhs(1))
+    model.add_constraint(LXConstraint("all")
+                         .expression(LXLinearExpression().add_term(full)).le().rhs(1))
+    solver = LXORToolsSolver()
+    solver.build_model(model)
+    row = solver._constraint_map["all"]
+    assert sum(1 for v in solver._solver.variables() if row.GetCoefficient(v)) == 3

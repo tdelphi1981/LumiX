@@ -89,6 +89,9 @@ You can switch a term from ``where`` to ``keys`` without changing results.
 - ``where`` and ``keys`` cannot be combined in one term (``ValueError``).
 - ``keys`` must be an iterable of keys; a single string raises ``TypeError``
   (write ``keys=["a"]``, not ``keys="a"``).
+- For ``indexed_by_product`` variables every key must be a tuple with one key
+  per dimension; a bare tuple, a non-tuple key or a list key raises
+  ``TypeError`` (write ``keys=[(plant.id, customer.id)]``).
 - Keys are fixed per term. For a constraint family defined with
   ``.from_data(...)`` whose rows need different keys, build the rows in a loop
   (as in the example above) or keep ``where``.
@@ -148,8 +151,9 @@ Practical advice
   dimension of a two- or three-dimensional family.
 - Precompute keys once (for example a dict from plant to its customers' keys)
   instead of rebuilding lists inside nested loops.
-- Keep cross-dimension filters (``.filter(...)`` on a cartesian product) for
-  sparsity that is part of the model, not for selecting the terms of one row.
+- Keep cross-dimension filters (``.where_multi(...)`` on an
+  ``indexed_by_product`` variable, see :doc:`indexing/multi-model`) for sparsity
+  that is part of the model, not for selecting the terms of one row.
 - Linearization adds auxiliary variables and constraints: McCormick adds one
   variable and four constraints per product, piecewise terms add one variable
   per breakpoint. Check :meth:`~lumix.linearization.LXLinearizer.get_statistics`

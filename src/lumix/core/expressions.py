@@ -37,8 +37,23 @@ class LXKeyFilter:
                 "keys must be an iterable of index keys, not a single string; "
                 "wrap a single key in a list: keys=[key]"
             )
+        try:
+            key_set = frozenset(keys)
+        except TypeError as err:
+            raise TypeError(
+                "keys must be hashable; write indexed_by_product keys as tuples, "
+                "not lists, e.g. keys=[(plant.id, customer.id)]"
+            ) from err
+        if var.index_func is None and var._cartesian is not None:
+            width = len(var._cartesian.dimensions)
+            if any(not isinstance(k, tuple) or len(k) != width for k in key_set):
+                raise TypeError(
+                    f"keys for the indexed_by_product variable {var.name!r} must be a "
+                    f"list of tuples with {width} dimension keys each, "
+                    "e.g. keys=[(plant.id, customer.id)]"
+                )
         self.var = var
-        self.keys = frozenset(keys)
+        self.keys = key_set
 
     def __call__(self, *instance: Any) -> bool:
         item = instance[0] if len(instance) == 1 else instance

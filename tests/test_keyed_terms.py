@@ -80,3 +80,15 @@ def test_key_filter_survives_deepcopy():
     copied = copy.deepcopy(expr)
     where = copied.terms["y"][2]
     assert isinstance(where, LXKeyFilter) and where(Plant("b")) and not where(Plant("a"))
+
+
+def test_product_keys_must_be_tuples_of_dimension_keys():
+    with pytest.raises(TypeError, match="list of tuples"):
+        LXLinearExpression().add_multi_term(flow_var(), keys=("a", "r"))
+    with pytest.raises(TypeError, match="list of tuples"):
+        LXLinearExpression().add_multi_term(flow_var(), keys=["a"])
+
+
+def test_unhashable_keys_get_a_clear_message():
+    with pytest.raises(TypeError, match="tuples, not lists"):
+        LXLinearExpression().add_multi_term(flow_var(), keys=[["a", "r"]])

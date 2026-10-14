@@ -383,13 +383,8 @@ class LXORToolsSolver(LXSolverInterface):
 
             if isinstance(solver_vars, dict):
                 # Indexed variable family
-                instances, where_func = self._candidates(lx_var, where_func)
-
-                # If constraint instance is provided and matches variable type,
-                # filter to only include the matching instance
-                if constraint_instance is not None and constraint_instance in instances:
-                    # Same-type constraint: only use matching instance
-                    instances = [constraint_instance]
+                # A same-type constraint row narrows the family to its own instance
+                instances, where_func = self._candidates(lx_var, where_func, constraint_instance)
 
                 for instance in instances:
                     # Check where clause

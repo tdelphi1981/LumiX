@@ -46,40 +46,50 @@ class LXSolverInterface(ABC, Generic[TModel]):
     def _reset_instance_cache(self) -> None:
         """Forget cached variable instances. Adapters call this at the start of
         every ``build_model`` so data changed between solves is picked up."""
-        self._instance_cache: Dict[str, List[Any]] = {}
-        self._key_positions: Dict[str, Dict[Any, List[int]]] = {}
+        # Keyed by id(): two distinct LXVariable objects may share a name.
+        # The model keeps every variable object alive for the whole build.
+        self._instance_cache: Dict[int, List[Any]] = {}
+        self._key_positions: Dict[int, Dict[Any, List[int]]] = {}
 
-    def _candidates(self, lx_var: Any, where_func: Any) -> Tuple[List[Any], Any]:
+    def _candidates(
+        self, lx_var: Any, where_func: Any, constraint_instance: Any = None
+    ) -> Tuple[List[Any], Any]:
         """
         Instances of ``lx_var`` that a term has to examine, in instance order.
 
         ``get_instances()`` runs once per variable family per build instead of
-        once per constraint row. For an :class:`~lumix.core.expressions.LXKeyFilter`
-        only the instances whose index key is in the filter are returned,
-        looked up through a key index, so the work per row is proportional to
-        the number of keys rather than to the size of the family. The order is
-        the instance order, which makes ``keys=`` build exactly the same model
-        as the equivalent ``where``.
+        once per constraint row. When ``constraint_instance`` is one of the
+        family's instances (a data-driven constraint over the variable's own
+        type), the row is narrowed to that instance and ``where_func`` still
+        decides whether it is included. For an
+        :class:`~lumix.core.expressions.LXKeyFilter` only the instances whose
+        index key is in the filter are returned, looked up through a key index,
+        so the work per row is proportional to the number of keys rather than
+        to the size of the family. The order is the instance order, which makes
+        ``keys=`` build exactly the same model as the equivalent ``where``.
 
         Returns:
-            ``(instances, where_func)``. For a key filter the returned filter
-            accepts everything, because the instances were already selected
-            by key; otherwise ``where_func`` is returned unchanged.
+            ``(instances, where_func)``. For a key-filter lookup the returned
+            filter accepts everything, because the instances were already
+            selected by key; otherwise ``where_func`` is returned unchanged.
         """
         if not hasattr(self, "_instance_cache"):
             self._reset_instance_cache()
-        instances = self._instance_cache.get(lx_var.name)
+        slot = id(lx_var)
+        instances = self._instance_cache.get(slot)
         if instances is None:
             instances = lx_var.get_instances()
-            self._instance_cache[lx_var.name] = instances
+            self._instance_cache[slot] = instances
+        if constraint_instance is not None and constraint_instance in instances:
+            return [constraint_instance], where_func
         if not isinstance(where_func, LXKeyFilter):
             return instances, where_func
-        positions = self._key_positions.get(lx_var.name)
+        positions = self._key_positions.get(slot)
         if positions is None:
             positions = {}
             for i, instance in enumerate(instances):
                 positions.setdefault(lx_var.index_key(instance), []).append(i)
-            self._key_positions[lx_var.name] = positions
+            self._key_positions[slot] = positions
         hits = sorted(i for key in where_func.keys for i in positions.get(key, ()))
         return [instances[i] for i in hits], _accept_all
 
