@@ -214,6 +214,12 @@ class LXCanonicalBuilder:
 
     # ---- rows and objective ---------------------------------------------
     def _rows(self, constraint: Any) -> List[LXCanonicalRow]:
+        if constraint.index_func is None and (constraint._data is not None
+                                              or getattr(constraint, "_session", None) is not None):
+            raise ValueError(
+                f"Constraint '{constraint.name}' has data (from_data/from_model) but no "
+                "indexed_by(...); add indexed_by to build one row per instance, or remove "
+                "the data for a single constraint")
         if constraint.lhs is None:
             raise ValueError(f"Constraint '{constraint.name}' has no LHS expression")
         indexed = constraint.index_func is not None

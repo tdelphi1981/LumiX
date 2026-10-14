@@ -237,8 +237,10 @@ class LXConstraint(Generic[TModel]):
         """
         if callable(value):
             self.rhs_func = value
+            self.rhs_value = None
         else:
             self.rhs_value = value
+            self.rhs_func = None
         return self
 
     def from_data(self, data: List[TModel]) -> Self:

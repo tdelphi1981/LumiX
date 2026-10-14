@@ -52,6 +52,13 @@ class LXGoalMetadata:
                 # expr == rhs: both deviations are undesired
                 self.undesired_deviations = {"pos", "neg"}
 
+    def update_sense(self, sense: LXConstraintSense) -> None:
+        """Use the constraint's current sense; ``as_goal()`` may come before ``.ge()``."""
+        if sense != self.constraint_sense:
+            self.constraint_sense = sense
+            self.undesired_deviations = set()
+            self.__post_init__()
+
     def is_custom_objective(self) -> bool:
         """Check if this is a custom objective term (priority 0)."""
         return self.priority == 0

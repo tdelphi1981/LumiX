@@ -121,6 +121,10 @@ def relax_constraint(
             f"Cannot relax constraint '{constraint.name}' - no LHS expression defined"
         )
 
+    # The sense may have been set after as_goal() (``.as_goal(1).ge()``): use the
+    # constraint's sense as it is now.
+    goal_metadata.update_sense(constraint.sense)
+
     # Create deviation variables indexed by Goal instances
     pos_dev_name = get_deviation_var_name(constraint.name, "pos")
     neg_dev_name = get_deviation_var_name(constraint.name, "neg")
@@ -152,7 +156,7 @@ def relax_constraint(
                 constraint_name=constraint.name,
                 priority=goal_metadata.priority,
                 weight=goal_metadata.weight,
-                constraint_sense=goal_metadata.constraint_sense,
+                constraint_sense=constraint.sense,
                 target_value=target_val,
                 instance_id=instance_id,
             )
@@ -180,7 +184,7 @@ def relax_constraint(
             constraint_name=constraint.name,
             priority=goal_metadata.priority,
             weight=goal_metadata.weight,
-            constraint_sense=goal_metadata.constraint_sense,
+            constraint_sense=constraint.sense,
             target_value=constraint.rhs_value,
             instance_id=None,  # No instance for non-indexed constraints
         )
