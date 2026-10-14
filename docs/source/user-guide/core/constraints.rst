@@ -123,6 +123,11 @@ One constraint per data instance:
 This creates one constraint per resource.
 
 .. versionchanged:: 0.3.0
+   A constraint with data (``from_data`` / ``from_model``) must also call
+   ``indexed_by``; without it LumiX raises ``ValueError`` instead of silently
+   building one combined row.
+
+.. versionchanged:: 0.3.0
    When a constraint family is defined over the same data as a variable, a term
    on that variable is narrowed to the row's own instance only if its coefficient
    and filter take one argument. Give the coefficient two arguments
@@ -153,6 +158,10 @@ Expression RHS
 .. code-block:: python
 
    .rhs(lambda r: r.base_capacity * r.efficiency_factor)
+
+.. versionchanged:: 0.3.0
+   When ``rhs`` is called more than once, the last call wins, whether it gives a
+   value or a function.
 
 Multi-Model Constraints
 -----------------------

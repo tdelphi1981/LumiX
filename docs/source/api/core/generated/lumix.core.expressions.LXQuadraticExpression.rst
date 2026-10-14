@@ -15,6 +15,7 @@
    
       ~LXQuadraticExpression.__init__
       ~LXQuadraticExpression.add_quadratic
+      ~LXQuadraticExpression.add_quadratic_term
       ~LXQuadraticExpression.add_squared
    
    

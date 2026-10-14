@@ -18,6 +18,7 @@
       ~LXVariable.bounds
       ~LXVariable.continuous
       ~LXVariable.cost
+      ~LXVariable.cost_expression
       ~LXVariable.cost_multi
       ~LXVariable.from_data
       ~LXVariable.from_model

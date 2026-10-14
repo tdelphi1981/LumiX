@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coefficients and filters of `add_term` may take the constraint row instance as a second argument.
 - Scalar variables: an `LXVariable` without a data source is one variable whose solution value is a number (documented before, but it raised "has no data source").
 - CP-SAT: `approximate_coefficients=True` (on `solve()` or `use_solver("cpsat", ...)`) accepts coefficients that cannot be represented exactly.
+- `LXVariable.cost_expression()`, `LXModel.cost_objective()`, and `minimize()` / `maximize()` without an argument, which use the variables' `cost()` / `cost_multi()`.
+- `indexed_by_join(...)` builds the `(first, second)` pairs returned by `join_func`, keyed by `key_func`.
+- Quadratic objectives: Gurobi and CPLEX solve them natively (nonconvex included); `add_quadratic` covers every instance pair of two families with a numeric or `coeff(a, b)` coefficient, `add_squared` the diagonal; `add_quadratic_term` is an alias of `add_quadratic`. Other solvers raise a clear error, or linearize products of single variables with `enable_linearization()`.
+- Expression arithmetic: `-`, unary `-`, `+=`, `*=`, `sum([...])`, right-hand `+`/`*`, and any real constant (NumPy scalars included).
 
 ### Changed
 - Same-type constraint narrowing applies only to one-argument coefficients and filters, decided for each `add_term` separately (also after `e1 + e2` or `expr * 2`). Parameters with a default value do not count, so `lambda item, g=g: ...` is a one-argument filter.
@@ -24,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gurobi no longer prints its log; pass `verbose=True` to `solve()` or `use_solver("gurobi", ...)` to see it.
 - OR-Tools (GLOP) and CPLEX re-solve once without presolve when presolve cannot tell an infeasible LP from an unbounded one; GLPK settles a MIP with an unbounded relaxation by a feasibility check (at most 2 s) and reports `inf_or_unbounded` when that does not finish.
 - OR-Tools returns no duals or reduced costs for MIPs (SCIP has none; they were reported as 0).
+- `+` and `*` on expressions return a new expression and no longer modify the left operand; use `+=` / `*=` for in-place changes.
+- Adding a second variable family with an existing name raises `ValueError` (it crashed with `KeyError` at solve).
+- A constraint with data but no `indexed_by(...)` raises `ValueError` (it built one combined row).
+- A quadratic expression in a constraint raises `ValueError`.
 
 ### Deprecated
 
@@ -44,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - B4: NamedTuple data was unpacked into several arguments in `sum_over`.
 - B10: GLPK reported infeasible/unbounded problems as "undefined" and printed solver output for MIPs.
 - Gurobi INF_OR_UNBD is resolved to infeasible or unbounded; CPLEX `output_clonelog` works.
+- A9: `.rhs(value).rhs(func)` kept the value; the last call now wins.
+- A10: `as_goal()` captured the constraint sense at call time (`.as_goal(1).ge()` was relaxed as `<=`).
+- A11: a constraint with data but no `indexed_by` silently built one combined row.
+- A12: `cost()` / `cost_multi()` were never used.
+- A13: `where_multi` before `indexed_by_product`, and `.where()` on product variables, were ignored.
+- B5: `indexed_by_join` did nothing.
+- B6: quadratic objectives crashed every adapter; `LXQuadraticExpression.__add__` dropped the other expression.
 
 ### Security
 

@@ -148,6 +148,33 @@ Multi-Model Filter
        )
    )
 
+.. versionchanged:: 0.3.0
+   ``where_multi`` may be called before or after ``indexed_by_product``, and
+   ``.where(...)`` on a product variable filters the ``(driver, date)`` pairs
+   (it receives both instances). Both were silently ignored before.
+
+Joined Index
+~~~~~~~~~~~~
+
+.. versionchanged:: 0.3.0
+
+When the second dimension depends on the first (each driver serves its own
+routes), use ``indexed_by_join``. The instances are the ``(driver, route)``
+pairs that ``join_func`` returns; ``key_func`` gives each pair's index key.
+
+.. code-block:: python
+
+   assignment = (
+       LXVariable[tuple[Driver, Route], int]("assignment")
+       .binary()
+       .indexed_by_join(
+           Driver, Route,
+           join_func=lambda d: d.routes,
+           key_func=lambda d, r: (d.id, r.id),
+       )
+       .from_data(drivers)
+   )
+
 Data Sources
 ------------
 
@@ -209,10 +236,19 @@ Single-Model
        .from_data(products)
    )
 
-   # Use in objective
-   model.maximize(
-       LXLinearExpression().add_term(production, lambda p: p.profit)
-   )
+   # The objective is the sum of the costs: called without an expression,
+   # minimize()/maximize() use the variables' cost() / cost_multi().
+   model.maximize()
+
+   # The same objective, written out:
+   model.maximize(production.cost_expression())
+
+.. versionchanged:: 0.3.0
+   ``cost()`` and ``cost_multi()`` define objective coefficients.
+   ``model.minimize()`` / ``model.maximize()`` without an argument use the sum
+   of all cost expressions (``model.cost_objective()``) and raise
+   ``ValueError`` if no variable has a cost. An explicit objective expression
+   ignores the costs. Before 0.3.0 the costs were never used.
 
 Multi-Model
 ~~~~~~~~~~~

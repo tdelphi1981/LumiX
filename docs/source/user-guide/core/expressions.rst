@@ -67,19 +67,32 @@ For quadratic objectives (risk, portfolio optimization):
    from lumix import LXQuadraticExpression
 
    # Portfolio variance: 0.5 * w^T * Cov * w
-   risk_expr = LXQuadraticExpression()
-
-   for i, asset_i in enumerate(assets):
-       for j, asset_j in enumerate(assets):
-           covariance = cov_matrix[i][j]
-           risk_expr.add_quadratic(
-               weights[i],
-               weights[j],
-               coeff=0.5 * covariance
-           )
+   risk_expr = LXQuadraticExpression().add_quadratic(
+       weights, weights, coeff=lambda a, b: 0.5 * cov[a.id][b.id]
+   )
 
    # Add linear terms (expected returns)
    risk_expr.linear_terms.add_term(weights, lambda a: a.expected_return)
+
+   model.minimize(risk_expr)
+
+.. versionchanged:: 0.3.0
+
+   Quadratic terms work on whole variable families:
+
+   - ``add_quadratic(var1, var2, coeff)`` adds ``coeff * var1[a] * var2[b]`` for
+     **every pair** of instances ``(a, b)``. ``coeff`` is a number or a function
+     ``coeff(a, b)`` of the two instances.
+   - ``add_squared(var, coeff)`` adds ``coeff * var[a]**2`` for every instance
+     ``a`` (the diagonal only). ``coeff`` is a number or ``coeff(a)``.
+   - ``add_quadratic_term(var1, var2, coefficient)`` is an alias of
+     ``add_quadratic``.
+
+   Quadratic expressions are allowed **only in the objective**; a quadratic
+   constraint raises ``ValueError``. Gurobi and CPLEX solve quadratic objectives
+   natively, including nonconvex ones. OR-Tools, CP-SAT and GLPK raise a clear
+   error; with ``LXOptimizer().enable_linearization()`` products of single
+   variables (one instance each) are linearized instead.
 
 Non-Linear Expressions
 ----------------------
@@ -120,20 +133,33 @@ Piecewise Linear
 Expression Operations
 ---------------------
 
-Addition
-~~~~~~~~
+.. versionchanged:: 0.3.0
+
+   ``+``, ``-`` and ``*`` return a **new** expression and leave their operands
+   unchanged (before 0.3.0, ``+`` and ``*`` modified the left operand). Use
+   ``+=`` and ``*=`` to change an expression in place. Constants may be any real
+   number, including NumPy scalars.
+
+Addition and Subtraction
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   total = revenue_expr + cost_expr
-   total = expr + 100  # Add constant
+   total = revenue_expr + cost_expr   # new expression
+   total = expr + 100                 # add a constant
+   margin = revenue_expr - cost_expr  # subtraction and negation (-expr)
+   total = sum([e1, e2, e3])          # sum() works too
+   expr += other_expr                 # in place
+
+Adding a quadratic expression to a linear one gives a quadratic expression.
 
 Multiplication
 ~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   scaled = expr * 2.0  # Scale by constant
+   scaled = expr * 2.0  # Scale by constant (also 2.0 * expr)
+   expr *= 2.0          # in place
 
 Copying
 ~~~~~~~

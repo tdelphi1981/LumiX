@@ -2,12 +2,15 @@
 
 import itertools
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, List, Optional, Tuple, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, List, Optional, Tuple, Type, TypeVar
 
 from typing_extensions import Self
 
 from ..indexing import LXCartesianProduct, LXIndexDimension
 from .enums import LXVarType
+
+if TYPE_CHECKING:
+    from .expressions import LXLinearExpression
 
 TModel = TypeVar("TModel")
 TValue = TypeVar("TValue", int, float)

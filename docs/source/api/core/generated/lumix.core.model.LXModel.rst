@@ -18,6 +18,7 @@
       ~LXModel.add_constraints
       ~LXModel.add_variable
       ~LXModel.add_variables
+      ~LXModel.cost_objective
       ~LXModel.get_constraint
       ~LXModel.get_variable
       ~LXModel.has_goals
