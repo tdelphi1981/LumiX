@@ -39,6 +39,7 @@ all-solvers = ["ortools>=9.8.0", "gurobipy>=11.0.0", "cplex>=22.1.0", "swiglpk>=
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
+    "hypothesis>=6.100.0",
     "mypy>=1.5.0",
     "black>=23.7.0",
     "ruff>=0.0.285",
