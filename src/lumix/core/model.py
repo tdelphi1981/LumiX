@@ -101,6 +101,7 @@ from .expressions import LXLinearExpression, LXQuadraticExpression
 from .variables import LXVariable
 
 if TYPE_CHECKING:
+    from .canonical import LXCanonicalModel
     from ..goal_programming.goal import LXGoalMode
     from ..goal_programming.relaxation import RelaxedConstraint
     from ..solution.solution import LXSolution
@@ -292,6 +293,17 @@ class LXModel(Generic[TModel]):
         """
         self.constraints.extend(constraints)
         return self
+
+    def to_canonical(self) -> "LXCanonicalModel":
+        """Solver-independent canonical form of this model (variable instances,
+        rows with summed coefficients, objective). Solver adapters build from
+        it; external engines can read it instead of LumiX internals.
+
+        .. versionadded:: 0.3.0
+        """
+        from .canonical import LXCanonicalBuilder
+
+        return LXCanonicalBuilder(self).build()
 
     def minimize(self, expr: LXLinearExpression | LXQuadraticExpression) -> Self:
         """

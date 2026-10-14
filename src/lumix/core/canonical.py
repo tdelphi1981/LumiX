@@ -178,9 +178,85 @@ class LXCanonicalBuilder:
             self.families[var.name] = positions
         return out
 
-    # ---- rows and objective (Görev 4) -------------------------------------
+    # ---- rows and objective ---------------------------------------------
     def _rows(self, constraint: Any) -> List[LXCanonicalRow]:
-        return []
+        if constraint.lhs is None:
+            raise ValueError(f"Constraint '{constraint.name}' has no LHS expression")
+        indexed = constraint.index_func is not None
+        instances = constraint.get_instances() if indexed else [None]
+        rows: List[LXCanonicalRow] = []
+        for instance in instances:
+            key = constraint.index_func(instance) if indexed else None
+            coeffs, constant = self.linear_row(constraint.lhs, instance,
+                                               where=f"constraint '{constraint.name}'")
+            if constraint.rhs_value is not None:
+                rhs = constraint.rhs_value
+            elif constraint.rhs_func is not None:
+                rhs = constraint.rhs_func(instance)
+            else:
+                raise ValueError(f"Constraint '{constraint.name}' has no RHS value")
+            rows.append(LXCanonicalRow(
+                name=f"{constraint.name}[{key}]" if indexed else constraint.name,
+                coeffs=coeffs, sense=constraint.sense, rhs=float(rhs) - constant,
+                family=constraint.name, key=key, indexed=indexed))
+        return rows
 
     def _objective(self) -> Tuple[Dict[int, float], float, Optional[LXObjectiveSense]]:
-        return {}, 0.0, None
+        expr = self.model.objective_expr
+        if expr is None:
+            return {}, 0.0, None
+        coeffs, constant = self.linear_row(expr, None, where="the objective")
+        return coeffs, constant, self.model.objective_sense
+
+    def linear_row(self, expr: Any, row: Any = None,
+                   where: str = "an expression") -> Tuple[Dict[int, float], float]:
+        """Coefficients per canonical variable position (summed) and the constant."""
+        expr = self._linear_part(expr, where)
+        acc: Dict[int, float] = {}
+        for _, (var, coeff, keep) in expr.terms.items():
+            positions = self._positions(var, where)
+            row_aware = row is not None and (call_arity(coeff) > 1 or call_arity(keep) > 1)
+            instances, keep = self.cache.candidates(var, keep, None if row_aware else row)
+            for instance in instances:
+                if not call_with_row(keep, instance, row):
+                    continue
+                value = float(call_with_row(coeff, instance, row))
+                if value:
+                    slot = positions[var.index_key(instance)]
+                    acc[slot] = acc.get(slot, 0.0) + value
+        for var, coeff, keep in expr._multi_terms:
+            positions = self._positions(var, where)
+            instances, keep = self.cache.candidates(var, keep)
+            spread = var.is_multi_indexed
+            for instance in instances:
+                args = instance if spread else (instance,)
+                if keep is not None and not keep(*args):
+                    continue
+                value = float(coeff(*args))
+                if value:
+                    slot = positions[var.index_key(instance)]
+                    acc[slot] = acc.get(slot, 0.0) + value
+        return {k: v for k, v in acc.items() if v != 0.0}, float(expr.constant)
+
+    def _positions(self, var: "LXVariable", where: str) -> Dict[Any, int]:
+        positions = self.families.get(var.name)
+        if positions is None:
+            raise ValueError(
+                f"Variable '{var.name}' is used in {where} but is not part of the model; "
+                "add it with model.add_variable()"
+            )
+        return positions
+
+    @staticmethod
+    def _linear_part(expr: Any, where: str) -> LXLinearExpression:
+        if isinstance(expr, LXLinearExpression):
+            return expr
+        if isinstance(expr, LXNonLinearExpression):
+            if expr.nonlinear_terms:
+                raise ValueError(
+                    f"{where.capitalize()} has nonlinear terms; call "
+                    "LXOptimizer().enable_linearization() or LXLinearizer(...).linearize_model() "
+                    "before solving"
+                )
+            return expr.linear_terms
+        raise ValueError(f"{where.capitalize()} has unsupported type {type(expr).__name__}")

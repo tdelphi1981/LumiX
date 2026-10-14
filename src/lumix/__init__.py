@@ -70,6 +70,7 @@ Quick Start
 __version__ = "0.2.1"
 
 # Core classes
+from .core.canonical import LXCanonicalModel, LXCanonicalNonlinear, LXCanonicalRow, LXCanonicalVariable
 from .core import (
     LXConstraint,
     LXConstraintSense,
@@ -171,6 +172,10 @@ __all__ = [
     "LXVariable",
     "LXConstraint",
     "LXKeyFilter",
+    "LXCanonicalModel",
+    "LXCanonicalNonlinear",
+    "LXCanonicalRow",
+    "LXCanonicalVariable",
     "LXLinearExpression",
     "LXQuadraticExpression",
     "LXQuadraticTerm",

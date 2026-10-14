@@ -101,3 +101,142 @@ def test_is_multi_indexed():
         LXIndexDimension(str, lambda s: s).from_data(["a"]),
         LXIndexDimension(str, lambda s: s).from_data(["b"])))
     assert prod.is_multi_indexed
+
+
+from lumix.core.enums import LXConstraintSense, LXObjectiveSense
+
+
+def row_map(canon, name):
+    row = next(r for r in canon.rows if r.name == name)
+    return {canon.variables[i].name: c for i, c in row.coeffs.items()}, row
+
+
+def test_a1_constraint_constant_moves_to_rhs():
+    x = fam("x", ["k"], upper=100)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 1.0).add_constant(5)).le().rhs(8))
+    coeffs, row = row_map(m.to_canonical(), "c")
+    assert coeffs == {"x[k]": 1.0} and row.rhs == 3.0
+
+
+def test_a2_repeated_terms_are_summed():
+    x = fam("x", ["k"], upper=100)
+    e = LXLinearExpression().add_term(x, 4.0)
+    e._multi_terms.append((x, lambda k: 1.0, None))       # add_term + sum_over on one family
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(e).le().rhs(10))
+    m.maximize(LXLinearExpression().add_term(x, 3.0) + LXLinearExpression().add_multi_term(x, coeff=lambda k: -1.0))
+    canon = m.to_canonical()
+    assert row_map(canon, "c")[0] == {"x[k]": 5.0}
+    assert canon.objective == {0: 2.0}
+
+
+def test_a2_cancelling_terms_drop_out():
+    x = fam("x", ["k"], upper=1)
+    e = LXLinearExpression().add_term(x, 1.0) + LXLinearExpression().add_multi_term(x, coeff=lambda k: -1.0)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(e).le().rhs(0))
+    assert row_map(m.to_canonical(), "c")[0] == {}
+
+
+@dataclass(frozen=True)
+class Period:
+    t: int
+    demand: float
+
+
+PERIODS = [Period(1, 0.0), Period(2, 4.0), Period(3, 4.0)]
+
+
+def inventory_model():
+    inv = (LXVariable[Period, float]("inv").continuous().bounds(lower=0, upper=100)
+           .indexed_by(lambda p: p.t).from_data(PERIODS))
+    prod = (LXVariable[Period, float]("prod").continuous().bounds(lower=0, upper=100)
+            .indexed_by(lambda p: p.t).from_data(PERIODS))
+    balance = (LXConstraint[Period]("balance")
+               .expression(LXLinearExpression()
+                           .add_term(inv, lambda s, t: 1.0 if s.t == t.t else (-1.0 if s.t == t.t - 1 else 0.0))
+                           .add_term(prod, lambda s, t: -1.0 if s.t == t.t else 0.0))
+               .eq().rhs(lambda t: -t.demand)
+               .from_data(PERIODS[1:]).indexed_by(lambda t: t.t))
+    start = (LXConstraint("start").expression(
+        LXLinearExpression().add_term(inv, 1.0, where=lambda s: s.t == 1)
+        .add_term(prod, -1.0, where=lambda s: s.t == 1)).eq().rhs(0))
+    m = LXModel("inventory").add_variables(inv, prod).add_constraint(balance).add_constraint(start)
+    m.minimize(LXLinearExpression().add_term(prod, lambda s: 0.0 if s.t == 1 else 10.0).add_term(inv, 1.0))
+    return m
+
+
+def test_a5_two_argument_coefficient_sees_whole_family():
+    coeffs, row = row_map(inventory_model().to_canonical(), "balance[2]")
+    assert coeffs == {"inv[1]": -1.0, "inv[2]": 1.0, "prod[2]": -1.0}
+    assert row.rhs == -4.0 and row.family == "balance" and row.key == 2 and row.indexed
+
+
+def test_a5_constant_coeff_still_narrows():
+    caps = [Period(1, 3.0), Period(2, 5.0)]
+    x = (LXVariable[Period, float]("x").continuous().bounds(lower=0)
+         .indexed_by(lambda p: p.t).from_data(caps))
+    cap = (LXConstraint[Period]("cap").expression(LXLinearExpression().add_term(x, 1.0))
+           .le().rhs(lambda p: p.demand).from_data(caps).indexed_by(lambda p: p.t))
+    canon = LXModel("m").add_variable(x).add_constraint(cap).to_canonical()
+    assert row_map(canon, "cap[1]")[0] == {"x[1]": 1.0}
+    assert row_map(canon, "cap[2]")[0] == {"x[2]": 1.0}
+
+
+def test_two_argument_where_receives_the_row():
+    caps = [Period(1, 3.0), Period(2, 5.0)]
+    x = (LXVariable[Period, float]("x").continuous().indexed_by(lambda p: p.t).from_data(caps))
+    upto = (LXConstraint[Period]("upto")
+            .expression(LXLinearExpression().add_term(x, 1.0, where=lambda s, t: s.t <= t.t))
+            .le().rhs(10).from_data(caps).indexed_by(lambda p: p.t))
+    canon = LXModel("m").add_variable(x).add_constraint(upto).to_canonical()
+    assert row_map(canon, "upto[2]")[0] == {"x[1]": 1.0, "x[2]": 1.0}
+
+
+class Item(NamedTuple):
+    name: str
+    active: bool
+
+
+def test_b4_namedtuple_data_is_not_unpacked():
+    items = [Item("a", True), Item("b", False)]
+    x = LXVariable[Item, float]("x").continuous().indexed_by(lambda r: r.name).from_data(items)
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().sum_over(x, where=lambda r: r.active))
+    assert m.to_canonical().objective == {0: 1.0}
+
+
+def test_a4_empty_indexed_constraint_family_has_no_rows():
+    x = fam("x", ["k"], upper=5)
+    empty = (LXConstraint[str]("none").expression(LXLinearExpression().add_term(x, 1.0))
+             .le().rhs(3).from_data([]).indexed_by(lambda s: s))
+    canon = LXModel("m").add_variable(x).add_constraint(empty).to_canonical()
+    assert canon.rows == ()
+
+
+def test_objective_constant_and_sense():
+    x = fam("x", ["k"], upper=5)
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, 2.0).add_constant(7))
+    canon = m.to_canonical()
+    assert canon.objective == {0: 2.0} and canon.objective_constant == 7.0
+    assert canon.sense == LXObjectiveSense.MAXIMIZE and canon.schema_version == 1
+
+
+def test_unknown_variable_in_expression_raises():
+    x = fam("x", ["k"])
+    y = fam("y", ["k"])
+    m = LXModel("m").add_variable(x)
+    m.minimize(LXLinearExpression().add_term(y, 1.0))
+    with pytest.raises(ValueError, match="'y' is used in the objective but is not part of the model"):
+        m.to_canonical()
+
+
+def test_nonlinear_objective_requires_linearization():
+    from lumix import LXNonLinearExpression
+    x = fam("x", ["k"], lower=0, upper=5)
+    m = LXModel("m").add_variable(x)
+    m.minimize(LXNonLinearExpression().add_abs(x))
+    with pytest.raises(ValueError, match="enable_linearization"):
+        m.to_canonical()
