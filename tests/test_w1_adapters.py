@@ -172,3 +172,126 @@ def test_glpk_mip_respects_message_level(capfd):
     pytest.importorskip("swiglpk")
     solve_with("glpk", knapsack())
     assert "GLPK Simplex Optimizer" not in capfd.readouterr().out
+
+
+def int_var(name, keys, lower=0, upper=10):
+    return fam(name, keys, "integer", lower, upper)
+
+
+def test_a6_cpsat_scales_rhs_with_coefficients():
+    x = int_var("x", ["k"])
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 0.5)).le().rhs(2.25))
+    m.maximize(LXLinearExpression().add_term(x, 1.0))
+    assert solve_with("cpsat", m).objective_value == pytest.approx(4)
+
+
+def test_a6_cpsat_keeps_fractional_objective_constant():
+    x = int_var("x", ["k"], upper=4)
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, 1.0).add_constant(0.5))
+    s = solve_with("cpsat", m)
+    assert s.objective_value == pytest.approx(4.5) and s.gap in (None, pytest.approx(0))
+
+
+def mixed_model():
+    x = int_var("x", ["k"])
+    y = fam("y", ["k"], lower=0, upper=10)
+    m = LXModel("mixed").add_variables(x, y)
+    m.add_constraint(LXConstraint("c").expression(
+        LXLinearExpression().add_term(x, 1.0).add_term(y, 1.0)).le().rhs(7.5))
+    m.maximize(LXLinearExpression().add_term(x, 2.0).add_term(y, 1.0))
+    return m
+
+
+def test_a6_cpsat_mixed_integer_and_scaled_continuous():
+    s = solve_with("cpsat", mixed_model(), rational=True)
+    assert s.status == "optimal" and s.objective_value == pytest.approx(14.5)
+    assert s.variables["y"]["k"] == pytest.approx(0.5)
+
+
+def test_a6_cpsat_scaling_state_does_not_leak_between_solves():
+    from lumix import LXOptimizer
+    opt = LXOptimizer().use_solver("cpsat").enable_rational_conversion()
+    assert opt.solve(mixed_model()).objective_value == pytest.approx(14.5)
+    x = int_var("x", ["k"])
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 1.0)).le().rhs(3))
+    m.maximize(LXLinearExpression().add_term(x, 1.0))
+    assert opt.solve(m).objective_value == pytest.approx(3)
+
+
+def test_a6_cpsat_open_bound_beyond_int32():
+    x = int_var("x", ["k"], lower=0, upper=None)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 1.0)).ge().rhs(3_000_000_000))
+    m.minimize(LXLinearExpression().add_term(x, 1.0))
+    assert solve_with("cpsat", m).objective_value == pytest.approx(3_000_000_000)
+
+
+def test_a6_cpsat_unrepresentable_coefficient_raises():
+    x = int_var("x", ["k"])
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 1e-7)).le().rhs(1))
+    m.maximize(LXLinearExpression().add_term(x, 1.0))
+    with pytest.raises(ValueError, match="cannot represent"):
+        solve_with("cpsat", m)
+
+
+@pytest.mark.parametrize("build", ["lhs_constant_model", "inventory_model", "mixed_model"])
+def test_cpsat_matches_ortools_on_canonical_rows(build):
+    """A1 and A5 through CP-SAT (continuous variables via rational conversion)."""
+    model_fn = globals()[build]
+    expected = solve_with("ortools", model_fn())
+    s = solve_with("cpsat", model_fn(), rational=True)
+    assert s.status == "optimal"
+    assert s.objective_value == pytest.approx(expected.objective_value, abs=1e-6)
+
+
+def test_a2_a3_a4_cpsat_integer_models():
+    x = int_var("x", ["k"], upper=100)
+    m = LXModel("m").add_variable(x)
+    row = LXLinearExpression().add_term(x, 4.0) + LXLinearExpression().add_multi_term(x, coeff=lambda k: 1.0)
+    m.add_constraint(LXConstraint("c").expression(row).le().rhs(10))
+    m.maximize(LXLinearExpression().add_term(x, 3.0) + LXLinearExpression().add_multi_term(x, coeff=lambda k: -1.0))
+    assert solve_with("cpsat", m).objective_value == pytest.approx(4.0)
+    b = fam("b", ["k"], "binary", 0, 0)
+    n = fam("n", ["k"], "integer", 0.5, 3.7)
+    e = int_var("e", [])
+    m2 = LXModel("m2").add_variables(b, n, e)
+    m2.minimize(LXLinearExpression().add_term(b, -1.0).add_term(n, 1.0).add_term(e, 1.0))
+    s = solve_with("cpsat", m2)
+    assert s.variables["b"]["k"] == 0 and s.variables["n"]["k"] == 1 and s.variables["e"] == {}
+
+
+def test_b3_cpsat_no_sensitivity_warning(caplog):
+    import logging
+    from lumix import LXOptimizer
+    x = int_var("x", ["k"])
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, 1.0))
+    with caplog.at_level(logging.WARNING):
+        LXOptimizer().use_solver("cpsat").solve(m)
+    assert "enable_sensitivity" not in caplog.text
+
+
+def many_digit_model():
+    x = int_var("x", ["k"])
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(x, 0.12345)).le().rhs(1))
+    m.maximize(LXLinearExpression().add_term(x, 1.0))
+    return m
+
+
+def test_cpsat_many_digit_coefficient_names_the_flag():
+    with pytest.raises(ValueError, match="approximate_coefficients=True"):
+        solve_with("cpsat", many_digit_model())
+
+
+def test_cpsat_approximate_coefficients_flag(caplog):
+    import logging
+    from lumix import LXOptimizer
+    with caplog.at_level(logging.WARNING):
+        s = LXOptimizer().use_solver("cpsat").solve(many_digit_model(), approximate_coefficients=True)
+    assert s.status == "optimal" and s.objective_value == pytest.approx(8)
+    assert "approximated" in caplog.text
