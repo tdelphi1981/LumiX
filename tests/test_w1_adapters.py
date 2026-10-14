@@ -295,3 +295,20 @@ def test_cpsat_approximate_coefficients_flag(caplog):
         s = LXOptimizer().use_solver("cpsat").solve(many_digit_model(), approximate_coefficients=True)
     assert s.status == "optimal" and s.objective_value == pytest.approx(8)
     assert "approximated" in caplog.text
+
+
+def test_b2_use_solver_after_solve_switches_adapter():
+    pytest.importorskip("gurobipy")
+    from lumix import LXOptimizer
+    opt = LXOptimizer().use_solver("ortools")
+    opt.solve(lhs_constant_model())
+    opt.use_solver("gurobi")
+    opt.solve(lhs_constant_model())
+    assert type(opt._solver).__name__ == "LXGurobiSolver"
+
+
+def test_b2_use_solver_kwargs_reach_the_solver():
+    pytest.importorskip("gurobipy")
+    from lumix import LXOptimizer
+    s = LXOptimizer().use_solver("gurobi", SolutionLimit=1).solve(knapsack())
+    assert s.status == "feasible"

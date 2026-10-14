@@ -166,6 +166,7 @@ class LXOptimizer(Generic[TModel]):
         self.linearizer_config: Optional[LXLinearizerConfig] = None
         self.logger = LXModelLogger("lumix.optimizer")
         self._solver: Optional[LXSolverInterface[TModel]] = None
+        self._solver_params: Dict[str, Any] = {}
 
     def use_solver(self, name: Literal["ortools", "gurobi", "cplex", "cpsat", "glpk"], **kwargs) -> Self:
         """
@@ -179,6 +180,7 @@ class LXOptimizer(Generic[TModel]):
         """
         self.solver_name = name
         self._solver_params = kwargs
+        self._solver = None
         return self
 
     def enable_rational_conversion(self, max_denom: int = 10000) -> Self:
@@ -193,6 +195,7 @@ class LXOptimizer(Generic[TModel]):
         """
         self.use_rationals = True
         self.rational_converter = LXRationalConverter(max_denom)
+        self._solver = None
         return self
 
     def enable_linearization(
@@ -247,6 +250,7 @@ class LXOptimizer(Generic[TModel]):
 
             solution = optimizer.solve(model)
         """
+        self._solver = None
         self.use_linearization = True
         self.linearizer_config = LXLinearizerConfig(
             big_m_value=big_m,
@@ -267,6 +271,7 @@ class LXOptimizer(Generic[TModel]):
             Self for chaining
         """
         self.enable_sens = True
+        self._solver = None
         return self
 
     def solve(self, model: LXModel[TModel], **solver_params: Any) -> LXSolution[TModel]:
@@ -304,8 +309,9 @@ class LXOptimizer(Generic[TModel]):
 
         # Solve
         self.logger.log_solve_start(self.solver_name)
+        params = {**self._solver_params, **solver_params}
         solution = self._solver.solve(
-            solve_model, enable_sensitivity=self.enable_sens, **solver_params
+            solve_model, enable_sensitivity=self.enable_sens, **params
         )
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
 
