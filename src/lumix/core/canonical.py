@@ -95,6 +95,9 @@ def canonical_bounds(var: "LXVariable") -> Tuple[float, float]:
     return lower, upper
 
 
+_BUILTIN_ROWS = (tuple, list, dict, set, frozenset, str, bytes, int, float, bool, complex)
+
+
 def _difference(a: float, b: float) -> float:
     """``a - b`` with cancellation noise (0.3 - (0.1 + 0.2)) snapped to 0."""
     d = a - b
@@ -154,6 +157,7 @@ class LXCanonicalBuilder:
         self.cache = cache or LXInstanceCache()
         self.families: Dict[str, Dict[Any, int]] = {}
         self.scalars: List[str] = []
+        self._missing_rows: Dict[Tuple[str, str], None] = {}
 
     def build(self) -> LXCanonicalModel:
         variables = self._variables()
@@ -161,6 +165,10 @@ class LXCanonicalBuilder:
         for constraint in self.model.constraints:
             rows.extend(self._rows(constraint))
         objective, constant, sense = self._objective()
+        for where, family in self._missing_rows:
+            logger.warning(
+                "Rows of %s are of the same type as variable '%s' but not among the instances "
+                "of '%s'; its one-argument terms contribute nothing there", where, family, family)
         return LXCanonicalModel(
             name=self.model.name,
             variables=tuple(variables),
@@ -252,6 +260,9 @@ class LXCanonicalBuilder:
             # Narrowing is decided per added term, not per merged term (spec §3 rule 3).
             for coeff, keep in term_parts(merged_coeff, merged_keep):
                 row_aware = row is not None and (call_arity(coeff) > 1 or call_arity(keep) > 1)
+                if not row_aware and self._row_outside_family(var, row):
+                    self._missing_rows.setdefault((where, var.name), None)
+                    continue
                 instances, keep = self.cache.candidates(var, keep, None if row_aware else row)
                 for instance in instances:
                     if not call_with_row(keep, instance, row):
@@ -276,6 +287,16 @@ class LXCanonicalBuilder:
                     size[slot] = size.get(slot, 0.0) + abs(value)
         return ({k: v for k, v in acc.items() if abs(v) > NOISE * size[k]},
                 float(expr.constant))
+
+    def _row_outside_family(self, var: "LXVariable", row: Any) -> bool:
+        """A row of the variable's own (user-defined) data type that is not one of its
+        instances, e.g. an inactive product filtered out of the variable's data. A
+        one-argument term narrows such a row to nothing (spec §3 rule 3). Built-in
+        types (tuples, strings, numbers) are not taken as "the same data"."""
+        if row is None or type(row) in _BUILTIN_ROWS:
+            return False
+        instances = self.cache.instances(var)
+        return bool(instances) and type(row) is type(instances[0]) and row not in instances
 
     def _positions(self, var: "LXVariable", where: str) -> Dict[Any, int]:
         positions = self.families.get(var.name)

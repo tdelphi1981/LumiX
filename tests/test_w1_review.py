@@ -205,3 +205,41 @@ def test_gurobi_is_quiet_by_default(capfd):
     solve_with("gurobi", unbounded())
     out = capfd.readouterr().out
     assert "Gurobi Optimizer version" not in out and "Optimize a model" not in out
+
+
+@dataclass(frozen=True)
+class Product:
+    id: str
+    active: bool
+    cap: float
+
+
+PRODUCTS = [Product("a", True, 10.0), Product("b", True, 10.0), Product("c", False, 1.0)]
+
+
+def filtered_capacity_model():
+    x = (LXVariable[Product, float]("x").continuous().bounds(lower=0)
+         .indexed_by(lambda p: p.id).from_data([p for p in PRODUCTS if p.active]))
+    cap = (LXConstraint[Product]("cap").expression(LXLinearExpression().add_term(x, 1.0))
+           .le().rhs(lambda p: p.cap).indexed_by(lambda p: p.id).from_data(PRODUCTS))
+    total = LXConstraint("total").expression(LXLinearExpression().add_term(x, 1.0)).le().rhs(10)
+    m = LXModel("m").add_variable(x).add_constraint(cap).add_constraint(total)
+    return m.maximize(LXLinearExpression().add_term(x, 1.0))
+
+
+def test_i7_row_missing_from_the_variable_data_has_no_terms(caplog):
+    with caplog.at_level(logging.WARNING):
+        canon = filtered_capacity_model().to_canonical()
+    assert row_map(canon, "cap[a]")[0] == {"x[a]": 1.0}
+    assert row_map(canon, "cap[c]")[0] == {}
+    assert caplog.text.count("not among the instances") == 1
+    assert solve_with("ortools", filtered_capacity_model()).objective_value == pytest.approx(10)
+
+
+def test_i7_builtin_row_types_keep_the_whole_family():
+    x = fam("x", ["a", "b"], upper=5)
+    rows = (LXConstraint[str]("lim").expression(LXLinearExpression().add_term(x, 1.0))
+            .le().rhs(8).indexed_by(lambda s: s).from_data(["a", "z"]))
+    canon = LXModel("m").add_variable(x).add_constraint(rows).to_canonical()
+    assert row_map(canon, "lim[a]")[0] == {"x[a]": 1.0}
+    assert row_map(canon, "lim[z]")[0] == {"x[a]": 1.0, "x[b]": 1.0}
