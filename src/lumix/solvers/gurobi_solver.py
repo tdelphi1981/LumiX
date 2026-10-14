@@ -14,7 +14,6 @@ except ImportError:
 
 from ..core.constraints import LXConstraint
 from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
-from ..core.expressions import LXLinearExpression
 from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
@@ -64,59 +63,30 @@ class LXGurobiSolver(LXSolverInterface):
         self._constraint_list: List[Any] = []
 
     def build_model(self, model: LXModel) -> gp.Model:
-        """
-        Build Gurobi native model from LXModel.
-
-        Args:
-            model: LumiX model to build
-
-        Returns:
-            Gurobi Model instance
-
-        Raises:
-            ValueError: If model contains unsupported features
-        """
-        # Create Gurobi model instance
+        """Build a Gurobi model from the canonical form of ``model``."""
+        canon = self._canonicalize(model)
         self._model = gp.Model(model.name)
-
-        # Reset internal state
-        self._variable_map = {}
-        self._reset_instance_cache()
-        self._constraint_map = {}
-        self._constraint_list = []
-
-        # Build variables
-        for lx_var in model.variables:
-            instances = lx_var.get_instances()
-
-            if not instances:
-                # Single variable (not indexed)
-                self._create_single_variable(lx_var)
-            else:
-                # Variable family (indexed by data)
-                self._create_indexed_variables(lx_var, instances)
-
-        # Update model to integrate new variables
-        self._model.update()
-
-        # Build constraints
-        for lx_constraint in model.constraints:
-            instances = lx_constraint.get_instances()
-
-            if not instances:
-                # Single constraint
-                self._create_single_constraint(lx_constraint)
-            else:
-                # Constraint family (indexed by data)
-                self._create_indexed_constraints(lx_constraint, instances)
-
-        # Set objective
-        self._set_objective(model)
-
-        # Update model to integrate constraints and objective
-        self._model.update()
-
-        return self._model
+        gm = self._model
+        vtype = {LXVarType.CONTINUOUS: GRB.CONTINUOUS, LXVarType.INTEGER: GRB.INTEGER,
+                 LXVarType.BINARY: GRB.BINARY}
+        handles = [gm.addVar(lb=v.lower, ub=v.upper, vtype=vtype[v.var_type], name=v.name)
+                   for v in canon.variables]
+        self._handles = handles
+        self._variable_map = self._family_map(canon, handles)
+        gm.update()
+        sense = {LXConstraintSense.LE: GRB.LESS_EQUAL, LXConstraintSense.GE: GRB.GREATER_EQUAL,
+                 LXConstraintSense.EQ: GRB.EQUAL}
+        for row in canon.rows:
+            expr = gp.LinExpr([c for c in row.coeffs.values()], [handles[p] for p in row.coeffs])
+            self._register_row(row, gm.addLConstr(expr, sense[row.sense], row.rhs, name=row.name))
+        if canon.sense is not None:
+            expr = gp.LinExpr([c for c in canon.objective.values()],
+                              [handles[p] for p in canon.objective])
+            expr.addConstant(canon.objective_constant)
+            gm.setObjective(expr, GRB.MAXIMIZE if canon.sense == LXObjectiveSense.MAXIMIZE
+                            else GRB.MINIMIZE)
+        gm.update()
+        return gm
 
     def solve(
         self,
@@ -172,6 +142,10 @@ class LXGurobiSolver(LXSolverInterface):
         # Solve
         start_time = time.time()
         gurobi_model.optimize()
+        if gurobi_model.Status == GRB.INF_OR_UNBD:
+            # Presolve could not tell infeasible from unbounded; ask once more.
+            gurobi_model.setParam(GRB.Param.DualReductions, 0)
+            gurobi_model.optimize()
         solve_time = time.time() - start_time
 
         # Parse and return solution
@@ -215,284 +189,6 @@ class LXGurobiSolver(LXSolverInterface):
             Hashable index key
         """
         return lx_var.index_key(instance)
-
-    def _create_single_variable(self, lx_var: LXVariable) -> None:
-        """Create single Gurobi variable (not indexed)."""
-        model = self._model
-        assert model is not None
-
-        # Get bounds
-        lb = lx_var.lower_bound if lx_var.lower_bound is not None else -GRB.INFINITY
-        ub = lx_var.upper_bound if lx_var.upper_bound is not None else GRB.INFINITY
-
-        # Map variable type
-        if lx_var.var_type == LXVarType.CONTINUOUS:
-            vtype = GRB.CONTINUOUS
-        elif lx_var.var_type == LXVarType.INTEGER:
-            vtype = GRB.INTEGER
-        elif lx_var.var_type == LXVarType.BINARY:
-            vtype = GRB.BINARY
-        else:
-            raise ValueError(f"Unknown variable type: {lx_var.var_type}")
-
-        # Create variable
-        var = model.addVar(
-            lb=lb,
-            ub=ub,
-            vtype=vtype,
-            name=lx_var.name
-        )
-
-        # Store in mapping
-        self._variable_map[lx_var.name] = var
-
-    def _create_indexed_variables(
-        self, lx_var: LXVariable, instances: List[Any]
-    ) -> None:
-        """Create indexed family of Gurobi variables."""
-        model = self._model
-        assert model is not None
-
-        var_dict: Dict[Any, Any] = {}
-
-        for instance in instances:
-            # Get index key (handles cartesian products)
-            index_key = self._get_index_key(lx_var, instance)
-
-            # Variable name: "varname[index]"
-            var_name = f"{lx_var.name}[{index_key}]"
-
-            # Get bounds (same for all instances for now)
-            # TODO: Support per-instance bounds via bound functions
-            lb = lx_var.lower_bound if lx_var.lower_bound is not None else -GRB.INFINITY
-            ub = lx_var.upper_bound if lx_var.upper_bound is not None else GRB.INFINITY
-
-            # Map variable type
-            if lx_var.var_type == LXVarType.CONTINUOUS:
-                vtype = GRB.CONTINUOUS
-            elif lx_var.var_type == LXVarType.INTEGER:
-                vtype = GRB.INTEGER
-            elif lx_var.var_type == LXVarType.BINARY:
-                vtype = GRB.BINARY
-            else:
-                raise ValueError(f"Unknown variable type: {lx_var.var_type}")
-
-            # Create Gurobi variable
-            var = model.addVar(
-                lb=lb,
-                ub=ub,
-                vtype=vtype,
-                name=var_name
-            )
-
-            var_dict[index_key] = var
-
-        # Store dictionary in mapping
-        self._variable_map[lx_var.name] = var_dict
-
-    def _create_single_constraint(self, lx_constraint: LXConstraint) -> None:
-        """Create single Gurobi constraint."""
-        model = self._model
-        assert model is not None
-
-        if lx_constraint.lhs is None:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
-
-        # Build linear expression
-        expr = self._build_expression(lx_constraint.lhs)
-
-        # Get RHS value
-        if lx_constraint.rhs_value is not None:
-            rhs = lx_constraint.rhs_value
-        elif lx_constraint.rhs_func is not None:
-            # For single constraint with rhs function, call with None
-            rhs = lx_constraint.rhs_func(None)  # type: ignore
-        else:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no RHS value")
-
-        # Create constraint with appropriate sense
-        # Note: Gurobi requires using Python operators (<=, >=, ==) to form constraint
-        if lx_constraint.sense == LXConstraintSense.LE:
-            constr = model.addConstr(expr <= rhs, name=lx_constraint.name)
-        elif lx_constraint.sense == LXConstraintSense.GE:
-            constr = model.addConstr(expr >= rhs, name=lx_constraint.name)
-        elif lx_constraint.sense == LXConstraintSense.EQ:
-            constr = model.addConstr(expr == rhs, name=lx_constraint.name)
-        else:
-            raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
-
-        # Store in constraint map
-        self._constraint_map[lx_constraint.name] = constr
-        self._constraint_list.append(constr)
-
-    def _create_indexed_constraints(
-        self, lx_constraint: LXConstraint, instances: List[Any]
-    ) -> None:
-        """Create indexed family of Gurobi constraints."""
-        model = self._model
-        assert model is not None
-
-        if lx_constraint.lhs is None:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
-
-        # Dictionary to store indexed constraints
-        constraint_dict: Dict[Any, Any] = {}
-
-        for instance in instances:
-            # Get index for naming
-            if lx_constraint.index_func is not None:
-                index_key = lx_constraint.index_func(instance)
-            else:
-                index_key = instance
-
-            # Constraint name: "constraintname[index]"
-            ct_name = f"{lx_constraint.name}[{index_key}]"
-
-            # Build expression for this instance
-            expr = self._build_expression(lx_constraint.lhs, constraint_instance=instance)
-
-            # Get RHS value for this instance
-            if lx_constraint.rhs_value is not None:
-                rhs = lx_constraint.rhs_value
-            elif lx_constraint.rhs_func is not None:
-                rhs = lx_constraint.rhs_func(instance)
-            else:
-                raise ValueError(f"Constraint '{lx_constraint.name}' has no RHS value")
-
-            # Create constraint with appropriate sense
-            # Note: Gurobi requires using Python operators (<=, >=, ==) to form constraint
-            if lx_constraint.sense == LXConstraintSense.LE:
-                constr = model.addConstr(expr <= rhs, name=ct_name)
-            elif lx_constraint.sense == LXConstraintSense.GE:
-                constr = model.addConstr(expr >= rhs, name=ct_name)
-            elif lx_constraint.sense == LXConstraintSense.EQ:
-                constr = model.addConstr(expr == rhs, name=ct_name)
-            else:
-                raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
-
-            # Store in constraint dictionary
-            constraint_dict[index_key] = constr
-            self._constraint_list.append(constr)
-
-        # Store dictionary in constraint map
-        self._constraint_map[lx_constraint.name] = constraint_dict
-
-    def _build_expression(
-        self,
-        lx_expr: LXLinearExpression,
-        constraint_instance: Optional[Any] = None,
-    ) -> gp.LinExpr:
-        """
-        Build Gurobi LinExpr from LXLinearExpression.
-
-        Args:
-            lx_expr: LumiX linear expression
-            constraint_instance: Instance for indexed constraints (for multi-model coefficients)
-
-        Returns:
-            Gurobi LinExpr object
-        """
-        expr = gp.LinExpr()
-
-        # Process regular terms
-        for var_name, (lx_var, coeff_func, where_func) in lx_expr.terms.items():
-            solver_vars = self._variable_map[var_name]
-
-            if isinstance(solver_vars, dict):
-                # Indexed variable family
-                # A same-type constraint row narrows the family to its own instance
-                instances, where_func = self._candidates(lx_var, where_func, constraint_instance)
-
-                for instance in instances:
-                    # Check where clause
-                    if not where_func(instance):
-                        continue
-
-                    # Get index key (handles cartesian products)
-                    index_key = self._get_index_key(lx_var, instance)
-
-                    # Get coefficient
-                    # For multi-model constraints, coefficient function may need both instances
-                    if constraint_instance is not None:
-                        # Try to call with both arguments (multi-model case)
-                        try:
-                            coeff = coeff_func(instance, constraint_instance)
-                        except TypeError:
-                            # Fall back to single argument
-                            coeff = coeff_func(instance)
-                    else:
-                        coeff = coeff_func(instance)
-
-                    if abs(coeff) > 1e-10:  # Skip near-zero coefficients
-                        expr.addTerms(coeff, solver_vars[index_key])
-            else:
-                # Single variable
-                if constraint_instance is not None:
-                    try:
-                        coeff = coeff_func(constraint_instance)
-                    except TypeError:
-                        coeff = coeff_func(None)  # type: ignore
-                else:
-                    coeff = coeff_func(None)  # type: ignore
-
-                if abs(coeff) > 1e-10:
-                    expr.addTerms(coeff, solver_vars)
-
-        # Process multi-model terms
-        for lx_var, coeff_func, where_func in lx_expr._multi_terms:
-            solver_vars = self._variable_map[lx_var.name]
-
-            if isinstance(solver_vars, dict):
-                instances, where_func = self._candidates(lx_var, where_func)
-
-                for instance in instances:
-                    # Check where clause
-                    if where_func is not None:
-                        # Multi-model instances are tuples
-                        if isinstance(instance, tuple):
-                            if not where_func(*instance):
-                                continue
-                        else:
-                            if not where_func(instance):
-                                continue
-
-                    # Get coefficient
-                    if isinstance(instance, tuple):
-                        coeff = coeff_func(*instance)
-                    else:
-                        coeff = coeff_func(instance)
-
-                    # Get index key (handles cartesian products)
-                    index_key = self._get_index_key(lx_var, instance)
-
-                    if abs(coeff) > 1e-10:
-                        expr.addTerms(coeff, solver_vars[index_key])
-
-        # Add constant term
-        expr.addConstant(lx_expr.constant)
-
-        return expr
-
-    def _set_objective(self, model: LXModel) -> None:
-        """Set objective function in Gurobi model."""
-        gurobi_model = self._model
-        assert gurobi_model is not None
-
-        if model.objective_expr is None:
-            # No objective, just feasibility
-            return
-
-        # Build expression
-        expr = self._build_expression(model.objective_expr)
-
-        # Map objective sense
-        if model.objective_sense == LXObjectiveSense.MAXIMIZE:
-            sense = GRB.MAXIMIZE
-        else:
-            sense = GRB.MINIMIZE
-
-        # Set objective
-        gurobi_model.setObjective(expr, sense)
 
     def _extract_sensitivity_data(
         self,
@@ -625,52 +321,15 @@ class LXGurobiSolver(LXSolverInterface):
         }
 
         lx_status = status_map.get(status, "unknown")
-
-        # Extract objective value
-        if status in [GRB.OPTIMAL, GRB.SUBOPTIMAL]:
-            try:
-                obj_value = gurobi_model.ObjVal
-            except Exception:
-                obj_value = 0.0
+        has_solution = gurobi_model.SolCount > 0 and status not in (
+            GRB.INFEASIBLE, GRB.INF_OR_UNBD, GRB.UNBOUNDED)
+        if has_solution and status != GRB.OPTIMAL:
+            lx_status = "feasible"      # a limit stopped the search with an incumbent
+        obj_value = gurobi_model.ObjVal if has_solution else 0.0
+        if has_solution:
+            variables, mapped = self._solution_values(lambda pos: self._handles[pos].X)
         else:
-            obj_value = 0.0
-
-        # Extract variable values
-        variables: Dict[str, Union[float, Dict[Any, float]]] = {}
-        mapped: Dict[str, Dict[Any, float]] = {}
-
-        if status in [GRB.OPTIMAL, GRB.SUBOPTIMAL]:
-            for lx_var in model.variables:
-                solver_vars = self._variable_map[lx_var.name]
-
-                if isinstance(solver_vars, dict):
-                    # Indexed variable family
-                    var_values: Dict[Any, float] = {}
-                    mapped_values: Dict[Any, float] = {}
-                    instances = lx_var.get_instances()
-
-                    for instance in instances:
-                        # Get index key (handles cartesian products)
-                        index_key = self._get_index_key(lx_var, instance)
-
-                        var = solver_vars[index_key]
-                        try:
-                            value = var.X
-                        except Exception:
-                            value = 0.0
-
-                        var_values[index_key] = value
-                        mapped_values[index_key] = value
-
-                    variables[lx_var.name] = var_values
-                    mapped[lx_var.name] = mapped_values
-                else:
-                    # Single variable
-                    try:
-                        value = solver_vars.X
-                    except Exception:
-                        value = 0.0
-                    variables[lx_var.name] = value
+            variables, mapped = {}, {}
 
         # Extract sensitivity data if enabled
         shadow_prices: Dict[str, float] = {}
@@ -687,7 +346,7 @@ class LXGurobiSolver(LXSolverInterface):
 
         try:
             # MIP gap (only for MIP problems)
-            if gurobi_model.IsMIP and status in [GRB.OPTIMAL, GRB.SUBOPTIMAL]:
+            if gurobi_model.IsMIP and has_solution:
                 gap = gurobi_model.MIPGap
         except Exception:
             pass

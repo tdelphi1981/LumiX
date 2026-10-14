@@ -93,3 +93,35 @@ def test_b2_ortools_warns_on_unknown_parameter(caplog):
     with caplog.at_level(logging.WARNING):
         LXOptimizer().use_solver("ortools").solve(lhs_constant_model(), no_such_param=1)
     assert "no_such_param" in caplog.text
+
+
+def knapsack(n=30):
+    import random
+    rng = random.Random(3)
+    items = [f"i{j}" for j in range(n)]
+    w = {i: rng.randint(5, 40) for i in items}
+    v = {i: rng.randint(5, 60) for i in items}
+    x = fam("x", items, "binary")
+    m = LXModel("knap").add_variable(x)
+    m.add_constraint(LXConstraint("cap").expression(LXLinearExpression().add_term(x, lambda i: w[i])).le().rhs(200))
+    m.maximize(LXLinearExpression().add_term(x, lambda i: v[i]))
+    return m
+
+
+def test_a7_gurobi_returns_incumbent_on_solution_limit():
+    pytest.importorskip("gurobipy")
+    s = solve_with("gurobi", knapsack(), SolutionLimit=1)
+    assert s.status == "feasible"
+    assert s.objective_value > 0 and len(s.variables["x"]) == 30
+
+
+def test_gurobi_resolves_inf_or_unbounded():
+    pytest.importorskip("gurobipy")
+    # Gurobi's presolve answers INF_OR_UNBD (status 4) for this LP
+    x = fam("x", ["k"], lower=0, upper=None)
+    y = fam("y", ["k"], lower=0, upper=None)
+    m = LXModel("m").add_variables(x, y)
+    m.add_constraint(LXConstraint("c").expression(
+        LXLinearExpression().add_term(x, 1.0).add_term(y, -1.0)).le().rhs(1))
+    m.maximize(LXLinearExpression().add_term(x, 1.0).add_term(y, 1.0))
+    assert solve_with("gurobi", m).status == "unbounded"
