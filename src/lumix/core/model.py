@@ -154,6 +154,7 @@ class LXModel(Generic[TModel]):
         self.constraints: List[LXConstraint] = []
         self.objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
         self.objective_sense: LXObjectiveSense = LXObjectiveSense.MAXIMIZE
+        self._objective_from_costs = False
 
         # Goal programming support
         self.goal_mode: Optional[str] = None  # "weighted" or "sequential"
@@ -305,33 +306,60 @@ class LXModel(Generic[TModel]):
 
         return LXCanonicalBuilder(self).build()
 
-    def minimize(self, expr: LXLinearExpression | LXQuadraticExpression) -> Self:
+    def minimize(self, expr: Optional[LXLinearExpression | LXQuadraticExpression] = None) -> Self:
         """
         Set objective to minimize.
 
         Args:
-            expr: Objective expression (linear or quadratic)
+            expr: Objective expression (linear or quadratic). Without it, the
+                objective is the sum of the variables' costs (``.cost()`` /
+                ``.cost_multi()``), taken from the variables in the model when
+                it is solved.
 
         Returns:
             Self for chaining
+
+        .. versionchanged:: 0.3.0
+           ``expr`` is optional.
         """
         self.objective_sense = LXObjectiveSense.MINIMIZE
-        self.objective_expr = expr
+        self._objective_from_costs = expr is None
+        self.objective_expr = self.cost_objective() if expr is None else expr
         return self
 
-    def maximize(self, expr: LXLinearExpression | LXQuadraticExpression) -> Self:
+    def maximize(self, expr: Optional[LXLinearExpression | LXQuadraticExpression] = None) -> Self:
         """
         Set objective to maximize.
 
         Args:
-            expr: Objective expression (linear or quadratic)
+            expr: Objective expression (linear or quadratic). Without it, the
+                objective is the sum of the variables' costs (``.cost()`` /
+                ``.cost_multi()``), taken from the variables in the model when
+                it is solved.
 
         Returns:
             Self for chaining
+
+        .. versionchanged:: 0.3.0
+           ``expr`` is optional.
         """
         self.objective_sense = LXObjectiveSense.MAXIMIZE
-        self.objective_expr = expr
+        self._objective_from_costs = expr is None
+        self.objective_expr = self.cost_objective() if expr is None else expr
         return self
+
+    def cost_objective(self) -> Optional[LXLinearExpression]:
+        """Sum of the cost expressions of all variable families (``None`` if no
+        variable defines a cost).
+
+        .. versionadded:: 0.3.0
+        """
+        total: Optional[LXLinearExpression] = None
+        for var in self.variables:
+            part = var.cost_expression()
+            if part is not None:
+                total = part if total is None else total + part
+        return total
 
     def get_variable(self, name: str) -> Optional[LXVariable]:
         """

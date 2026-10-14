@@ -249,6 +249,15 @@ class LXCanonicalBuilder:
         return rows
 
     def _objective(self) -> Tuple[Dict[int, float], float, Optional[LXObjectiveSense]]:
+        if getattr(self.model, "_objective_from_costs", False):
+            # minimize()/maximize() without an expression: the variables' costs, taken
+            # now so that families added after the call are included.
+            expr = self.model.cost_objective()
+            if expr is None:
+                raise ValueError(
+                    "minimize()/maximize() was called without an objective, but no "
+                    "variable defines a cost (.cost() or .cost_multi())")
+            self.model.objective_expr = expr
         expr = self.model.objective_expr
         if expr is None:
             return {}, 0.0, None

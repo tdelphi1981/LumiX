@@ -129,3 +129,50 @@ def test_b5_join_with_empty_relations(caplog):
     with caplog.at_level(logging.WARNING):
         canon = LXModel("m").add_variable(v).to_canonical()
     assert canon.variables == () and "has no instances" in caplog.text
+
+
+@dataclass(frozen=True)
+class P:
+    id: int
+    unit_cost: float
+
+
+PS = [P(1, 3.0), P(2, 5.0)]
+
+
+def costed():
+    return (LXVariable[P, float]("x").continuous().bounds(lower=1, upper=10)
+            .indexed_by(lambda p: p.id).cost(lambda p: p.unit_cost).from_data(PS))
+
+
+@pytest.mark.parametrize("solver", AVAILABLE)
+def test_a12_minimize_without_argument_uses_costs(solver):
+    m = LXModel("m").add_variable(costed())
+    m.minimize()
+    assert solve_with(solver, m).objective_value == pytest.approx(8.0)
+
+
+def test_a12_cost_multi_and_late_variables():
+    v = product("v").cost_multi(lambda a, b: a.id * 10 + b.id)
+    m = LXModel("m").maximize()
+    m.add_variable(v)
+    assert solve_with("ortools", m).objective_value == pytest.approx(11 + 12 + 21 + 22)
+
+
+def test_a12_explicit_objective_ignores_costs():
+    x = costed()
+    m = LXModel("m").add_variable(x)
+    m.minimize(LXLinearExpression().add_term(x, 1.0))
+    assert solve_with("ortools", m).objective_value == pytest.approx(2.0)
+
+
+def test_a12_no_costs_raises():
+    m = LXModel("m").add_variable(fam("x", ["k"], upper=1))
+    m.minimize()
+    with pytest.raises(ValueError, match="cost"):
+        m.to_canonical()
+
+
+def test_a12_cost_expression():
+    e = costed().cost_expression()
+    assert isinstance(e, LXLinearExpression) and fam("y", ["k"]).cost_expression() is None

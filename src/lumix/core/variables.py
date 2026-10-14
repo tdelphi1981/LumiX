@@ -494,6 +494,19 @@ class LXVariable(Generic[TModel, TValue]):
         self.cost_func = func
         return self
 
+    def cost_expression(self) -> Optional["LXLinearExpression"]:
+        """The objective contribution defined by ``cost()`` / ``cost_multi()``:
+        ``sum(cost(instance) * self[instance])``, or ``None`` without a cost.
+
+        .. versionadded:: 0.3.0
+        """
+        from .expressions import LXLinearExpression
+        if self._multi_cost_func is not None:
+            return LXLinearExpression().add_multi_term(self, coeff=self._multi_cost_func)
+        if self.cost_func is not None:
+            return LXLinearExpression().add_term(self, self.cost_func)
+        return None
+
     def cost_multi(self, func: Callable[..., float]) -> Self:
         """
         Define cost function for multi-indexed variables.
