@@ -58,6 +58,8 @@ class LXCPSATSolver(LXSolverInterface):
 
     #: Bound used for an open variable bound (CP-SAT domains must stay well inside int64).
     OPEN_BOUND = 2**40
+    #: Largest integer coefficient or right-hand side passed to CP-SAT.
+    INT_LIMIT = 2**62
 
     def __init__(
         self,
@@ -209,7 +211,28 @@ class LXCPSATSolver(LXSolverInterface):
         rhs_frac = self._fraction(rhs, what)
         scale = math.lcm(rhs_frac.denominator, *(f.denominator for f in fracs.values()))
         ints = {pos: int(f * scale) for pos, f in fracs.items()}
-        return ints, int(rhs_frac * scale), scale
+        rhs_int = int(rhs_frac * scale)
+        if max(map(abs, [rhs_int, *ints.values()])) <= self.INT_LIMIT:
+            return ints, rhs_int, scale
+        if not self._approximate:
+            raise ValueError(
+                f"CP-SAT needs a common denominator of {scale} for {what}, which puts its "
+                "integer coefficients beyond the 64-bit range; pass approximate_coefficients=True "
+                "to solve() or use_solver('cpsat', ...) to accept an approximation, or use a "
+                "linear solver ('ortools', 'gurobi', 'cplex', 'glpk')"
+            )
+        # Approximate: a power-of-ten scale that keeps the largest value near 2**40.
+        biggest = float(max(map(abs, [rhs_frac, *fracs.values()])))
+        scale = 10 ** max(0, math.floor(math.log10(2**40 / biggest)))
+        ints = {pos: round(f * scale) for pos, f in fracs.items()}
+        for pos, f in fracs.items():
+            if f and not ints[pos]:
+                raise ValueError(f"CP-SAT cannot represent coefficient {float(f)!r} in {what}: "
+                                 "it is too small next to the largest value of the row")
+            if f:
+                self._approximation_error = max(self._approximation_error,
+                                                abs(ints[pos] / scale - f) / abs(f))
+        return ints, round(rhs_frac * scale), scale
 
     def solve(
         self,
@@ -389,7 +412,9 @@ class LXCPSATSolver(LXSolverInterface):
                     var = self._canonical.variables[pos]
                     self.logger.logger.warning(
                         f"Variable '{var.name}' reached the CP-SAT bound ±2^40 used for an open "
-                        "bound; the true optimum may lie beyond it")
+                        "bound; the true optimum may lie beyond it or the model may be unbounded")
+                    if lx_status == "optimal" and self._canonical.objective.get(pos):
+                        lx_status = "feasible"     # optimality is only proven within ±2^40
 
         # CP-SAT doesn't provide sensitivity analysis
         # TODO: Could compute reduced costs for feasibility/bound analysis

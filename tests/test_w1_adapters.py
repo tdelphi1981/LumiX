@@ -312,3 +312,48 @@ def test_b2_use_solver_kwargs_reach_the_solver():
     from lumix import LXOptimizer
     s = LXOptimizer().use_solver("gurobi", SolutionLimit=1).solve(knapsack())
     assert s.status == "feasible"
+
+
+PRIMES = [9973, 9967, 9949, 9941, 9931, 9929]
+
+
+def prime_denominator_model():
+    x = int_var("x", list(range(len(PRIMES))))
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, lambda k: 1.0 / PRIMES[k]))
+    return m
+
+
+def test_cpsat_common_denominator_beyond_int64_raises_clearly():
+    with pytest.raises(ValueError, match="64-bit"):
+        solve_with("cpsat", prime_denominator_model())
+
+
+def test_cpsat_common_denominator_beyond_int64_approximates_with_flag():
+    s = solve_with("cpsat", prime_denominator_model(), approximate_coefficients=True)
+    assert s.status == "optimal"
+    assert s.objective_value == pytest.approx(sum(10 / p for p in PRIMES), rel=1e-9)
+
+
+def test_cpsat_open_bound_reached_is_not_reported_optimal(caplog):
+    import logging
+    from lumix import LXOptimizer
+    x = int_var("x", ["k"], lower=0, upper=None)
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, 1.0))
+    with caplog.at_level(logging.WARNING):
+        s = LXOptimizer().use_solver("cpsat").solve(m)
+    assert s.status == "feasible"
+    assert "2^40" in caplog.text
+
+
+@pytest.mark.parametrize("solver", AVAILABLE + ["cpsat"])
+def test_a4_scalar_variable_solves_and_returns_a_float(solver):
+    kind = "integer" if solver == "cpsat" else "continuous"
+    t = getattr(LXVariable[None, float]("total_cost"), kind)().bounds(lower=0)
+    m = LXModel("m").add_variable(t)
+    m.add_constraint(LXConstraint("c").expression(LXLinearExpression().add_term(t, 2.0)).ge().rhs(6))
+    m.minimize(LXLinearExpression().add_term(t, 1.0).add_constant(1))
+    s = solve_with(solver, m)
+    assert s.status == "optimal" and s.objective_value == pytest.approx(4)
+    assert s.variables["total_cost"] == pytest.approx(3) and s.get_variable(t) == pytest.approx(3)
