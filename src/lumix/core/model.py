@@ -269,7 +269,8 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
         """
-        self.variables.extend(variables)
+        for var in variables:
+            self.add_variable(var)
         return self
 
     def add_constraint(self, constraint: LXConstraint) -> Self:

@@ -207,3 +207,5 @@ def test_duplicate_family_name_raises():
     m = LXModel("m").add_variable(fam("x", ["a"]))
     with pytest.raises(ValueError, match="already has a variable family named 'x'"):
         m.add_variable(fam("x", ["b"]))
+    with pytest.raises(ValueError, match="already has a variable family named 'y'"):
+        LXModel("m2").add_variables(fam("y", ["a"]), fam("y", ["b"]))
