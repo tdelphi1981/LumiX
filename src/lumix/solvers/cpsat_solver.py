@@ -337,22 +337,7 @@ class LXCPSATSolver(LXSolverInterface):
 
         for instance in instances:
             # Get index for this instance
-            if lx_var.index_func is not None:
-                index_key = lx_var.index_func(instance)
-            elif lx_var._cartesian is not None:
-                # For cartesian products, build key from dimension key functions
-                if isinstance(instance, tuple):
-                    # Apply each dimension's key function to its corresponding element
-                    index_key = tuple(
-                        dim.key_func(inst)
-                        for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-                    )
-                else:
-                    index_key = instance
-            else:
-                # For multi-model (tuple instances), use the tuple as key
-                # This may fail if instances are not hashable
-                index_key = instance
+            index_key = lx_var.index_key(instance)
 
             # Variable name: "varname[index]"
             var_name = f"{lx_var.name}[{index_key}]"
@@ -578,16 +563,7 @@ class LXCPSATSolver(LXSolverInterface):
                         continue
 
                     # Get index key
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    elif lx_var._cartesian is not None and isinstance(instance, tuple):
-                        # For cartesian products, build key from dimension key functions
-                        index_key = tuple(
-                            dim.key_func(inst)
-                            for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-                        )
-                    else:
-                        index_key = instance
+                    index_key = lx_var.index_key(instance)
 
                     # Get coefficient
                     if constraint_instance is not None:
@@ -648,16 +624,7 @@ class LXCPSATSolver(LXSolverInterface):
                     # RHS will be scaled instead
 
                     # Get index key
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    elif lx_var._cartesian is not None and isinstance(instance, tuple):
-                        # For cartesian products, build key from dimension key functions
-                        index_key = tuple(
-                            dim.key_func(inst)
-                            for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-                        )
-                    else:
-                        index_key = instance
+                    index_key = lx_var.index_key(instance)
 
                     if abs(coeff) > 1e-10:
                         terms.append(solver_vars[index_key])
@@ -725,15 +692,7 @@ class LXCPSATSolver(LXSolverInterface):
                 for instance in instances:
                     if not where_func(instance):
                         continue
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    elif lx_var._cartesian is not None and isinstance(instance, tuple):
-                        index_key = tuple(
-                            dim.key_func(inst)
-                            for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-                        )
-                    else:
-                        index_key = instance
+                    index_key = lx_var.index_key(instance)
                     coeff = coeff_func(instance)
                     if abs(coeff) > 1e-10:
                         terms.append(solver_vars[index_key])
@@ -761,15 +720,7 @@ class LXCPSATSolver(LXSolverInterface):
                         coeff = coeff_func(*instance)
                     else:
                         coeff = coeff_func(instance)
-                    if lx_var.index_func is not None:
-                        index_key = lx_var.index_func(instance)
-                    elif lx_var._cartesian is not None and isinstance(instance, tuple):
-                        index_key = tuple(
-                            dim.key_func(inst)
-                            for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-                        )
-                    else:
-                        index_key = instance
+                    index_key = lx_var.index_key(instance)
                     if abs(coeff) > 1e-10:
                         terms.append(solver_vars[index_key])
                         float_coeffs.append(coeff)
@@ -860,16 +811,7 @@ class LXCPSATSolver(LXSolverInterface):
 
                     for instance in instances:
                         # Get index key
-                        if lx_var.index_func is not None:
-                            index_key = lx_var.index_func(instance)
-                        elif lx_var._cartesian is not None and isinstance(instance, tuple):
-                            # For cartesian products, build key from dimension key functions
-                            index_key = tuple(
-                                dim.key_func(inst)
-                                for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-                            )
-                        else:
-                            index_key = instance
+                        index_key = lx_var.index_key(instance)
 
                         var = solver_vars[index_key]
                         value = float(solver.Value(var))

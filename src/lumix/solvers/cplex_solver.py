@@ -254,16 +254,7 @@ class LXCPLEXSolver(LXSolverInterface):
         Returns:
             Hashable index key
         """
-        if lx_var.index_func is not None:
-            return lx_var.index_func(instance)
-        elif lx_var._cartesian is not None and isinstance(instance, tuple):
-            # For cartesian products, apply each dimension's key function
-            return tuple(
-                dim.key_func(inst)
-                for dim, inst in zip(lx_var._cartesian.dimensions, instance)
-            )
-        else:
-            return instance
+        return lx_var.index_key(instance)
 
     def _create_single_variable(self, lx_var: LXVariable) -> None:
         """Create single CPLEX variable (not indexed)."""
