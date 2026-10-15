@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import List
 
 
+# [docs:data-models]
 @dataclass
 class Driver:
     """Represents a delivery driver with availability and cost information.
@@ -101,6 +102,7 @@ class Date:
     overtime_multiplier: float  # Cost multiplier (e.g., 1.5x for weekends)
     min_drivers_required: int  # Minimum drivers needed this day
     is_weekend: bool
+# [docs:data-models-end]
 
 
 # Sample drivers

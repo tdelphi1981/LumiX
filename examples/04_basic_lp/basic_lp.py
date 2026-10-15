@@ -109,6 +109,7 @@ def build_diet_model() -> Tuple[LXModel, LXVariable[Food, float]]:
     """
     # Decision Variable: Servings of each food (variable family)
     # ONE LXVariable that expands to multiple solver variables automatically
+    # [docs:servings-variable]
     servings = (
         LXVariable[Food, float]("servings")
         .continuous()
@@ -116,18 +117,22 @@ def build_diet_model() -> Tuple[LXModel, LXVariable[Food, float]]:
         .indexed_by(lambda f: f.name)
         .from_data(FOODS)  # Data-driven: auto-expands to one var per food
     )
+    # [docs:servings-variable-end]
 
     # Create model and add the variable family
     model = LXModel("diet_problem").add_variable(servings)
 
     # Objective: Minimize total cost
     # Expression automatically sums over all foods
+    # [docs:objective]
     cost_expr = LXLinearExpression().add_term(
         servings,
         coeff=lambda f: f.cost_per_serving
     )
-    model.minimize(cost_expr) # TODO feels like optimization runs in this line, naming confusion
+    model.minimize(cost_expr)
+    # [docs:objective-end]
 
+    # [docs:nutrition-constraints]
     # Constraint 1: Minimum calories
     # Expression automatically sums calories from all foods
     model.add_constraint(
@@ -158,6 +163,7 @@ def build_diet_model() -> Tuple[LXModel, LXVariable[Food, float]]:
         .ge()
         .rhs(MIN_CALCIUM)
     )
+    # [docs:nutrition-constraints-end]
 
     return model, servings
 

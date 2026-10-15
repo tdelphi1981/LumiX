@@ -153,6 +153,14 @@ Addition and Subtraction
 
 Adding a quadratic expression to a linear one gives a quadratic expression.
 
+.. versionadded:: 0.3.0
+   Quadratic expressions support ``lin - quad``, ``quad - lin``, ``quad - 3``,
+   ``-quad``, ``quad * k`` and ``k * quad``.
+
+.. versionchanged:: 0.3.0
+   Coefficients and constants that cancel to floating-point noise
+   (``0.1 + 0.2 - 0.3``) are treated as 0 in constraint rows and right-hand sides.
+
 Multiplication
 ~~~~~~~~~~~~~~
 

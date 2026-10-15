@@ -115,6 +115,10 @@ Creating the Analyzer
        include_baseline=True  # Include unmodified model as "baseline"
    )
 
+.. versionchanged:: 0.3.0
+   ``LXScenarioAnalyzer`` and ``LXWhatIfAnalyzer`` accept the model and optimizer as
+   keyword arguments (``base_model=`` / ``model=``, ``optimizer=``).
+
 The analyzer never changes ``model``. Each scenario runs on a copy made with
 ``copy.deepcopy``: the copy has its own families and constraints, but shares every data
 instance and every lambda with ``model`` (see :doc:`/user-guide/utils/model-copying`).

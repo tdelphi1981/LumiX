@@ -134,6 +134,20 @@ This creates one constraint per resource.
    (``lambda var_instance, row_instance: ...``) to reach other instances, for
    example ``inv[t-1]`` in an inventory balance. See :doc:`/development/canonical-model`.
 
+.. note::
+   Narrowing applies to terms whose variable family has the row's own data type.
+   In a row, a term on a multi-part variable (``indexed_by_product`` or
+   ``indexed_by_join``) is **not** narrowed to the row's part: it covers every
+   instance unless you select them. Give ``where`` two arguments, the instance
+   (a tuple of its parts) and the row, for example
+
+   .. code-block:: python
+
+      # supply[s]: the flows that leave supplier s
+      LXLinearExpression().add_term(flow, 1.0, where=lambda f, s: f[0].id == s.id)
+
+   or pick the instances with ``keys=`` (see :doc:`/user-guide/performance`).
+
 
 Right-Hand Side (RHS)
 ---------------------

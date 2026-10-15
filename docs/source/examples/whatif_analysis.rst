@@ -49,7 +49,9 @@ Quickly modify and resolve:
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 123-128
+   :start-after: # [docs:increase-labor]
+   :end-before: # [docs:increase-labor-end]
+   :dedent: 4
 
 **Key Points**:
 
@@ -92,7 +94,9 @@ Test all constraints to find bottlenecks:
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 204-206
+   :start-after: # [docs:find-bottlenecks]
+   :end-before: # [docs:find-bottlenecks-end]
+   :dedent: 4
 
 The built-in ``whatif.find_bottlenecks(test_amount=1.0, top_n=10)`` does the same for
 every constraint of the model. It returns ``(constraint_name, improvement_per_unit)``
@@ -108,7 +112,9 @@ Analyze objective across parameter range:
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 260-265
+   :start-after: # [docs:labor-range]
+   :end-before: # [docs:labor-range-end]
+   :dedent: 4
 
 Investment Comparison
 ~~~~~~~~~~~~~~~~~~~~~
@@ -117,7 +123,9 @@ Compare multiple investment options:
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 316-327
+   :start-after: # [docs:compare-changes]
+   :end-before: # [docs:compare-changes-end]
+   :dedent: 4
 
 Running the Example
 -------------------
@@ -188,35 +196,51 @@ Step 1: Create What-If Analyzer
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 109-111
+   :start-after: # [docs:create-analyzer]
+   :end-before: # [docs:create-analyzer-end]
+   :dedent: 4
 
 Step 2: Test Parameter Changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 119-156
+   :start-after: # [docs:increase-labor]
+   :end-before: # [docs:increase-labor-end]
+   :dedent: 4
+
+.. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
+   :language: python
+   :start-after: # [docs:more-whatifs]
+   :end-before: # [docs:more-whatifs-end]
+   :dedent: 4
 
 Step 3: Identify Bottlenecks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 195-242
+   :start-after: # [docs:find-bottlenecks]
+   :end-before: # [docs:find-bottlenecks-end]
+   :dedent: 4
 
 Step 4: Analyze Sensitivity Ranges
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 256-298
+   :start-after: # [docs:labor-range]
+   :end-before: # [docs:labor-range-end]
+   :dedent: 4
 
 Step 5: Compare Investment Options
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
-   :lines: 309-354
+   :start-after: # [docs:compare-changes]
+   :end-before: # [docs:compare-changes-end]
+   :dedent: 4
 
 Learning Objectives
 -------------------

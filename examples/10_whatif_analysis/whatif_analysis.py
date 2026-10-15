@@ -192,9 +192,11 @@ def run_whatif_analysis():
     print("=" * 80)
 
     # Build model and create analyzer
+    # [docs:create-analyzer]
     model = build_production_model()
     optimizer = LXOptimizer().use_solver(solver_to_use)
     whatif = LXWhatIfAnalyzer(model, optimizer)
+    # [docs:create-analyzer-end]
 
     # Get baseline
     print("\nSolving baseline model...")
@@ -206,13 +208,16 @@ def run_whatif_analysis():
     print("WHAT-IF #1: Increase Labor Hours by 200")
     print("-" * 80)
 
+    # [docs:increase-labor]
     result = whatif.increase_constraint_rhs("capacity_Labor Hours", by=200)
     print(f"\nOriginal Profit:  ${result.original_objective:,.2f}")
     print(f"New Profit:       ${result.new_objective:,.2f}")
     print(f"Change:           ${result.delta_objective:,.2f} ({result.delta_percentage:+.2f}%)")
     print(f"\nInterpretation: Adding 200 labor hours would increase profit by ${result.delta_objective:,.2f}")
     print(f"Marginal value:  ${result.delta_objective/200:.2f} per labor hour")
+    # [docs:increase-labor-end]
 
+    # [docs:more-whatifs]
     # What-if #2: Decrease machine hours
     print("\n" + "-" * 80)
     print("WHAT-IF #2: Decrease Machine Hours by 100 (Equipment Failure)")
@@ -261,6 +266,7 @@ def run_whatif_analysis():
     print(f"New Profit:       ${result.new_objective:,.2f}")
     print(f"Change:           ${result.delta_objective:,.2f} ({result.delta_percentage:+.2f}%)")
     print(f"\n⚠ Supply Risk: 20% material shortage would cost ${abs(result.delta_objective):,.2f}")
+    # [docs:more-whatifs-end]
 
 
 # ==================== BOTTLENECK IDENTIFICATION ====================
@@ -281,6 +287,7 @@ def identify_bottlenecks():
     # Note: Only testing resource capacity constraints (with constant RHS)
     print("\nTesting impact of adding 10 units to each resource...")
 
+    # [docs:find-bottlenecks]
     test_amount = 10.0
     improvements = []
 
@@ -293,6 +300,7 @@ def identify_bottlenecks():
 
     # Sort by improvement (descending)
     bottlenecks = sorted(improvements, key=lambda x: x[1], reverse=True)
+    # [docs:find-bottlenecks-end]
 
     print(f"\n{'Resource':<30s} {'Improvement':<20s} {'Per Unit':<15s} {'Priority':<10s}")
     print("-" * 80)
@@ -345,6 +353,7 @@ def analyze_sensitivity_ranges():
     print("\n1. LABOR CAPACITY SENSITIVITY (700 - 1300 hours)")
     print("-" * 80)
 
+    # [docs:labor-range]
     labor_range = whatif.sensitivity_range(
         "capacity_Labor Hours", min_value=700, max_value=1300, num_points=13
     )
@@ -362,6 +371,7 @@ def analyze_sensitivity_ranges():
 
         print(f"{labor:<15.0f} ${profit:<18,.2f} ${marginal:>18.2f}/hour")
         prev_labor, prev_profit = labor, profit
+    # [docs:labor-range-end]
 
     # Analyze machine capacity sensitivity
     print("\n\n2. MACHINE CAPACITY SENSITIVITY (600 - 1000 hours)")
@@ -399,6 +409,7 @@ def compare_multiple_changes():
     whatif = LXWhatIfAnalyzer(model, optimizer)
 
     # Define investment scenarios
+    # [docs:compare-changes]
     investment_options = [
         ("capacity_Labor Hours", "increase", 100),
         ("capacity_Labor Hours", "increase", 200),
@@ -422,6 +433,7 @@ def compare_multiple_changes():
             f"{resource_name} +{amount:<3.0f} units"
             f"{'':<23s} ${result.delta_objective:<18,.2f} ${roi_per_unit:>13.2f}"
         )
+    # [docs:compare-changes-end]
 
     # Best investment
     print("\n" + "-" * 80)

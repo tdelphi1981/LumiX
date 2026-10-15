@@ -89,11 +89,14 @@ def build_timetabling_model(session) -> LXModel:
 
     start_time = time.time()
 
+    # [docs:compatibility-checker]
     # Create cached compatibility checker (capacity + room type)
     # This is crucial for performance - avoids thousands of database queries
     print("  Creating cached compatibility checker...")
     compatibility_checker = create_cached_compatibility_checker(session)
+    # [docs:compatibility-checker-end]
 
+    # [docs:assignment-variable]
     # Decision variable: assignment[lecture, timeslot, classroom]
     # Now includes room type filtering
     print("  Creating 3D decision variables...")
@@ -110,6 +113,7 @@ def build_timetabling_model(session) -> LXModel:
             lambda lec, ts, room: compatibility_checker(lec.id, room.id)
         )
     )
+    # [docs:assignment-variable-end]
 
     # Create model
     model = LXModel("high_school_timetabling_large_scale")

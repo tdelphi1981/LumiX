@@ -45,7 +45,8 @@ LumiX queries the database directly:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step2_database_integration/timetabling_db.py
    :language: python
-   :lines: 87-98
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 3. Solution Persistence
@@ -80,8 +81,8 @@ ORM Models
 
 .. literalinclude:: ../../../../tutorials/timetabling/step2_database_integration/database.py
    :language: python
-   :lines: 52-78
-   :dedent: 0
+   :start-after: # [docs:orm-models]
+   :end-before: # [docs:orm-models-end]
 
 Running the Example
 -------------------
@@ -119,7 +120,8 @@ Code Walkthrough
 
 .. literalinclude:: ../../../../tutorials/timetabling/step2_database_integration/timetabling_db.py
    :language: python
-   :lines: 274-277
+   :start-after: # [docs:init-database]
+   :end-before: # [docs:init-database-end]
    :dedent: 4
 
 2. Create Variables with from_model()
@@ -127,7 +129,8 @@ Code Walkthrough
 
 .. literalinclude:: ../../../../tutorials/timetabling/step2_database_integration/timetabling_db.py
    :language: python
-   :lines: 87-98
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 3. Build Constraints (Same as Step 1)

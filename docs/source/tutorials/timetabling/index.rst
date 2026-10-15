@@ -389,7 +389,8 @@ Variables indexed by **tuples of three models**:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 110-122
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 **Benefits**: Type-safe access, natural problem representation, IDE support
@@ -401,7 +402,8 @@ Direct integration with SQLAlchemy ORM:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step2_database_integration/timetabling_db.py
    :language: python
-   :lines: 87-98
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 **Benefits**: Automatic data loading, type-safe queries, solution persistence

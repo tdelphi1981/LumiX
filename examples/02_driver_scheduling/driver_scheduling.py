@@ -111,6 +111,7 @@ def build_scheduling_model() -> LXModel:
     # ========================================
     # MULTI-MODEL INDEXED VARIABLE
     # ========================================
+    # [docs:duty-variable]
     # This creates a binary variable for EACH (driver, date) combination!
     # duty[driver, date] = 1 if driver works on date, 0 otherwise
 
@@ -130,6 +131,7 @@ def build_scheduling_model() -> LXModel:
         # Filter out invalid combinations
         .where_multi(lambda driver, date: is_driver_available(driver, date))
     )
+    # [docs:duty-variable-end]
 
     # Create model
     model = LXModel("driver_scheduling").add_variable(duty)
@@ -137,6 +139,7 @@ def build_scheduling_model() -> LXModel:
     # ========================================
     # OBJECTIVE: Minimize Total Cost
     # ========================================
+    # [docs:objective]
     # Cost expression using multi-indexed variable
     # The cost function was already defined in cost_multi() above
     cost_expr = LXLinearExpression().add_multi_term(
@@ -144,10 +147,12 @@ def build_scheduling_model() -> LXModel:
     )
 
     model.minimize(cost_expr)
+    # [docs:objective-end]
 
     # ========================================
     # CONSTRAINT 1: Driver Max Days
     # ========================================
+    # [docs:max-days-constraint]
     # Each driver works <= max_days_per_week
     # This sums over ALL dates for EACH driver
 
@@ -168,10 +173,12 @@ def build_scheduling_model() -> LXModel:
             .le()
             .rhs(float(driver.max_days_per_week))
         )
+    # [docs:max-days-constraint-end]
 
     # ========================================
     # CONSTRAINT 2: Daily Coverage
     # ========================================
+    # [docs:coverage-constraint]
     # Each date needs >= min_drivers_required
     # This sums over ALL drivers for EACH date
 
@@ -189,6 +196,7 @@ def build_scheduling_model() -> LXModel:
             .ge()
             .rhs(float(date.min_drivers_required))
         )
+    # [docs:coverage-constraint-end]
 
     return model
 

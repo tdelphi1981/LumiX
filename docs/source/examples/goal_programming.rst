@@ -113,8 +113,9 @@ Mark constraints as goals:
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 105-112
-   :dedent: 8
+   :start-after: # [docs:goal-constraints]
+   :end-before: # Goal 2: Limit overtime
+   :dedent: 4
 
 **Key Points**:
 
@@ -166,7 +167,8 @@ Check goal satisfaction:
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 187-204
+   :start-after: # [docs:goal-satisfaction]
+   :end-before: # [docs:goal-satisfaction-end]
    :dedent: 4
 
 Running the Example
@@ -241,7 +243,8 @@ Step 1: Define Variables
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 66-82
+   :start-after: # [docs:define-variables]
+   :end-before: # [docs:define-variables-end]
    :dedent: 4
 
 Step 2: Add Hard Constraints
@@ -249,7 +252,8 @@ Step 2: Add Hard Constraints
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 88-95
+   :start-after: # [docs:hard-constraint]
+   :end-before: # [docs:hard-constraint-end]
    :dedent: 4
 
 Step 3: Add Goal Constraints
@@ -257,7 +261,8 @@ Step 3: Add Goal Constraints
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 99-137
+   :start-after: # [docs:goal-constraints]
+   :end-before: # [docs:goal-constraints-end]
    :dedent: 4
 
 Step 4: Configure Goal Mode
@@ -265,7 +270,8 @@ Step 4: Configure Goal Mode
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 140-143
+   :start-after: # [docs:goal-mode]
+   :end-before: # [docs:goal-mode-end]
    :dedent: 4
 
 Step 5: Solve and Analyze Goals
@@ -273,7 +279,8 @@ Step 5: Solve and Analyze Goals
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 149-157
+   :start-after: # [docs:solve]
+   :end-before: # [docs:solve-end]
    :dedent: 4
 
 Learning Objectives

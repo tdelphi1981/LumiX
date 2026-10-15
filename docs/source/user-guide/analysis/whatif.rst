@@ -238,7 +238,8 @@ best first:
 .. versionchanged:: 0.3.0
    Improvements follow the objective's sense; for minimization they used to come out
    negative and were ranked backwards. Constraints with a per-row right-hand side are
-   supported.
+   supported. Equality rows are tried in both directions (raised and lowered) and the
+   better one is reported; they used to be raised only.
 
 Comparing Bottleneck Relaxation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -419,7 +420,7 @@ Advanced Features
 -----------------
 
 Exact Values and Change Records
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 

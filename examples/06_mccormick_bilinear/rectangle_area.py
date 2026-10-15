@@ -145,6 +145,7 @@ def build_rectangle_model():
         bounds result in better approximations of the bilinear product.
     """
 
+    # [docs:define-variables]
     # Decision Variables (scalar variables need single-element data source)
     # Using "dimension" as a simple scalar identifier
     scalar_data = ["dim"]
@@ -164,10 +165,12 @@ def build_rectangle_model():
         .indexed_by(lambda x: x)
         .from_data(scalar_data)
     )
+    # [docs:define-variables-end]
 
     # Create model
     model = LXModel("rectangle_area").add_variables(length, width)
 
+    # [docs:perimeter-constraint]
     # Constraint: Minimum perimeter
     # 2 * (length + width) >= MIN_PERIMETER
     model.add_constraint(
@@ -178,12 +181,15 @@ def build_rectangle_model():
         .ge()
         .rhs(MIN_PERIMETER)
     )
+    # [docs:perimeter-constraint-end]
 
+    # [docs:bilinear-objective]
     # Objective: Maximize area = length × width (bilinear product!)
     # This will be automatically linearized using McCormick envelopes
     area_expr = LXNonLinearExpression().add_product(length, width)
 
     model.maximize(area_expr)
+    # [docs:bilinear-objective-end]
 
     return model, length, width
 
@@ -279,6 +285,7 @@ def main():
     print(f"  ✓ Variable bounds defined (required for McCormick)")
     print()
 
+    # [docs:linearize]
     # Create linearizer
     print("Creating linearizer...")
     config = LXLinearizerConfig()
@@ -313,6 +320,7 @@ def main():
     else:
         print("No linearization needed (solver has native support)")
         model_to_solve = model
+    # [docs:linearize-end]
 
     # Solve
     print("Solving with OR-Tools...")

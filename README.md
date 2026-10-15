@@ -177,26 +177,30 @@ quadratic_expr = (
 LumiX can automatically linearize non-linear terms:
 
 ```python
-from lumix import LXBilinearTerm, LXAbsoluteTerm, LXPiecewiseLinearTerm
+from lumix import LXNonLinearExpression, LXOptimizer
 
-# Bilinear products (x * y)
-bilinear = LXBilinearTerm(x, y, bounds_x=(0, 10), bounds_y=(0, 5))
-
-# Absolute values |x|
-absolute = LXAbsoluteTerm(x)
-
-# Piecewise-linear functions
-piecewise = LXPiecewiseLinearTerm(
-    variable=x,
-    breakpoints=[0, 10, 20, 30],
-    slopes=[1.0, 0.5, 0.2]
+# Products, absolute values and piecewise-linear functions are linearized at solve time
+expr = (
+    LXNonLinearExpression()
+    .add_product(x, y)                                   # x * y (bounds come from x and y)
+    .add_abs(x)                                          # |x|
+    .add_piecewise(x, lambda v: abs(v) ** 0.5,
+                   breakpoints=[-5, 0, 5, 10])           # sqrt(|x|), exact at the breakpoints
 )
+model.maximize(expr)
+solution = LXOptimizer().use_solver("ortools").enable_linearization().solve(model)
 ```
+
+Absolute values are exact, and a piecewise term is the linear interpolation between its
+breakpoints. A product of two continuous variables is a relaxation (McCormick envelopes):
+LumiX warns and sets `solution.relaxation`. See the
+[Correctness Notes](https://lumix.readthedocs.io/en/latest/user-guide/correctness.html).
 
 ### Advanced Analysis
 
 ```python
 from lumix import (
+    LXScenario,
     LXSensitivityAnalyzer,
     LXScenarioAnalyzer,
     LXWhatIfAnalyzer,
@@ -207,11 +211,12 @@ sens = LXSensitivityAnalyzer(model, solution)
 report = sens.generate_report()
 print(report)
 
-# Scenario analysis
+# Scenario analysis (the baseline is included automatically)
 scenario_analyzer = LXScenarioAnalyzer(model, optimizer)
-scenario_analyzer.add_scenario("base", {})
-scenario_analyzer.add_scenario("high_demand", {"demand": 150})
-results = scenario_analyzer.solve_all()
+scenario_analyzer.add_scenario(
+    LXScenario("high_demand").modify_constraint_rhs("demand", set_value=150)
+)
+results = scenario_analyzer.run_all_scenarios()
 
 # What-if analysis
 whatif = LXWhatIfAnalyzer(model, optimizer)

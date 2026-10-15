@@ -213,7 +213,7 @@ any SQL tool.
      - string(255), nullable, indexed
      - The store's ``analysis`` label
    * - ``scenario``
-     - string(255)
+     - text
      - Scenario name, ``"baseline"``, or the what-if description
    * - ``status``
      - string(64)
@@ -250,7 +250,7 @@ any SQL tool.
      - string(16)
      - ``"value"``, ``"shadow_price"`` or ``"reduced_cost"``
    * - ``name``
-     - string(255)
+     - text
      - Variable name (values, reduced costs) or constraint name (shadow prices)
    * - ``indexed``
      - boolean
@@ -299,7 +299,15 @@ Transactions
 
 With ``commit=True`` (the default) the store commits the session after each recorded run,
 so every run is visible to other sessions right away and a later failure does not lose
-earlier runs. This also commits anything else pending in the same session.
+earlier runs.
+
+.. note::
+   ``session.commit()`` commits **everything** pending in the session, not only LumiX's
+   rows, and with SQLAlchemy's default ``expire_on_commit=True`` it expires every instance
+   loaded in that session (the next attribute access reloads it). Give the store a session
+   of its own, as in the examples on this page, rather than the session your model reads
+   its data from. If you must share one, pass ``commit=False`` and commit yourself, or
+   create the session with ``expire_on_commit=False``.
 
 With ``commit=False`` the store only flushes. The rows are visible inside the session,
 and you decide when to commit or roll back:
@@ -326,12 +334,14 @@ Limitations
   existing ones.
 - **Numbers only.** Solutions are stored as variable values (and optionally shadow prices
   and reduced costs); the model itself is not stored.
-- **Non-JSON keys** are stored as strings (see `Schema`_) and come back as strings.
+- **Non-JSON keys** are stored as ``str(key)`` (see `Schema`_) and come back as strings;
+  two keys with the same ``str()`` come back as one entry (the last value). Index by a
+  JSON-friendly id (``lambda p: p.id``).
 - **Infeasible runs** keep their status but no objective and no values.
 - **Sensitivity data** requires an LP solved with ``enable_sensitivity()``; MIP solves
   usually have no shadow prices or reduced costs.
-- **Names** longer than 255 characters do not fit the ``scenario`` and ``name`` columns
-  on databases that enforce the length.
+- **Analysis labels** longer than 255 characters do not fit the ``analysis`` column on
+  databases that enforce the length.
 
 See Also
 --------

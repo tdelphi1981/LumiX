@@ -162,6 +162,7 @@ def build_investment_model():
     scalar_data = ["inv"]
 
     for i, inv in enumerate(INVESTMENTS):
+        # [docs:investment-variable]
         # Decision variable: investment amount
         amount = (
             LXVariable[str, float](f"amount_{inv['name']}")
@@ -172,6 +173,7 @@ def build_investment_model():
         )
         investment_vars.append(amount)
         model.add_variable(amount)
+        # [docs:investment-variable-end]
 
         # Exponential return: amount × exp(growth_rate × time × (1 - risk))
         # Simplified: amount × exp(effective_rate × time)
@@ -190,6 +192,7 @@ def build_investment_model():
         # For this example, we'll use linear objective with the multiplier
         # In a real scenario, you'd linearize amount × exp(variable)
 
+    # [docs:budget-constraint]
     # Constraint: Total budget
     budget_expr = LXLinearExpression()
     for amount in investment_vars:
@@ -198,7 +201,9 @@ def build_investment_model():
     model.add_constraint(
         LXConstraint("budget").expression(budget_expr).le().rhs(TOTAL_BUDGET)
     )
+    # [docs:budget-constraint-end]
 
+    # [docs:objective]
     # Objective: Maximize total return
     # For simplicity, using linear approximation with computed multipliers
     objective_expr = LXLinearExpression()
@@ -208,6 +213,7 @@ def build_investment_model():
         objective_expr.add_term(amount, multiplier)
 
     model.maximize(objective_expr)
+    # [docs:objective-end]
 
     return model, investment_vars
 

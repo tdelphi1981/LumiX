@@ -157,7 +157,7 @@ Multi-Model Filter
 Joined Index
 ~~~~~~~~~~~~
 
-.. versionchanged:: 0.3.0
+.. versionadded:: 0.3.0
 
 When the second dimension depends on the first (each driver serves its own
 routes), use ``indexed_by_join``. The instances are the ``(driver, route)``

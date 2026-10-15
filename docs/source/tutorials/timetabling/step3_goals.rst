@@ -110,15 +110,17 @@ Converting preferences to soft constraints:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step3_goal_programming/timetabling_goals.py
    :language: python
-   :lines: 223-256
-   :dedent: 8
+   :start-after: # [docs:day-off-goal]
+   :end-before: # [docs:day-off-goal-end]
+   :dedent: 12
 
 **SPECIFIC_TIME**: Teacher wants to teach a specific lecture at a specific time
 
 .. literalinclude:: ../../../../tutorials/timetabling/step3_goal_programming/timetabling_goals.py
    :language: python
-   :lines: 258-287
-   :dedent: 8
+   :start-after: # [docs:specific-time-goal]
+   :end-before: # [docs:specific-time-goal-end]
+   :dedent: 12
 
 Database Schema Extensions
 ---------------------------
@@ -143,8 +145,7 @@ Updated Models
 
 .. literalinclude:: ../../../../tutorials/timetabling/step3_goal_programming/database.py
    :language: python
-   :lines: 63-79
-   :dedent: 0
+   :pyobject: Teacher
 
 Running the Example
 -------------------
@@ -184,7 +185,8 @@ Code Walkthrough
 
 .. literalinclude:: ../../../../tutorials/timetabling/step3_goal_programming/timetabling_goals.py
    :language: python
-   :lines: 91-104
+   :start-after: # [docs:data-counts]
+   :end-before: # [docs:data-counts-end]
    :dedent: 4
 
 2. Set Goal Programming Mode
@@ -192,7 +194,8 @@ Code Walkthrough
 
 .. literalinclude:: ../../../../tutorials/timetabling/step3_goal_programming/timetabling_goals.py
    :language: python
-   :lines: 261-262
+   :start-after: # [docs:goal-mode]
+   :end-before: # [docs:goal-mode-end]
    :dedent: 4
 
 3. Add Goal Constraints
@@ -205,8 +208,9 @@ For each preference, create a goal constraint with calculated priority.
 
 .. literalinclude:: ../../../../tutorials/timetabling/step3_goal_programming/timetabling_goals.py
    :language: python
-   :lines: 322-378
-   :dedent: 0
+   :start-after: # [docs:goal-satisfaction-check]
+   :end-before: # [docs:goal-satisfaction-check-end]
+   :dedent: 4
 
 Key Learnings
 -------------

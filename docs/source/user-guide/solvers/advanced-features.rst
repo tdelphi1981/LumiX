@@ -117,6 +117,10 @@ Enabling Sensitivity
    shadow_prices = solution.shadow_prices
    reduced_costs = solution.reduced_costs
 
+.. versionchanged:: 0.3.0
+   OR-Tools returns no shadow prices or reduced costs for MIPs (its MIP solver,
+   SCIP, has none); they used to be reported as 0.
+
 Accessing Shadow Prices
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

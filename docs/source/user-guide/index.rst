@@ -17,6 +17,7 @@ Comprehensive guides for using LumiX effectively in your optimization projects.
    analysis/index
    goal_programming/index
    performance
+   correctness
 
 Core Module
 -----------
@@ -181,3 +182,10 @@ large models fast.
 - Selecting instances by key with ``keys=``
 - Per-build instance caching
 - Practical advice and known limitations
+
+Correctness Notes
+-----------------
+
+The :doc:`correctness` page lists what LumiX solves exactly, what it approximates
+(McCormick relaxations, piecewise interpolation, CP-SAT coefficient scaling), and how
+each part is verified.

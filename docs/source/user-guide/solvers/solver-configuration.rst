@@ -367,14 +367,8 @@ CP-SAT (Constraint Programming):
 
 **Solution Hints (Warm Start):**
 
-.. code-block:: python
-
-   # Provide initial solution as hint
-   solution = optimizer.solve(
-       model,
-       use_hint=True,
-       hint_variable_values=initial_solution
-   )
+LumiX does not pass solution hints or warm starts to the solvers yet; the
+``supports_warmstart`` capability flag only records what the solver itself offers.
 
 Performance Tuning
 ------------------

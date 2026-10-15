@@ -28,6 +28,9 @@ Seeing LumiX's log messages
 
 In a script or notebook, turn the messages on with one call:
 
+.. versionadded:: 0.3.0
+   :func:`lumix.enable_logging`.
+
 .. code-block:: python
 
    import lumix

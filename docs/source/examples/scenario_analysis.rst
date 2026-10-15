@@ -50,7 +50,8 @@ Define scenarios with constraint modifications:
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 121-128
+   :start-after: # [docs:optimistic-scenario]
+   :end-before: # [docs:optimistic-scenario-end]
    :dedent: 4
 
 **Key Points**:
@@ -67,7 +68,8 @@ Run multiple scenarios efficiently:
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 108-110
+   :start-after: # [docs:run-all]
+   :end-before: # [docs:run-all-end]
    :dedent: 4
 
 **Features**:
@@ -83,7 +85,8 @@ Compare results across scenarios:
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 204-210
+   :start-after: # [docs:compare-scenarios]
+   :end-before: # [docs:compare-scenarios-end]
    :dedent: 4
 
 **Outputs**:
@@ -102,7 +105,8 @@ Analyze sensitivity to parameter ranges:
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 228-233
+   :start-after: # [docs:labor-sensitivity]
+   :end-before: # [docs:labor-sensitivity-end]
    :dedent: 4
 
 Tests objective value across range of parameter values.
@@ -185,7 +189,8 @@ Step 1: Create Scenario Analyzer
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 104-109
+   :start-after: # [docs:create-analyzer]
+   :end-before: # [docs:create-analyzer-end]
    :dedent: 4
 
 Step 2: Define Business Scenarios
@@ -193,7 +198,14 @@ Step 2: Define Business Scenarios
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 116-154
+   :start-after: # [docs:optimistic-scenario]
+   :end-before: # [docs:optimistic-scenario-end]
+   :dedent: 4
+
+.. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
+   :language: python
+   :start-after: # [docs:more-scenarios]
+   :end-before: # [docs:more-scenarios-end]
    :dedent: 4
 
 Step 3: Run All Scenarios
@@ -201,7 +213,8 @@ Step 3: Run All Scenarios
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 194-198
+   :start-after: # [docs:run-all]
+   :end-before: # [docs:run-all-end]
    :dedent: 4
 
 Step 4: Compare and Analyze Results
@@ -209,7 +222,8 @@ Step 4: Compare and Analyze Results
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 201-220
+   :start-after: # [docs:compare-scenarios]
+   :end-before: # [docs:compare-scenarios-end]
    :dedent: 4
 
 Step 5: Parameter Sensitivity Analysis
@@ -217,7 +231,8 @@ Step 5: Parameter Sensitivity Analysis
 
 .. literalinclude:: ../../../examples/08_scenario_analysis/scenario_analysis.py
    :language: python
-   :lines: 223-248
+   :start-after: # [docs:labor-sensitivity]
+   :end-before: # [docs:labor-sensitivity-end]
    :dedent: 4
 
 Learning Objectives

@@ -187,12 +187,16 @@ def run_sensitivity_analysis():
 
     # Build and solve model
     print("\nBuilding and solving base model...")
+    # [docs:solve-with-sensitivity]
     model = build_production_model()
     optimizer = LXOptimizer().use_solver(solver_to_use).enable_sensitivity()
     solution = optimizer.solve(model)
+    # [docs:solve-with-sensitivity-end]
 
     # Create sensitivity analyzer
+    # [docs:create-analyzer]
     analyzer = LXSensitivityAnalyzer(model, solution)
+    # [docs:create-analyzer-end]
 
     # Display solution summary
     print("\n" + "-" * 80)
@@ -212,6 +216,7 @@ def run_sensitivity_analysis():
     print("=" * 80)
 
     print("\nAnalyzing individual constraints:")
+    # [docs:constraint-sensitivity]
     for constraint in model.constraints:
         if constraint.name.startswith("capacity_"):
             sens = analyzer.analyze_constraint(constraint.name)
@@ -224,6 +229,7 @@ def run_sensitivity_analysis():
                     f"    => Interpretation: Each additional unit of this resource "
                     f"increases profit by ${sens.shadow_price:.2f}"
                 )
+    # [docs:constraint-sensitivity-end]
 
     # Find binding constraints
     print("\n" + "-" * 80)
@@ -244,6 +250,7 @@ def run_sensitivity_analysis():
     print("BOTTLENECK IDENTIFICATION")
     print("-" * 80)
 
+    # [docs:bottlenecks]
     bottlenecks = analyzer.identify_bottlenecks(shadow_price_threshold=0.01)
     if bottlenecks:
         print(f"\nIdentified {len(bottlenecks)} bottlenecks:")
@@ -255,12 +262,14 @@ def run_sensitivity_analysis():
             print(f"    Impact: Relaxing by 1 unit → +${sens.shadow_price:.2f} profit")
     else:
         print("\nNo significant bottlenecks identified")
+    # [docs:bottlenecks-end]
 
     # Top sensitive constraints
     print("\n" + "-" * 80)
     print("TOP 5 MOST VALUABLE CONSTRAINTS TO RELAX")
     print("-" * 80)
 
+    # [docs:top-constraints]
     top_constraints = analyzer.get_most_sensitive_constraints(top_n=5)
     if top_constraints:
         print("\nPrioritize relaxing these constraints for maximum profit impact:")
@@ -270,6 +279,7 @@ def run_sensitivity_analysis():
             print(f"     Expected ROI: ${sens.shadow_price:.2f} per unit relaxation")
     else:
         print("\nNo constraints with significant shadow prices")
+    # [docs:top-constraints-end]
 
     # Variable sensitivity
     print("\n" + "=" * 80)
@@ -277,12 +287,14 @@ def run_sensitivity_analysis():
     print("=" * 80)
 
     print("\nAnalyzing production variables:")
+    # [docs:variable-sensitivity]
     for key, sens in analyzer.analyze_variable_family("production").items():
         print(f"\n  Variable: {sens.name}")
         print(f"    Value: {sens.value:.2f}")
         print(f"    Reduced Cost: ${sens.reduced_cost:.6f}" if sens.reduced_cost else "    Reduced Cost: $0.000000")
         print(f"    In Basis: {'YES' if sens.is_basic else 'NO'}")
         print(f"    At Bound: {'YES' if sens.is_at_bound else 'NO'}")
+    # [docs:variable-sensitivity-end]
 
     # Non-basic variables
     print("\n" + "-" * 80)
@@ -358,6 +370,7 @@ def extract_business_insights():
     analyzer = LXSensitivityAnalyzer(model, solution)
 
     # Get top sensitive constraints
+    # [docs:investment-priorities]
     top_constraints = analyzer.get_most_sensitive_constraints(top_n=3)
 
     print("\n1. RESOURCE INVESTMENT PRIORITIES")
@@ -377,6 +390,7 @@ def extract_business_insights():
             print(f"     [MODERATE PRIORITY]: Positive ROI from expansion")
         else:
             print(f"     [LOW PRIORITY]: Minimal impact from expansion")
+    # [docs:investment-priorities-end]
 
     # Bottleneck analysis
     bottlenecks = analyzer.identify_bottlenecks()

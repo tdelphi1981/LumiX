@@ -143,6 +143,7 @@ def main():
     print("Basic Goal Programming Example")
     print("=" * 70)
 
+    # [docs:define-variables]
     # Define variables
     production = (
         LXVariable[Product, float]("production")
@@ -160,11 +161,13 @@ def main():
         .indexed_by(lambda x: x)
         .from_data([1])  # Single instance for scalar variable
     )
+    # [docs:define-variables-end]
 
     # Build model
     model = LXModel("goal_programming_basic")
     model.add_variables(production, overtime)
 
+    # [docs:hard-constraint]
     # Hard constraint: Total hours <= capacity + overtime
     hours_expr = LXLinearExpression()
     hours_expr.add_term(production, lambda p: p.hours_per_unit)
@@ -173,7 +176,9 @@ def main():
     model.add_constraint(
         LXConstraint("capacity").expression(hours_expr).le().rhs(MAX_HOURS)
     )
+    # [docs:hard-constraint-end]
 
+    # [docs:goal-constraints]
     # Goal 1: Meet production targets (Priority 1, highest)
     # For each product, production >= target_production
     for product in PRODUCTS:
@@ -215,21 +220,26 @@ def main():
         .rhs(TARGET_PROFIT)
         .as_goal(priority=3, weight=1.0)  # Lowest priority
     )
+    # [docs:goal-constraints-end]
 
+    # [docs:goal-mode]
     # Set goal programming mode (weighted = single solve)
     model.set_goal_mode("weighted")
 
     # Optional: solve() relaxes the goals on a copy by itself. Preparing the model
     # here lets model.summary() below show the relaxed constraints.
     model.prepare_goal_programming()
+    # [docs:goal-mode-end]
 
     print("\nModel Summary:")
     print(model.summary())
 
     # Solve
     print("\nSolving...")
+    # [docs:solve]
     optimizer = LXOptimizer().use_solver(solver_to_use)
     solution = optimizer.solve(model)
+    # [docs:solve-end]
 
     # Display results
     print("\n" + "=" * 70)
@@ -263,6 +273,7 @@ def main():
     print("Goal Satisfaction:")
     print("-" * 70)
 
+    # [docs:goal-satisfaction]
     for product in PRODUCTS:
         goal_name = f"production_goal_{product.id}"
         deviations = solution.get_goal_deviations(goal_name)
@@ -278,6 +289,7 @@ def main():
                 f"  Under-production: {neg_dev:.2f}\n"
                 f"  Over-production:  {pos_dev:.2f}"
             )
+    # [docs:goal-satisfaction-end]
 
     # Overtime goal (non-indexed, single value)
     deviations = solution.get_goal_deviations("overtime_goal")

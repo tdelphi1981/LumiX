@@ -233,6 +233,17 @@ Check the optimization status:
    print(f"Status: {solution.status}")
    # Common values: "optimal", "feasible", "infeasible", "unbounded"
 
+.. versionchanged:: 0.3.0
+   A solve without a solution (infeasible, unbounded) returns
+   ``solution.variables == {}`` with every solver. OR-Tools used to return zeros,
+   and CPLEX returned values for unbounded MIPs.
+
+.. versionchanged:: 0.3.0
+   When presolve cannot tell an infeasible LP from an unbounded one, OR-Tools (GLOP)
+   and CPLEX solve once more without presolve to report which it is. GLPK settles a
+   MIP with an unbounded relaxation with a feasibility check of at most 2 s and
+   reports ``"inf_or_unbounded"`` when that check does not finish.
+
 Objective Value
 ~~~~~~~~~~~~~~~
 
@@ -299,6 +310,34 @@ are exact, and the flag is ``False``.
        print(f"Optimum: {solution.objective_value}")
 
 See :doc:`/user-guide/linearization/bilinear` for ways to get an exact model.
+
+Constraint Activity
+~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+:func:`~lumix.solution.activity.row_activity` evaluates every constraint row at a
+solution. It returns a dict keyed by row name (``name[key]`` for rows of an indexed
+constraint) of :class:`~lumix.solution.activity.LXRowActivity` records with ``lhs``,
+``rhs``, ``sense``, ``slack`` and ``binding``:
+
+.. code-block:: python
+
+   from lumix.solution import row_activity
+
+   for name, row in row_activity(model, solution).items():
+       state = "binding" if row.binding else f"slack {row.slack:.2f}"
+       print(f"{name}: {row.lhs:.2f} vs {row.rhs:.2f} ({state})")
+
+Slack is ``rhs - lhs`` for ``<=`` rows and ``lhs - rhs`` for ``>=`` rows, so it is
+never negative at a feasible solution. Rows on variables the solution does not
+report are left out, and a solution without values gives an empty dict.
+``LXSolutionVisualizer(solution, model).plot_constraint_utilization()`` draws the
+same data.
+
+.. versionchanged:: 0.3.0
+   ``plot_constraint_utilization()`` needs the model and no longer needs duals. It
+   used to draw every non-binding row at a fixed 50 %.
 
 Solution Summary
 ~~~~~~~~~~~~~~~~

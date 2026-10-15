@@ -219,7 +219,9 @@ Step 2: Define Investment Variables
 
 .. literalinclude:: ../../../examples/07_piecewise_functions/exponential_growth.py
    :language: python
-   :lines: 89-96
+   :start-after: # [docs:investment-variable]
+   :end-before: # [docs:investment-variable-end]
+   :dedent: 8
 
 Step 3: Approximate Exponential Function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -238,7 +240,8 @@ Step 4: Build Objective with Approximation
 
 .. literalinclude:: ../../../examples/07_piecewise_functions/exponential_growth.py
    :language: python
-   :lines: 127-133
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 Step 5: Add Budget Constraint
@@ -246,7 +249,8 @@ Step 5: Add Budget Constraint
 
 .. literalinclude:: ../../../examples/07_piecewise_functions/exponential_growth.py
    :language: python
-   :lines: 116-124
+   :start-after: # [docs:budget-constraint]
+   :end-before: # [docs:budget-constraint-end]
    :dedent: 4
 
 Learning Objectives

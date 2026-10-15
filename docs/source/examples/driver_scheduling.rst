@@ -85,7 +85,8 @@ Variables are indexed by **tuples** of multiple model instances:
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 116-131
+   :start-after: # [docs:duty-variable]
+   :end-before: # [docs:duty-variable-end]
    :dedent: 4
 
 **Key Points**:
@@ -104,7 +105,10 @@ Create variables for every valid combination:
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 119-126
+   :start-after: # [docs:duty-variable]
+   :end-before: # [docs:duty-variable-end]
+   :dedent: 4
+   :emphasize-lines: 7-14
 
 The first dimension (Driver) is filtered to only active drivers, while the second dimension (Date) includes all dates.
 
@@ -115,8 +119,10 @@ Cost functions receive **both** index models:
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 127-130
-   :dedent: 8
+   :start-after: # [docs:duty-variable]
+   :end-before: # [docs:duty-variable-end]
+   :dedent: 4
+   :emphasize-lines: 15-16
 
 The ``lambda driver, date: calculate_cost(driver, date)`` has access to both driver and date objects.
 
@@ -127,7 +133,8 @@ Sum over one dimension while fixing the other:
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 153-169
+   :start-after: # [docs:max-days-constraint]
+   :end-before: # [docs:max-days-constraint-end]
    :dedent: 4
 
 This sums over all dates for a specific driver. Note the closure capture: ``drv=driver`` captures the loop variable by value.
@@ -209,15 +216,16 @@ Step 1: Define Data Models
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/sample_data.py
    :language: python
-   :lines: 36-104
-   :dedent: 0
+   :start-after: # [docs:data-models]
+   :end-before: # [docs:data-models-end]
 
 Step 2: Create Multi-Indexed Variable
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 116-131
+   :start-after: # [docs:duty-variable]
+   :end-before: # [docs:duty-variable-end]
    :dedent: 4
 
 Step 3: Set Objective
@@ -225,7 +233,8 @@ Step 3: Set Objective
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 138-145
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 Step 4: Add Driver Capacity Constraints
@@ -233,7 +242,8 @@ Step 4: Add Driver Capacity Constraints
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 153-169
+   :start-after: # [docs:max-days-constraint]
+   :end-before: # [docs:max-days-constraint-end]
    :dedent: 4
 
 Step 5: Add Daily Coverage Constraints
@@ -241,7 +251,8 @@ Step 5: Add Daily Coverage Constraints
 
 .. literalinclude:: ../../../examples/02_driver_scheduling/driver_scheduling.py
    :language: python
-   :lines: 177-190
+   :start-after: # [docs:coverage-constraint]
+   :end-before: # [docs:coverage-constraint-end]
    :dedent: 4
 
 Step 6: Solve and Access Solution
