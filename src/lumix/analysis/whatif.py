@@ -546,7 +546,9 @@ class LXWhatIfAnalyzer(Generic[TModel]):
 
         for rhs_value in rhs_values:
             result = self.increase_constraint_rhs(constraint_name, to=rhs_value)
-            results.append((rhs_value, result.new_objective))
+            # NaN where the model has no solution (an infeasible run reports 0)
+            results.append((rhs_value, result.new_objective
+                            if result.new_solution.is_feasible() else math.nan))
 
         return results
 
@@ -652,7 +654,10 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         """
         delta_obj = new_solution.objective_value - baseline.objective_value
 
-        if baseline.objective_value != 0:
+        if not (baseline.is_feasible() and new_solution.is_feasible()):
+            # no change to report without two solutions (an infeasible run reports 0)
+            delta_obj = delta_pct = math.nan
+        elif baseline.objective_value != 0:
             delta_pct = (delta_obj / baseline.objective_value) * 100
         else:
             delta_pct = 0.0

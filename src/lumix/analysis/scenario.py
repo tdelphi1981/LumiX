@@ -429,15 +429,23 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         # Sort by objective if requested
         if sort_by_objective:
-            compare_names.sort(key=lambda name: self.results[name].objective_value, reverse=True)
+            # best first in the sense the model is solved; runs without a solution last
+            from ._sense import solved_sense
+
+            maximize = solved_sense(self.base_model) == LXObjectiveSense.MAXIMIZE
+            feasible = sorted((n for n in compare_names if self.results[n].is_feasible()),
+                              key=lambda n: self.results[n].objective_value, reverse=maximize)
+            compare_names = feasible + [n for n in compare_names
+                                        if not self.results[n].is_feasible()]
 
         # Build comparison report
         lines = ["Scenario Comparison", "=" * 80]
 
         # Add baseline reference if available
         if "baseline" in self.results:
-            baseline_obj = self.results["baseline"].objective_value
-            lines.append(f"Baseline Objective: {baseline_obj:,.2f}")
+            baseline = self.results["baseline"]
+            shown = f"{baseline.objective_value:,.2f}" if baseline.is_feasible() else "-"
+            lines.append(f"Baseline Objective: {shown} ({baseline.status})")
             lines.append("")
 
         # Add scenario results
@@ -446,11 +454,14 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         for name in compare_names:
             solution = self.results[name]
-            obj_str = f"{solution.objective_value:,.2f}"
+            obj_str = f"{solution.objective_value:,.2f}" if solution.is_feasible() else "-"
             status_str = solution.status
 
             # Calculate difference from baseline
-            if "baseline" in self.results and name != "baseline":
+            if not solution.is_feasible() or (
+                    "baseline" in self.results and not self.results["baseline"].is_feasible()):
+                diff_str = "-"
+            elif "baseline" in self.results and name != "baseline":
                 baseline_obj = self.results["baseline"].objective_value
                 if baseline_obj != 0:
                     diff_pct = ((solution.objective_value - baseline_obj) / baseline_obj) * 100

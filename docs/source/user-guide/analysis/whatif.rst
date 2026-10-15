@@ -55,6 +55,12 @@ The :class:`~lumix.analysis.whatif.LXWhatIfResult` contains:
 - **Delta percentage**: Percentage change
 - **Solutions**: Both original and new solutions
 
+.. versionchanged:: 0.3.0
+   When the baseline or the changed model has no solution (infeasible, unbounded),
+   ``delta_objective`` and ``delta_percentage`` are ``nan`` and ``sensitivity_range``
+   reports ``nan`` for that point; an infeasible run used to count as a change to an
+   objective of 0. Check ``result.new_solution.is_feasible()`` first.
+
 Bottlenecks
 ~~~~~~~~~~~
 

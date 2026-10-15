@@ -161,10 +161,10 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         if not include_baseline and "baseline" in results:
             del results["baseline"]
 
-        items = list(results.items())
+        skipped = [n for n, sol in results.items() if not sol.is_feasible()]
+        items = [(n, sol) for n, sol in results.items() if sol.is_feasible()]
         if sort_by_value:
-            ranked = [(n, sol) for n, sol in _ranked_feasible(self.analyzer) if n in results]
-            items = ranked + [(n, sol) for n, sol in items if not sol.is_feasible()]
+            items = [(n, sol) for n, sol in _ranked_feasible(self.analyzer) if n in results]
 
         names = [name for name, _ in items]
         objectives = [sol.objective_value for _, sol in items]
@@ -193,7 +193,8 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         )
 
         fig.update_layout(
-            title="Scenario Objective Comparison",
+            title="Scenario Objective Comparison"
+            + (f" (infeasible: {', '.join(skipped)})" if skipped else ""),
             xaxis_title="Scenario",
             yaxis_title="Objective Value",
         )
@@ -295,7 +296,9 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
             results = self.analyzer.sensitivity_to_parameter(parameter_name, values)
 
         x_values = list(results.keys())
-        y_values = [sol.objective_value for sol in results.values()]
+        # no point for a value without a feasible solution (a gap in the line)
+        y_values = [sol.objective_value if sol.is_feasible() else None
+                    for sol in results.values()]
         colors = self._get_colors()
 
         fig = go.Figure(
@@ -339,6 +342,14 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
                 x=0.5,
                 y=0.5,
                 showarrow=False,
+            )
+            return self._apply_theme(fig)
+
+        if not self.analyzer.results["baseline"].is_feasible():
+            fig = go.Figure()
+            fig.add_annotation(
+                text="The baseline is infeasible; there is nothing to compare against",
+                xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
             )
             return self._apply_theme(fig)
 

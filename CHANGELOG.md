@@ -99,6 +99,8 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `by_percent` in what-if changes moves the right-hand side by a share of its absolute value (`-10` relaxed by 20 % for a `>=` row is `-12`); `tighten_constraint` on an equality lowers the right-hand side (it raised it, like `relax_constraint`).
 - A goal solve without a solution has no goal deviations: `get_goal_deviations` and `is_goal_satisfied` return `None`, and `summary()` has no goal lines.
 - `LXVariable.bounds()` raises `TypeError` for a function (per-instance bounds were documented but crashed at solve time); use an indexed constraint for per-instance limits.
+- What-if `delta_objective` / `delta_percentage` are `nan` when the baseline or the changed model has no solution, and `sensitivity_range` reports `nan` for such points (an infeasible run used to count as a change to an objective of 0).
+- `compare_scenarios()` lists scenarios best first in the model's sense with runs without a solution last, shown as `-`.
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
@@ -189,6 +191,10 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `LXRationalConverter(method="stern_brocot")` never considered the upper starting bound and could be far less accurate than Farey (2.99999999 gave 29999/10000).
 - CPLEX's documented `mip_emphasis` parameter pointed at a parameter path that does not exist and was skipped.
 - Documentation: loop examples whose lambdas read the loop variable after the loop (every row used the last item), `from_data(LXCartesianProduct(...))`, per-instance bounds, constraints with data but no `indexed_by`, `add_piecewise(slopes=)`, nonlinear-function examples that did not run or left out the auxiliary rows, solver pages that used API that does not exist (`solution.mip_gap`, `solution.variable_values`, `model.copy()`, ...), and logger names that `lumix.enable_logging()` does not reach.
+- Building rows of a constraint family over the variable's own data type took quadratic time (8,000 rows: 4.9 s); it is linear again (0.13 s).
+- The scenario waterfall used an infeasible baseline as its base, and the comparison bar and sensitivity curve drew infeasible results at 0; `compare_scenarios()` sorted largest-first whatever the objective sense and printed infeasible runs as 0.00 / -100 %.
+- `row_activity`, `LXSolutionVisualizer.plot()` and `plot_constraint_utilization()` raised on a model with a nonlinear term in a constraint (rows with nonlinear terms are now left out).
+- The golden LP files of the model tests were ignored by `.gitignore`, so the test failed on a fresh clone.
 
 ## [0.2.1] - 2026-10-14
 

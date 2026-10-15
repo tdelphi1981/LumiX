@@ -517,3 +517,108 @@ def test_final_same_type_rows_build_in_linear_time():
     build_seconds(500)                      # warm up
     small, large = build_seconds(1000), build_seconds(4000)
     assert large < 8 * small                # quadratic scaling gives ~16x
+
+
+def _cap_need_model(cap):
+    x = _var("x", keys=["a", "b"])
+    m = LXModel("m").add_variable(x).maximize(LXLinearExpression().add_term(x, lambda k: 3 if k == "a" else 2))
+    m.add_constraint(_row("cap", LXLinearExpression().add_term(x, 1), "le", cap))
+    m.add_constraint(_row("need", LXLinearExpression().add_term(x, 1), "ge", 4))
+    return m
+
+
+def _run(sa):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        sa.run_all_scenarios()
+    return sa
+
+
+def test_final_waterfall_does_not_use_an_infeasible_baseline():
+    pytest.importorskip("plotly")
+    from lumix import LXScenario, LXScenarioAnalyzer
+    from lumix.visualization import LXScenarioCompare
+    sa = LXScenarioAnalyzer(_cap_need_model(2), LXOptimizer().use_solver("ortools"))
+    sa.add_scenario(LXScenario("fixed").modify_constraint_rhs("cap", set_value=10))
+    fig = LXScenarioCompare(_run(sa)).plot_scenario_waterfall()
+    assert not [t for t in fig.data if t.type == "bar"]
+    assert any("infeasible" in a.text for a in fig.layout.annotations)
+
+
+def test_final_comparison_bar_and_sensitivity_curve_leave_out_infeasible_results():
+    pytest.importorskip("plotly")
+    from lumix import LXScenario, LXScenarioAnalyzer
+    from lumix.visualization import LXScenarioCompare
+    sa = LXScenarioAnalyzer(_cap_need_model(10), LXOptimizer().use_solver("ortools"))
+    sa.add_scenario(LXScenario("broken").modify_constraint_rhs("cap", set_value=1))
+    compare = LXScenarioCompare(_run(sa))
+    assert list(compare.plot_comparison_bar().data[0].x) == ["baseline"]
+    curve = compare.plot_sensitivity_curve("need", [1.0, 3.0])   # need 4 → 12 > cap 10
+    assert list(curve.data[0].y)[1] is None
+
+
+def test_final_compare_scenarios_follows_the_sense_and_marks_infeasible_runs():
+    from lumix import LXScenario, LXScenarioAnalyzer
+    x = _var("x")
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("demand", LXLinearExpression().add_term(x, 1), "ge", 10))
+    m.add_constraint(_row("cap", LXLinearExpression().add_term(x, 1), "le", 60))
+    m.minimize(LXLinearExpression().add_term(x, 2))
+    sa = LXScenarioAnalyzer(m, LXOptimizer().use_solver("ortools"))
+    sa.add_scenario(LXScenario("low").modify_constraint_rhs("demand", set_value=5))
+    sa.add_scenario(LXScenario("high").modify_constraint_rhs("demand", set_value=50))
+    sa.add_scenario(LXScenario("impossible").modify_constraint_rhs("cap", set_value=-1))
+    report = _run(sa).compare_scenarios()
+    rows = [line.split()[0] for line in report.splitlines()
+            if line.split() and line.split()[0] in ("low", "baseline", "high", "impossible")]
+    assert rows[:4] == ["low", "baseline", "high", "impossible"]
+    impossible = next(l for l in report.splitlines() if l.startswith("impossible"))
+    assert "-100" not in impossible and "0.00" not in impossible
+
+
+def test_final_whatif_delta_of_an_infeasible_change_is_not_a_number():
+    import math
+    from lumix import LXWhatIfAnalyzer
+    w = LXWhatIfAnalyzer(_cap_need_model(10), LXOptimizer().use_solver("ortools"))
+    result = w.decrease_constraint_rhs("cap", by=8)       # cap 2 < need 4
+    assert not result.new_solution.is_feasible()
+    assert math.isnan(result.delta_objective) and math.isnan(result.delta_percentage)
+
+
+def test_final_sensitivity_range_marks_infeasible_points():
+    import math
+    from lumix import LXWhatIfAnalyzer
+    w = LXWhatIfAnalyzer(_cap_need_model(10), LXOptimizer().use_solver("ortools"))
+    points = dict(w.sensitivity_range("cap", 2, 10, num_points=2))
+    assert math.isnan(points[2.0]) and points[10.0] == pytest.approx(30)
+
+
+def test_final_charts_of_a_model_with_a_nonlinear_constraint():
+    pytest.importorskip("plotly")
+    from lumix import LXNonLinearExpression
+    from lumix.solution import row_activity
+    from lumix.visualization import LXSolutionVisualizer
+    x = _var("x", lower=-5, upper=5)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("absle", LXNonLinearExpression().add_abs(x), "le", 3))
+    m.add_constraint(_row("lin", LXLinearExpression().add_term(x, 1), "le", 6))
+    m.maximize(LXLinearExpression().add_term(x, 2))
+    s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.objective_value == pytest.approx(6)
+    act = row_activity(m, s)
+    assert set(act) == {"lin"} and act["lin"].lhs == pytest.approx(3)
+    viz = LXSolutionVisualizer(s, m)
+    assert viz.plot() is not None and viz.plot_constraint_utilization() is not None
+
+
+def test_final_golden_models_are_tracked_by_git():
+    import shutil
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    if shutil.which("git") is None or not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+    tracked = subprocess.run(["git", "ls-files", "tests/golden"], cwd=root,
+                             capture_output=True, text=True).stdout.split()
+    on_disk = sorted(str(p.relative_to(root)) for p in (root / "tests" / "golden").glob("*.lp"))
+    assert on_disk and sorted(tracked) == on_disk

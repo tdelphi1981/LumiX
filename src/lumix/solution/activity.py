@@ -26,13 +26,25 @@ def row_activity(model: "LXModel", solution: "LXSolution") -> Dict[str, LXRowAct
     """Activity of each row of ``model`` (by row name, ``name[key]`` for indexed rows).
 
     Rows on variables the solution does not report (for example auxiliaries of a
-    linearized model) are left out; an infeasible solution gives an empty dict.
+    linearized model) and rows with nonlinear terms are left out; an infeasible
+    solution gives an empty dict.
     """
     if not solution.variables:
         return {}
     from ..goal_programming.view import goal_form
 
     form = goal_form(model)
+    from ..core.expressions import LXNonLinearExpression
+
+    if any(isinstance(c.lhs, LXNonLinearExpression) and c.lhs.nonlinear_terms
+           for c in form.constraints):
+        # rows with nonlinear terms have no linear activity; report the others
+        import copy
+
+        form = copy.copy(form)
+        form.constraints = [c for c in form.constraints
+                            if not (isinstance(c.lhs, LXNonLinearExpression)
+                                    and c.lhs.nonlinear_terms)]
     # A goal row is reported as the goal itself: without its deviations, with its sense.
     goals = {r.constraint.name: r for r in getattr(form, "_relaxed_constraints", [])}
     deviations = {v.name for r in goals.values() for v in (r.pos_deviation, r.neg_deviation)}
