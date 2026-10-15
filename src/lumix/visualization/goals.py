@@ -317,7 +317,7 @@ class LXGoalProgressChart(LXBaseVisualizer[TModel], Generic[TModel]):
 
         # Add total
         goals.append("Total")
-        total_devs.append(sum(total_devs[:-1]) if total_devs else 0)
+        total_devs.append(sum(total_devs))
 
         measure = ["relative"] * (len(goals) - 1) + ["total"]
 

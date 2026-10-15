@@ -140,9 +140,18 @@ def relax_constraint(
         # Create one Goal instance per constraint instance
         constraint_instances = constraint.get_instances()
 
+        seen: Dict[str, Any] = {}
         for instance in constraint_instances:
             # Get instance ID using the constraint's index function
             instance_id = constraint.index_func(instance)
+            goal_id = f"{constraint.name}_{instance_id}"
+            if goal_id in seen and seen[goal_id] != instance_id:
+                raise ValueError(
+                    f"Goal '{constraint.name}' has index keys {seen[goal_id]!r} and "
+                    f"{instance_id!r} that give the same deviation name '{goal_id}'; "
+                    "make the keys distinct as strings"
+                )
+            seen[goal_id] = instance_id
 
             # Get target value (use function if available, otherwise constant)
             target_val = (
@@ -153,7 +162,7 @@ def relax_constraint(
 
             # Create Goal instance for this constraint instance
             goal_instance = LXGoal(
-                id=f"{constraint.name}_{instance_id}",
+                id=goal_id,
                 constraint_name=constraint.name,
                 priority=goal_metadata.priority,
                 weight=goal_metadata.weight,

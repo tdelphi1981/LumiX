@@ -223,7 +223,8 @@ class LXCanonicalBuilder:
         """Sequential goal programming: the stage objectives in priority order (spec
         §3.1); the model's own objective is ``objective``."""
         model = self.model
-        if not getattr(model, "_goal_programming_prepared", False):
+        if not getattr(model, "_goal_programming_prepared", False) or getattr(
+                model, "_goal_stage", False):
             return ()
         from ..goal_programming.objective_builder import build_sequential_objectives
         from ..goal_programming.view import goal_mode_value

@@ -1,5 +1,6 @@
 """Objective function construction for goal programming."""
 
+import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
@@ -259,7 +260,18 @@ def extract_custom_objectives(
 
     Returns:
         List of relaxed constraints with priority 0
+
+    .. deprecated:: 0.3.0
+       Priority 0 goals are objective terms, not relaxed rows, so this always returns
+       an empty list. Use :func:`final_objective`.
     """
+    warnings.warn(
+        "extract_custom_objectives is deprecated since 0.3.0 and always returns an empty "
+        "list: priority 0 goals are objective terms, not relaxed rows; use "
+        "final_objective(model, goals)",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return [
         relaxed
         for relaxed in relaxed_constraints

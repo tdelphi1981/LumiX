@@ -186,13 +186,14 @@ def priority_to_weight(priority: int, base: float = 10.0, exponent_offset: int =
 class LXGoalStage:
     """One solve of sequential goal programming: the priority it optimized (0 for the
     final objective: the model's own objective and the priority-0 goals), the
-    optimal value of that stage and the solver status.
+    optimal value of that stage (None when the stage has no feasible solution) and the
+    solver status.
 
     .. versionadded:: 0.3.0
     """
 
     priority: int
-    objective_value: float
+    objective_value: Optional[float]
     status: str
 
 

@@ -45,6 +45,7 @@ def _stage_model(model: LXModel, bounds: List[LXConstraint], expr: Any,
                  sense: LXObjectiveSense) -> LXModel:
     """A shallow copy of ``model`` with the stage bounds added and the stage objective."""
     stage = copy.copy(model)
+    stage._goal_stage = True  # one stage of a sequential solve: no goal_stages in its canonical form
     stage.constraints = list(model.constraints) + bounds
     return stage.minimize(expr) if sense == LXObjectiveSense.MINIMIZE else stage.maximize(expr)
 
@@ -118,7 +119,8 @@ class LXGoalProgrammingSolver:
         for priority, expr in stage_exprs:
             solution = self.optimizer._solve_once(
                 _stage_model(model, bounds, expr, LXObjectiveSense.MINIMIZE), **solver_params)
-            stages.append(LXGoalStage(priority, solution.objective_value, solution.status))
+            stages.append(LXGoalStage(priority, solution.objective_value if solution.is_feasible() else None,
+                                      solution.status))
             if not solution.is_optimal():
                 logger.warning("Goal priority %d did not solve to optimality (status %s); "
                                "lower priorities are not optimized", priority, solution.status)
@@ -131,7 +133,8 @@ class LXGoalProgrammingSolver:
                 expr, sense = final
                 solution = self.optimizer._solve_once(_stage_model(model, bounds, expr, sense),
                                                       **solver_params)
-                stages.append(LXGoalStage(0, solution.objective_value, solution.status))
+                stages.append(LXGoalStage(0, solution.objective_value if solution.is_feasible() else None,
+                                          solution.status))
         solution.goal_stages = stages
         model.populate_goal_deviations(solution)
         return solution
