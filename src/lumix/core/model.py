@@ -564,6 +564,10 @@ class LXModel(Generic[TModel]):
                 "pos": pos_dev_values,
                 "neg": neg_dev_values,
             }
+            meta = relaxed.goal_metadata
+            solution._undesired_deviations[constraint_name] = frozenset(
+                side for side, bad in (("pos", meta.is_pos_undesired()),
+                                       ("neg", meta.is_neg_undesired())) if bad)
 
         return solution
 

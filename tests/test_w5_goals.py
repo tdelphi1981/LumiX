@@ -342,3 +342,108 @@ def test_canonical_goal_stages():
     assert c.goal_stages == ({pos[("gx_neg_dev", "gx")]: 1.0}, {pos[("gy_neg_dev", "gy")]: 1.0})
     assert c.objective == {}
     assert _lex_model().set_goal_mode("weighted").to_canonical().goal_stages == ()
+
+
+# --- Görev 5: goal models against brute force (spec §6) ---------------------------
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+DOMAIN = range(0, 5)
+
+
+@st.composite
+def goal_cases(draw):
+    n = draw(st.integers(2, 3))
+    coeffs = st.lists(st.integers(-2, 2), min_size=n, max_size=n)
+    hard_rows = [(draw(coeffs), draw(st.integers(0, 6))) for _ in range(draw(st.integers(0, 2)))]
+    goals = [(draw(coeffs), draw(st.sampled_from(["<=", ">=", "=="])), draw(st.integers(0, 6)),
+              draw(st.integers(1, 2)), draw(st.sampled_from([1.0, 2.0])))
+             for _ in range(draw(st.integers(1, 3)))]
+    return n, hard_rows, goals
+
+
+def _dev(lhs, sense, rhs):
+    return max(0, lhs - rhs) if sense == "<=" else max(0, rhs - lhs) if sense == ">=" \
+        else abs(lhs - rhs)
+
+
+def goal_oracle(n, hard_rows, goals):
+    points = [x for x in itertools.product(DOMAIN, repeat=n)
+              if all(sum(a * v for a, v in zip(co, x)) <= r for co, r in hard_rows)]
+    if not points:
+        return None, None
+    def stage(x, p):
+        return sum(w * _dev(sum(a * v for a, v in zip(co, x)), s, r)
+                   for co, s, r, q, w in goals if q == p)
+    weighted = min(sum(10.0 ** (7 - p) * stage(x, p) for p in (1, 2)) for x in points)
+    lex = []
+    for p in sorted({g[3] for g in goals}):
+        best = min(stage(x, p) for x in points)
+        lex.append(best)
+        points = [x for x in points if stage(x, p) <= best + 1e-9]
+    return weighted, lex
+
+
+def build_goal_model(n, hard_rows, goals, mode):
+    xs = [fam(f"x{i}", ["k"], "integer", 0, 4) for i in range(n)]
+    m = LXModel("g").add_variables(*xs).set_goal_mode(mode)
+    for r, (co, rhs) in enumerate(hard_rows):
+        m.add_constraint(hard(f"h{r}", lin(*[(x, float(a)) for x, a in zip(xs, co)]), "<=", rhs))
+    for g, (co, sense, rhs, p, w) in enumerate(goals):
+        m.add_constraint(goal(f"g{g}", lin(*[(x, float(a)) for x, a in zip(xs, co)]), sense, rhs,
+                              priority=p, weight=w))
+    return m
+
+
+@settings(max_examples=60, derandomize=True, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow])
+@given(goal_cases())
+def test_goal_models_match_brute_force(case):
+    weighted, lex = goal_oracle(*case)
+    for solver in AVAILABLE:
+        w = solve_with(solver, build_goal_model(*case, "weighted"))
+        s = solve_with(solver, build_goal_model(*case, "sequential"))
+        if weighted is None:
+            assert w.status == "infeasible" and s.status == "infeasible", (solver, case)
+            continue
+        assert w.status == "optimal" and w.objective_value == pytest.approx(weighted, rel=1e-6, abs=1e-6)
+        assert s.status == "optimal", (solver, case, s.status)
+        assert [st_.objective_value for st_ in s.goal_stages] == pytest.approx(lex, abs=1e-5), (solver, case)
+
+
+@pytest.mark.parametrize("solver", AVAILABLE)
+def test_a21_later_stages_keep_earlier_optimum_exactly(solver):
+    # A slack on the stage bound is used up by the next stage (x = 7.999999,
+    # stage 2 = 0.999988 instead of 1); the bound is the optimum itself.
+    s = solve_with(solver, _lex_model())
+    assert s.get_goal_deviations("gx")["neg"]["gx"] == pytest.approx(0, abs=1e-9)
+    xs = [fam(f"x{i}", ["k"], "integer", 0, 4) for i in range(3)]
+    m = LXModel("g").add_variables(*xs).set_goal_mode("sequential")
+    m.add_constraint(hard("h0", lin(*zip(xs, (-3.0, -3.0, -2.0))), "<=", 6))
+    m.add_constraint(hard("h1", lin(*zip(xs, (-3.0, 3.0, 1.0))), "<=", 3))
+    m.add_constraint(goal("g0", lin(*zip(xs, (-3.0, 2.0, 1.0))), "==", 6, priority=1, weight=2.0))
+    m.add_constraint(goal("g1", lin(*zip(xs, (-2.0, 2.0, 2.0))), "==", 5, priority=2))
+    s = solve_with(solver, m)
+    assert [st.objective_value for st in s.goal_stages] == pytest.approx([6.0, 1.0], abs=1e-9)
+
+
+@pytest.mark.parametrize("sense,satisfied", [(">=", True), ("<=", False), ("==", False)])
+def test_goal_satisfied_ignores_the_desired_deviation(sense, satisfied):
+    # x is forced to 5 against a target of 3: over the target meets a >= goal.
+    x = fam("x", ["k"], lower=0, upper=5)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(hard("floor", lin((x, 1.0)), ">=", 5))
+    m.add_constraint(goal("g", lin((x, 1.0)), sense, 3, priority=1))
+    s = solve_with("ortools", m)
+    assert s.get_goal_deviations("g")["pos"] == pytest.approx({"g": 2.0})
+    assert s.is_goal_satisfied("g") is satisfied
+    assert f"Goals Satisfied: {int(satisfied)}/1" in s.summary()
+
+
+def test_goal_satisfied_below_a_le_goal():
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(hard("cap", lin((x, 1.0)), "<=", 1))
+    m.add_constraint(goal("g", lin((x, 1.0)), "<=", 3, priority=1))
+    s = solve_with("ortools", m)
+    assert s.is_goal_satisfied("g") is True

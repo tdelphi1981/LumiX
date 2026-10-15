@@ -74,6 +74,9 @@ class LXSolution(Generic[TModel]):
     goal_deviations: Dict[str, Dict[str, Union[float, Dict[Any, float]]]] = field(
         default_factory=dict
     )
+    # Deviation sides each goal minimizes ("pos", "neg"), set with goal_deviations;
+    # is_goal_satisfied checks only these. .. versionadded:: 0.3.0
+    _undesired_deviations: Dict[str, frozenset] = field(default_factory=dict, repr=False)
 
     #: True when the model was linearized with a relaxation (McCormick envelopes for a
     #: product of two continuous variables): the objective value is a bound, and the
@@ -173,8 +176,14 @@ class LXSolution(Generic[TModel]):
         """
         Check if a goal is satisfied within tolerance.
 
-        A goal is satisfied if both positive and negative deviations are
-        within the specified tolerance.
+        A goal is satisfied if its undesired deviations are within the
+        specified tolerance: the shortfall of a ``>=`` goal, the excess of a
+        ``<=`` goal, both for an ``==`` goal. A goal whose senses are unknown
+        (deviations set by hand) needs both deviations within tolerance.
+
+        .. versionchanged:: 0.3.0
+           Exceeding a ``>=`` goal or staying below a ``<=`` goal no longer counts
+           as unsatisfied.
 
         Args:
             goal_name: Name of the goal constraint
@@ -191,8 +200,9 @@ class LXSolution(Generic[TModel]):
         if deviations is None:
             return None
 
-        pos_dev = deviations.get("pos", 0)
-        neg_dev = deviations.get("neg", 0)
+        undesired = self._undesired_deviations.get(goal_name, frozenset(("pos", "neg")))
+        pos_dev = deviations.get("pos", 0) if "pos" in undesired else 0
+        neg_dev = deviations.get("neg", 0) if "neg" in undesired else 0
 
         # Handle both scalar and dict values
         if isinstance(pos_dev, dict):

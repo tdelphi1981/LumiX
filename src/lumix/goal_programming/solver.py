@@ -20,8 +20,11 @@ TModel = TypeVar("TModel")
 logger = logging.getLogger(__name__)
 
 #: Relative slack of a stage bound: later stages keep each earlier stage within
-#: ``optimum + SEQUENTIAL_TOLERANCE * max(1, |optimum|)``.
-SEQUENTIAL_TOLERANCE = 1e-6
+#: ``optimum + SEQUENTIAL_TOLERANCE * max(1, |optimum|)``. The default 0 bounds each
+#: stage by its optimum; the solver's own feasibility tolerance absorbs rounding, and
+#: any slack would be used up by the later stages. Raise it only if a solver reports
+#: a later stage infeasible.
+SEQUENTIAL_TOLERANCE = 0.0
 
 
 def _stage_model(model: LXModel, bounds: List[LXConstraint], expr: Any,
