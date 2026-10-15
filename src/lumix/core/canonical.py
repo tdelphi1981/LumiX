@@ -465,9 +465,10 @@ class LXCanonicalBuilder:
 
     def quadratic_items(self, expr: LXQuadraticExpression) -> List[LXCanonicalNonlinear]:
         """The objective products of ``expr`` as product items (one per pair of
-        positions, coefficients summed) for the linearizer."""
-        return [LXCanonicalNonlinear("product", (i, j), c, {}, 0, (i, j))
-                for (i, j), c in self._quadratic(expr).items()]
+        positions, coefficients summed, each its own term) for the linearizer."""
+        # Every pair is a term of its own, so each gets its own auxiliary family.
+        return [LXCanonicalNonlinear("product", (i, j), c, {}, n, (i, j))
+                for n, ((i, j), c) in enumerate(self._quadratic(expr).items())]
 
     @staticmethod
     def _linear_part(expr: Any, where: str) -> LXLinearExpression:

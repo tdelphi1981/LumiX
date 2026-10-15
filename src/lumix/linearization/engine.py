@@ -7,6 +7,7 @@ variable with linear constraints. The user's model is not changed; every call of
 from __future__ import annotations
 
 import copy
+import logging
 import math
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,6 +27,8 @@ from .techniques.piecewise import piecewise
 
 _TAG = {"abs": "abs", "min": "min", "max": "max", "product": "prod", "piecewise": "pwl"}
 
+
+logger = logging.getLogger(__name__)
 
 _MISSING = object()
 
@@ -164,14 +167,16 @@ class LXLinearizer:
             for item, z in outputs:
                 z.add_to(new_lhs, item.coeff)
         else:
-            self._row_terms(builder, new_lhs, lhs, outputs)
+            self._row_terms(builder, new_lhs, lhs, outputs, where)
         result = copy.copy(constraint)
         result.lhs = new_lhs
         return result
 
-    def _row_terms(self, builder, new_lhs, lhs, outputs) -> None:
+    def _row_terms(self, builder, new_lhs, lhs, outputs, where) -> None:
         """Per-row contributions in an indexed constraint: a row that is an instance
-        of the term's family takes that instance's item only (spec §3 rule 3)."""
+        of the term's family takes that instance's item only, and a row of the
+        family's own data type that is not one of its instances takes nothing
+        (spec §3 rule 3, as for one-argument linear terms)."""
         owners: Dict[int, Any] = {}
         for index, term in enumerate(lhs.nonlinear_terms):
             owners[index] = next((v for v in _term_variables(term)
@@ -179,12 +184,25 @@ class LXLinearizer:
         lookups = {i: _InstanceKeys(builder.cache.instances(v), v) if v is not None else None
                    for i, v in owners.items()}
 
+        warned: set = set()
+
         def selected(term_index, item_key, row):
             keys = lookups[term_index]
             if keys is None:
                 return True
             row_key = keys.key_of(row)
-            return row_key is _MISSING or row_key == item_key
+            if row_key is not _MISSING:
+                return row_key == item_key
+            owner = owners[term_index]
+            if builder._row_outside_family(owner, row):
+                if owner.name not in warned:
+                    warned.add(owner.name)
+                    logger.warning(
+                        "Rows of %s are of the same type as variable '%s' but not among the "
+                        "instances of '%s'; its nonlinear terms contribute nothing there",
+                        where, owner.name, owner.name)
+                return False
+            return True
 
         groups: Dict[int, Tuple[Any, Dict[Any, List[Tuple[Any, float, int]]]]] = {}
         for item, z in outputs:

@@ -47,8 +47,21 @@ class LXVarRef:
         return math.isfinite(self.lower) and math.isfinite(self.upper)
 
     @property
+    def integral(self) -> bool:
+        """True for integer and binary variables."""
+        return self.var_type in (LXVarType.INTEGER, LXVarType.BINARY)
+
+    @property
     def label(self) -> str:
         return self.var.name if self.key is None else f"{self.var.name}[{self.key}]"
+
+
+def value_kind(refs: Sequence[LXVarRef], coefficients: Sequence[float] = ()) -> str:
+    """Kind of an auxiliary that holds an integer combination of ``refs``: integer when
+    every variable is integral and every coefficient a whole number (so that solvers
+    without continuous variables, such as CP-SAT, accept it), else continuous."""
+    whole = all(float(c).is_integer() for c in coefficients)
+    return "integer" if whole and all(r.integral for r in refs) else "continuous"
 
 
 def scaled_bounds(c: float, ref: LXVarRef) -> Tuple[float, float]:
@@ -75,7 +88,7 @@ class LXAuxFactory:
     def __init__(self) -> None:
         self.variables: List[LXVariable] = []
         self.constraints: List[LXConstraint] = []
-        self._families: Dict[str, Tuple[LXVariable, list, List[float]]] = {}
+        self._families: Dict[str, Tuple[LXVariable, list, List[float], str]] = {}
         self._terms = 0
 
     def tag(self, kind: str, names: Sequence[str]) -> str:
@@ -92,8 +105,10 @@ class LXAuxFactory:
             v = {"continuous": v.continuous, "integer": v.integer, "binary": v.binary}[kind]()
             v = v.indexed_by(lambda a: a.key).from_data(data)
             self.variables.append(v)
-            found = self._families[name] = (v, data, [lower, upper])
-        v, data, bounds = found
+            found = self._families[name] = (v, data, [lower, upper], kind)
+        v, data, bounds, family_kind = found
+        if family_kind != kind:
+            raise RuntimeError(f"Auxiliary family '{name}' is {family_kind}, not {kind}")
         data.append(_AuxKey(key))
         if kind == "binary":
             return LXVarRef(v, key, 0.0, 1.0, v.var_type)

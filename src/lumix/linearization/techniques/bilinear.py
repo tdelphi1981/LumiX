@@ -18,7 +18,7 @@ from ...core.enums import LXVarType
 from ...core.variables import LXVariable
 from ...nonlinear.terms import LXBilinearTerm
 from ..config import LXLinearizerConfig
-from ..refs import LXAuxFactory, LXVarRef
+from ..refs import LXAuxFactory, LXVarRef, value_kind
 
 
 class LXBilinearLinearizer:
@@ -93,7 +93,7 @@ def _binary_times(aux, tag, key, b, y, config):
             UserWarning, stacklevel=4)
         lo = lo if math.isfinite(lo) else -config.big_m_value
         hi = hi if math.isfinite(hi) else config.big_m_value
-    z = aux.var(tag, "z", key, "continuous", min(lo, 0.0), max(hi, 0.0))
+    z = aux.var(tag, "z", key, value_kind([y]), min(lo, 0.0), max(hi, 0.0))
     aux.row(tag, "ub", key, [(z, 1.0), (b, -hi)], "<=", 0.0)                   # z <= hi b
     aux.row(tag, "lb", key, [(z, 1.0), (b, -lo)], ">=", 0.0)                   # z >= lo b
     aux.row(tag, "ub_y", key, [(z, 1.0), (y, -1.0), (b, -lo)], "<=", -lo)      # z <= y - lo (1 - b)
@@ -120,7 +120,7 @@ def _expansion(aux, tag, key, x, y, config):
             "==", float(low))
     corners = [a * b for a in (x.lower, x.upper) for b in (y.lower, y.upper)]
     finite = all(math.isfinite(c) for c in corners)
-    z = aux.var(tag, "z", key, "continuous", min(corners) if finite else -math.inf,
+    z = aux.var(tag, "z", key, value_kind([y]), min(corners) if finite else -math.inf,
                 max(corners) if finite else math.inf)
     terms = [(z, 1.0), (y, -float(low))]
     for k, d in enumerate(digits):

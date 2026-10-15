@@ -670,7 +670,9 @@ def build_nonlinear(n, kinds, terms, linear, rows, nl_row, sense):
 @given(nonlinear_cases())
 def test_linearized_models_match_brute_force(case):
     expected = nonlinear_oracle(*case)
-    for solver in AVAILABLE:
+    # CP-SAT has no continuous variables: piecewise terms (continuous weights) need a MIP.
+    integral = not any(t[0] in ("piecewise", "fpwl") for t in case[2])
+    for solver in AVAILABLE + (["cpsat"] if integral else []):
         s = LXOptimizer().use_solver(solver).enable_linearization().solve(build_nonlinear(*case))
         if expected is None:
             assert s.status == "infeasible", (solver, case)
@@ -678,3 +680,53 @@ def test_linearized_models_match_brute_force(case):
             assert s.status == "optimal", (solver, case, s.status)
             assert s.objective_value == pytest.approx(expected, abs=1e-6), (solver, case)
             assert not s.relaxation
+
+
+# --- Final review fixes ------------------------------------------------------------
+@pytest.mark.parametrize("solver", [s for s in AVAILABLE if s in ("ortools", "glpk")])
+@pytest.mark.parametrize("sense,order", [("max", "and_first"), ("min", "bigm_first")])
+def test_final_quadratic_pairs_get_their_own_auxiliaries(solver, sense, order):
+    x, y, b = fam("x", ["k"], "binary"), fam("y", ["k"], "binary"), fam("b", ["k"], "binary")
+    w = fam("w", ["k"], lower=-10, upper=10)
+    q = LXQuadraticExpression()
+    pairs = [(x, y, -1.0), (b, w, 1.0)] if order == "and_first" else [(b, w, 1.0), (x, y, 1.0)]
+    for u, v, c in pairs:
+        q.add_quadratic(u, v, c)
+    m = model([x, y, b, w], [], sense, q)
+    s = LXOptimizer().use_solver(solver).enable_linearization().solve(m)
+    cand = [sum(c * {"x": xv, "y": yv, "b": bv, "w": wv}[u.name]
+                * {"x": xv, "y": yv, "b": bv, "w": wv}[v.name] for u, v, c in pairs)
+            for xv, yv, bv in itertools.product((0, 1), repeat=3) for wv in (-10, 10)]
+    assert s.objective_value == pytest.approx(max(cand) if sense == "max" else min(cand))
+
+
+@dataclass(frozen=True)
+class PA:
+    id: str
+    cap: float
+    active: bool
+
+
+def test_final_row_of_the_family_type_outside_the_family_gets_nothing():
+    ps = [PA("a", 3.0, True), PA("b", 5.0, True), PA("c", 1.0, False)]
+    x = LXVariable[PA, float]("x").continuous().bounds(lower=-10, upper=10).indexed_by(
+        lambda p: p.id).from_data([p for p in ps if p.active])
+    row = (LXConstraint[PA]("cap").expression(LXNonLinearExpression().add_abs(x)).le()
+           .rhs(lambda p: p.cap).indexed_by(lambda p: p.id).from_data(ps))
+    lm, s = solve_lin(model([x], [row], "max", lin((x, 1))))
+    assert s.objective_value == pytest.approx(8)                 # like the linear x <= cap
+    (c,) = [r for r in lm.to_canonical().rows if r.name == "cap[c]"]
+    assert c.coeffs == {}
+
+
+@pytest.mark.parametrize("build,sense,expected", [
+    (lambda x: LXNonLinearExpression().add_abs(x), "max", 4),
+    (lambda x: LXNonLinearExpression().add_abs(x), "min", 0),
+    (lambda x: LXNonLinearExpression().add_max(x, x, coefficients=[1.0, -1.0]), "max", 4),
+    (lambda x: LXNonLinearExpression().add_product(x, x), "max", 16),
+    (lambda x: LXQuadraticExpression().add_squared(x, 1.0), "max", 16)])
+def test_final_integer_terms_linearize_for_cpsat(build, sense, expected):
+    x = fam("x", ["k"], "integer", -4, 3)
+    s = LXOptimizer().use_solver("cpsat").enable_linearization().solve(
+        model([x], [], sense, build(x)))
+    assert s.status == "optimal" and s.objective_value == pytest.approx(expected)

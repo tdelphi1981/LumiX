@@ -469,6 +469,12 @@ the rules of :doc:`bilinear`: products with a binary or an integer factor are ex
 products of two continuous variables use McCormick envelopes and are a flagged
 relaxation.
 
+CP-SAT has no continuous variables. The auxiliary variables of ``abs``, ``min``,
+``max`` and of products are integer when every variable they combine is integer or
+binary (and the coefficients are whole numbers), so these terms work on CP-SAT;
+piecewise terms and McCormick envelopes use continuous auxiliaries and need a MIP
+solver (OR-Tools SCIP, GLPK, Gurobi, CPLEX).
+
 .. versionchanged:: 0.3.0
    Quadratic objectives on variable families, with integer factors, or with two
    continuous factors are linearized on solvers without quadratic support. Before
