@@ -196,3 +196,65 @@ def test_solvers_still_require_linearization(solver):
     m = LXModel("m").add_variable(x).minimize(LXNonLinearExpression().add_abs(x))
     with pytest.raises(ValueError, match="enable_linearization"):
         solve_with(solver, m)
+
+
+# --- Görev 3: item-based linearizer (A15, A16, A17 name collisions) ----------------
+def test_a15_repeated_solves_do_not_drift_or_change_the_model():
+    a, b = fam("a", ["k"], lower=0, upper=10), fam("b", ["k"], lower=0, upper=10)
+    e = LXNonLinearExpression().add_min(a, b).add_linear(lin((a, 1.0)))
+    e.constant = 5.0
+    m = model([a, b], [cons("cap", lin((a, 1), (b, 1)), "<=", 8)], "max", e)
+    snapshot = (dict(e.linear_terms.terms), e.linear_terms.constant, e.constant,
+                list(e.nonlinear_terms))
+    opt = LXOptimizer().use_solver("ortools").enable_linearization()
+    assert [opt.solve(m).objective_value for _ in range(3)] == pytest.approx([13, 13, 13])
+    assert (dict(e.linear_terms.terms), e.linear_terms.constant, e.constant,
+            list(e.nonlinear_terms)) == snapshot
+
+
+def test_a15_linearize_model_twice_gives_the_same_model():
+    x = fam("x", ["p", "q"], lower=-4, upper=4)
+    m = model([x], [], "min", LXNonLinearExpression().add_abs(x))
+    lz = LXLinearizer(m, ORTOOLS_CAPABILITIES)
+    first, second = lz.linearize_model(), lz.linearize_model()
+    assert [v.name for v in first.variables] == [v.name for v in second.variables]
+    assert [c.name for c in first.constraints] == [c.name for c in second.constraints]
+    assert len(lz.auxiliary_vars) == len(first.variables) - 1
+
+
+def test_a16_abs_on_a_family_is_a_sum_over_instances():
+    x = fam("x", ["p", "q"], lower=-10, upper=10)
+    cs = [cons("xp", LXLinearExpression().add_term(x, 1.0, keys=["p"]), ">=", 3),
+          cons("xq", LXLinearExpression().add_term(x, 1.0, keys=["q"]), "<=", -3)]
+    _, s = solve_lin(model([x], cs, "min", LXNonLinearExpression().add_abs(x)))
+    assert s.objective_value == pytest.approx(6)
+
+
+def test_a16_piecewise_on_a_family():
+    x = fam("x", ["p", "q"], lower=0, upper=6)
+    cs = [cons("xp", LXLinearExpression().add_term(x, 1.0, keys=["p"]), "==", 1),
+          cons("xq", LXLinearExpression().add_term(x, 1.0, keys=["q"]), "==", 5)]
+    e = LXNonLinearExpression().add_piecewise(x, lambda t: (t - 3) ** 2, num_segments=6,
+                                              adaptive=False)
+    _, s = solve_lin(model([x], cs, "min", e))
+    assert s.status == "optimal" and s.objective_value == pytest.approx(8)
+
+
+def test_a16_aux_values_are_reported_per_instance():
+    x = fam("x", ["p", "q"], lower=-10, upper=10)
+    cs = [cons("xp", LXLinearExpression().add_term(x, 1.0, keys=["p"]), "==", 3),
+          cons("xq", LXLinearExpression().add_term(x, 1.0, keys=["q"]), "==", -4)]
+    lm, s = solve_lin(model([x], cs, "min", LXNonLinearExpression().add_abs(x)))
+    (z,) = [v.name for v in lm.variables if v.name.startswith("aux_abs_x_")]
+    assert s.variables[z] == pytest.approx({"p": 3.0, "q": 4.0})
+
+
+def test_a17_two_terms_on_the_same_variables_do_not_collide():
+    a, b = fam("a", ["k"], lower=0, upper=10), fam("b", ["k"], lower=0, upper=10)
+    e = LXNonLinearExpression().add_min(a, b).add_min(a, b, coefficients=[3.0, 1.0])
+    lm, s = solve_lin(model([a, b], [cons("fa", lin((a, 1)), "==", 2),
+                                     cons("fb", lin((b, 1)), "==", 6)], "max", e))
+    assert s.objective_value == pytest.approx(8)
+    names = [v.name for v in lm.variables]
+    rows = [c.name for c in lm.constraints]
+    assert len(set(names)) == len(names) and len(set(rows)) == len(rows)

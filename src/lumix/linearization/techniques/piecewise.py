@@ -15,9 +15,9 @@ from typing import Any, Callable, List, Literal, Optional, Sequence, Tuple
 import numpy as np
 
 from ...core.constraints import LXConstraint
-from ...core.expressions import LXLinearExpression
 from ...core.variables import LXVariable
 from ..config import LXLinearizerConfig
+from ..refs import LXAuxFactory, LXVarRef
 
 
 def adaptive_breakpoints(func: Callable[[float], float], x_min: float, x_max: float,
@@ -97,12 +97,8 @@ def piecewise_points(
 
 
 class LXPiecewiseLinearizer:
-    """
-    Piecewise-linear approximation for arbitrary nonlinear functions.
-
-    Supports multiple formulation methods and adaptive breakpoint generation
-    for improved approximation accuracy.
-    """
+    """Piecewise-linear approximation of a function of one variable (public API;
+    the linearization engine uses :func:`piecewise` per instance)."""
 
     def __init__(self, config: LXLinearizerConfig):
         """
@@ -112,9 +108,9 @@ class LXPiecewiseLinearizer:
             config: Linearization configuration
         """
         self.config = config
-        self.auxiliary_vars: List[LXVariable] = []
-        self.auxiliary_constraints: List[LXConstraint] = []
-        self._aux_counter = 0
+        self._aux = LXAuxFactory()
+        self.auxiliary_vars: List[LXVariable] = self._aux.variables
+        self.auxiliary_constraints: List[LXConstraint] = self._aux.constraints
 
     def approximate_function(
         self,
@@ -146,6 +142,9 @@ class LXPiecewiseLinearizer:
             breakpoints: Explicit, strictly increasing breakpoints; replaces
                 ``num_segments``, ``adaptive``, ``x_min`` and ``x_max``
 
+        ``var`` must be a single variable (a scalar or a family with one instance);
+        terms in an ``LXNonLinearExpression`` apply to every instance of a family.
+
         Returns:
             Output variable representing f(var)
 
@@ -162,217 +161,92 @@ class LXPiecewiseLinearizer:
                 num_segments=50
             )
         """
-        method = method or self.config.pwl_method
-        breakpoints, values = piecewise_points(
-            func, var.lower_bound, var.upper_bound, self.config, name=var.name,
+        x = LXVarRef.single(var, "approximate_function")
+        points, values = piecewise_points(
+            func, None if math.isinf(x.lower) else x.lower,
+            None if math.isinf(x.upper) else x.upper, self.config, name=var.name,
             num_segments=num_segments, x_min=x_min, x_max=x_max, adaptive=adaptive,
             breakpoints=breakpoints)
-
-        # One tag per term keeps auxiliary names unique when a variable has
-        # several piecewise terms.
-        tag = f"{var.name}_{self._aux_counter}"
-        self._aux_counter += 1
-
-        # Apply appropriate formulation
-        if method == "sos2":
-            return self._sos2_formulation(var, breakpoints, values, tag)
-        elif method == "incremental":
-            return self._incremental_formulation(var, breakpoints, values, tag)
-        elif method == "logarithmic":
-            return self._logarithmic_formulation(var, breakpoints, values, tag)
-        else:
-            raise ValueError(f"Unknown piecewise-linear method: {method}")
-
-    def _scalar(self, name: str, kind: str, lower: Optional[float] = None,
-                upper: Optional[float] = None) -> LXVariable:
-        """Create and register a single-instance auxiliary variable."""
-        var = LXVariable[str, float](name)
-        var = var.binary() if kind == "binary" else var.continuous().bounds(lower=lower, upper=upper)
-        var = var.indexed_by(lambda x: x).from_data([name])
-        self.auxiliary_vars.append(var)
-        return var
-
-    def _add(self, name: str, expr: LXLinearExpression, sense: str, rhs: float) -> None:
-        constraint = LXConstraint(name).expression(expr)
-        constraint = {"<=": constraint.le, ">=": constraint.ge, "==": constraint.eq}[sense]()
-        self.auxiliary_constraints.append(constraint.rhs(rhs))
-
-    def _lambda_model(
-        self, var: LXVariable, breakpoints: List[float], values: List[float], tag: str
-    ) -> Tuple[List[LXVariable], LXVariable]:
-        """
-        Convex-combination core shared by the SOS2 and logarithmic formulations.
-
-        Creates λ[i] ∈ [0, 1] per breakpoint and the output y with
-        sum(λ) = 1, x = sum(λ[i] * breakpoint[i]) and y = sum(λ[i] * value[i]).
-        On its own this is only the convex hull of the function; the caller
-        adds the constraints that keep at most two adjacent λ positive.
-        """
-        output_name = f"pwl_out_{tag}"
-        lambdas = [
-            self._scalar(f"lambda_{tag}_{i}", "continuous", 0, 1)
-            for i in range(len(breakpoints))
-        ]
-        output = self._scalar(output_name, "continuous", min(values), max(values))
-
-        convex_expr = LXLinearExpression()
-        for lv in lambdas:
-            convex_expr.add_term(lv, 1.0)
-        self._add(f"pwl_convex_{output_name}", convex_expr, "==", 1.0)
-
-        x_expr = LXLinearExpression().add_term(var, 1.0)
-        for i, lv in enumerate(lambdas):
-            x_expr.add_term(lv, -breakpoints[i])
-        self._add(f"pwl_x_{output_name}", x_expr, "==", 0)
-
-        y_expr = LXLinearExpression().add_term(output, 1.0)
-        for i, lv in enumerate(lambdas):
-            y_expr.add_term(lv, -values[i])
-        self._add(f"pwl_y_{output_name}", y_expr, "==", 0)
-        return lambdas, output
-
-    def _sos2_formulation(
-        self, var: LXVariable, breakpoints: List[float], values: List[float], tag: str
-    ) -> LXVariable:
-        """
-        SOS2 (Special Ordered Set type 2) formulation.
-
-        Creates λ[i] per breakpoint (see :meth:`_lambda_model`) and enforces the
-        SOS2 condition (at most two adjacent λ positive) with one binary z[s]
-        per segment: sum(z) = 1, λ[0] <= z[0], λ[i] <= z[i-1] + z[i],
-        λ[n] <= z[n-1]. No solver adapter passes SOS2 sets to the solver yet,
-        and without the condition the model is only a convex relaxation.
-
-        Args:
-            var: Input variable
-            breakpoints: Breakpoint x-coordinates
-            values: Function values at breakpoints
-            tag: Unique name fragment for the auxiliary variables
-
-        Returns:
-            Output variable representing f(var)
-        """
-        lambdas, output = self._lambda_model(var, breakpoints, values, tag)
-        segments = len(breakpoints) - 1
-        if segments == 1:
-            return output
-
-        z = [self._scalar(f"sos2_{tag}_{s}", "binary") for s in range(segments)]
-        one_expr = LXLinearExpression()
-        for zv in z:
-            one_expr.add_term(zv, 1.0)
-        self._add(f"sos2_one_{tag}", one_expr, "==", 1)
-        for i, lv in enumerate(lambdas):
-            expr = LXLinearExpression().add_term(lv, 1.0)
-            for s in (i - 1, i):
-                if 0 <= s < segments:
-                    expr.add_term(z[s], -1.0)
-            self._add(f"sos2_adj_{tag}_{i}", expr, "<=", 0)
-        return output
-
-    def _incremental_formulation(
-        self, var: LXVariable, breakpoints: List[float], values: List[float], tag: str
-    ) -> LXVariable:
-        """
-        Incremental (multiple choice) formulation.
-
-        Uses binary variables to select which segment is active.
-        More variables but can be faster for some solvers.
-
-        Args:
-            var: Input variable
-            breakpoints: Breakpoint x-coordinates
-            values: Function values at breakpoints
-            tag: Unique name fragment for the auxiliary variables
-
-        Returns:
-            Output variable representing f(var)
-        """
-        n = len(breakpoints) - 1  # Number of segments
-
-        # Binary variables for segment selection
-        segment_vars = [self._scalar(f"segment_{tag}_{i}", "binary") for i in range(n)]
-        # Delta variables (how far into each segment, normalized to [0,1])
-        delta_vars = [self._scalar(f"delta_{tag}_{i}", "continuous", 0, 1) for i in range(n)]
-        output_name = f"pwl_out_{tag}"
-        output = self._scalar(output_name, "continuous", min(values), max(values))
-
-        # Constraint: exactly one segment active
-        segment_expr = LXLinearExpression()
-        for sv in segment_vars:
-            segment_expr.add_term(sv, 1.0)
-        self._add(f"one_segment_{output_name}", segment_expr, "==", 1)
-
-        # Constraint: delta only positive if segment selected
-        for i, (sv, dv) in enumerate(zip(segment_vars, delta_vars)):
-            self._add(
-                f"delta_active_{output_name}_{i}",
-                LXLinearExpression().add_term(dv, 1.0).add_term(sv, -1.0),
-                "<=",
-                0,
-            )
-
-        # Constraint: x = sum(bp[i] * s[i] + delta[i] * width[i])
-        x_expr = LXLinearExpression().add_term(var, 1.0)
-        for i in range(n):
-            width = breakpoints[i + 1] - breakpoints[i]
-            x_expr.add_term(segment_vars[i], -breakpoints[i])
-            x_expr.add_term(delta_vars[i], -width)
-        self._add(f"pwl_x_{output_name}", x_expr, "==", 0)
-
-        # Constraint: y = sum(value[i] * s[i] + delta[i] * (val[i+1] - val[i]))
-        y_expr = LXLinearExpression().add_term(output, 1.0)
-        for i in range(n):
-            slope = values[i + 1] - values[i]
-            y_expr.add_term(segment_vars[i], -values[i])
-            y_expr.add_term(delta_vars[i], -slope)
-        self._add(f"pwl_y_{output_name}", y_expr, "==", 0)
-
-        return output
-
-    def _logarithmic_formulation(
-        self, var: LXVariable, breakpoints: List[float], values: List[float], tag: str
-    ) -> LXVariable:
-        """
-        Logarithmic formulation using Gray code (Vielma and Nemhauser, 2011).
-
-        Uses ceil(log2(segments)) binaries y[l] instead of one per segment.
-        Segment s gets the Gray code g(s) = s XOR (s >> 1); for every bit l,
-        the λ of breakpoints whose adjacent segments all have bit l set sum to
-        at most y[l], and those whose adjacent segments all have it clear sum
-        to at most 1 - y[l]. The segment count is padded to a power of two
-        with zero-width segments at the last breakpoint.
-
-        Args:
-            var: Input variable
-            breakpoints: Breakpoint x-coordinates
-            values: Function values at breakpoints
-            tag: Unique name fragment for the auxiliary variables
-
-        Returns:
-            Output variable representing f(var)
-        """
-        segments = len(breakpoints) - 1
-        bits = math.ceil(math.log2(segments)) if segments > 1 else 0
-        padded = 2 ** bits
-        breakpoints = list(breakpoints) + [breakpoints[-1]] * (padded - segments)
-        values = list(values) + [values[-1]] * (padded - segments)
-        lambdas, output = self._lambda_model(var, breakpoints, values, tag)
-
-        codes = [s ^ (s >> 1) for s in range(padded)]
-        for l in range(bits):
-            y = self._scalar(f"gray_{tag}_{l}", "binary")
-            ones = LXLinearExpression().add_term(y, -1.0)
-            zeros = LXLinearExpression().add_term(y, 1.0)
-            for j, lv in enumerate(lambdas):
-                adjacent = [codes[s] >> l & 1 for s in (j - 1, j) if 0 <= s < padded]
-                if all(adjacent):
-                    ones.add_term(lv, 1.0)
-                elif not any(adjacent):
-                    zeros.add_term(lv, 1.0)
-            self._add(f"gray_one_{tag}_{l}", ones, "<=", 0)
-            self._add(f"gray_zero_{tag}_{l}", zeros, "<=", 1)
-        return output
+        tag = self._aux.tag("pwl", [var.name])
+        return piecewise(self._aux, tag, None, x, points, values,
+                         method or self.config.pwl_method).var
 
 
-__all__ = ["LXPiecewiseLinearizer"]
+def piecewise(aux: LXAuxFactory, tag: str, key: Any, x: LXVarRef, breakpoints: Sequence[float],
+              values: Sequence[float], method: str) -> LXVarRef:
+    """``y = f(x)``, exact for the piecewise-linear function through the breakpoints."""
+    if method == "sos2":
+        return _sos2(aux, tag, key, x, list(breakpoints), list(values))
+    if method == "incremental":
+        return _incremental(aux, tag, key, x, list(breakpoints), list(values))
+    if method == "logarithmic":
+        return _logarithmic(aux, tag, key, x, list(breakpoints), list(values))
+    raise ValueError(f"Unknown piecewise-linear method: {method}")
+
+
+def _lambdas(aux, tag, key, x, bps, values):
+    """Convex-combination weights ``lam`` with ``x = sum(lam*b)``, ``y = sum(lam*v)``."""
+    lam = [aux.var(tag, f"lam{i}", key, "continuous", 0.0, 1.0) for i in range(len(bps))]
+    y = aux.var(tag, "out", key, "continuous", min(values), max(values))
+    aux.row(tag, "convex", key, [(l, 1.0) for l in lam], "==", 1.0)
+    aux.row(tag, "x", key, [(x, 1.0)] + [(l, -b) for l, b in zip(lam, bps)], "==", 0.0)
+    aux.row(tag, "y", key, [(y, 1.0)] + [(l, -v) for l, v in zip(lam, values)], "==", 0.0)
+    return lam, y
+
+
+def _sos2(aux, tag, key, x, bps, values):
+    """SOS2 by segment binaries: only the two weights of the chosen segment can be
+    nonzero."""
+    lam, y = _lambdas(aux, tag, key, x, bps, values)
+    segments = len(bps) - 1
+    if segments == 1:
+        return y
+    z = [aux.var(tag, f"sos{s}", key, "binary") for s in range(segments)]
+    aux.row(tag, "sos_one", key, [(v, 1.0) for v in z], "==", 1.0)
+    for i, l in enumerate(lam):
+        aux.row(tag, f"adj{i}", key,
+                [(l, 1.0)] + [(z[s], -1.0) for s in (i - 1, i) if 0 <= s < segments], "<=", 0.0)
+    return y
+
+
+def _incremental(aux, tag, key, x, bps, values):
+    """One binary per segment selects it; ``delta`` is the position inside it."""
+    n = len(bps) - 1
+    seg = [aux.var(tag, f"seg{i}", key, "binary") for i in range(n)]
+    delta = [aux.var(tag, f"delta{i}", key, "continuous", 0.0, 1.0) for i in range(n)]
+    y = aux.var(tag, "out", key, "continuous", min(values), max(values))
+    aux.row(tag, "one", key, [(s, 1.0) for s in seg], "==", 1.0)
+    for i in range(n):
+        aux.row(tag, f"active{i}", key, [(delta[i], 1.0), (seg[i], -1.0)], "<=", 0.0)
+    aux.row(tag, "x", key, [(x, 1.0)] + [(seg[i], -bps[i]) for i in range(n)]
+            + [(delta[i], -(bps[i + 1] - bps[i])) for i in range(n)], "==", 0.0)
+    aux.row(tag, "y", key, [(y, 1.0)] + [(seg[i], -values[i]) for i in range(n)]
+            + [(delta[i], -(values[i + 1] - values[i])) for i in range(n)], "==", 0.0)
+    return y
+
+
+def _logarithmic(aux, tag, key, x, bps, values):
+    """Gray-code encoding with ``ceil(log2(segments))`` binaries; segments are padded
+    to a power of two with zero-width copies of the last breakpoint."""
+    segments = len(bps) - 1
+    bits = math.ceil(math.log2(segments)) if segments > 1 else 0
+    padded = 2 ** bits
+    bps = bps + [bps[-1]] * (padded - segments)
+    values = values + [values[-1]] * (padded - segments)
+    lam, y = _lambdas(aux, tag, key, x, bps, values)
+    codes = [s ^ (s >> 1) for s in range(padded)]
+    for l in range(bits):
+        g = aux.var(tag, f"gray{l}", key, "binary")
+        ones, zeros = [(g, -1.0)], [(g, 1.0)]
+        for j, lv in enumerate(lam):
+            adjacent = [codes[s] >> l & 1 for s in (j - 1, j) if 0 <= s < padded]
+            if all(adjacent):
+                ones.append((lv, 1.0))
+            elif not any(adjacent):
+                zeros.append((lv, 1.0))
+        aux.row(tag, f"gray_one{l}", key, ones, "<=", 0.0)
+        aux.row(tag, f"gray_zero{l}", key, zeros, "<=", 1.0)
+    return y
+
+
+__all__ = ["LXPiecewiseLinearizer", "adaptive_breakpoints", "piecewise", "piecewise_points"]
