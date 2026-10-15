@@ -141,7 +141,11 @@ the sign with the item's coefficient to choose the cheap or the exact form:
 **Indexed constraints:** for a constraint with ``indexed_by``, ``_row_terms`` adds
 the outputs with row-dependent coefficients: a row that is an instance of the term's
 family takes only that instance's item; a row from other data takes all items (the
-narrowing rule of :doc:`canonical-model`).
+narrowing rule of :doc:`canonical-model`). The row is matched against every
+multi-instance variable family of the term, not only the first, so the result does
+not depend on the order of the arguments. A row of a family's own data type that is
+not one of its instances takes nothing, and the ``lumix.linearization.engine``
+logger reports it once per family.
 
 **Indicators** are not items: ``_indicator`` turns each
 :class:`~lumix.nonlinear.terms.LXIndicatorTerm` into Big-M rows, with M from the
@@ -174,7 +178,8 @@ LXVarRef and LXAuxFactory
   ``key`` to the family ``<tag>_<role>`` and returns its reference; ``row(tag, role,
   key, terms, sense, rhs)`` adds the constraint ``<tag>_<role>[<key>]``. An
   auxiliary family is indexed by the instance keys of its term, so the solution
-  reports ``{"p": 3.0, "q": 4.0}`` for ``aux_abs_x_1_z``.
+  reports ``{"p": 3.0, "q": 4.0}`` for ``aux_abs_x_1_z``. A term on a single variable
+  gets scalar auxiliary variables.
 
 Techniques
 ~~~~~~~~~~
@@ -327,7 +332,7 @@ Test individual linearization techniques:
 
 .. code-block:: python
 
-   def test_mccormick_envelope():
+   def test_mccormick_relaxation():
        """Test McCormick envelope for continuous × continuous."""
        config = LXLinearizerConfig()
        linearizer = LXBilinearLinearizer(config)

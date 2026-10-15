@@ -80,10 +80,18 @@ the expression's value:
 
    solution = LXOptimizer().use_solver("ortools").enable_linearization().solve(model)
 
-``add_indicator(b, condition, expr)`` is a shorthand for
-``LXIndicatorTerm(b, condition, expr)`` with the defaults ``sense="<="`` and
-``rhs=0.0`` (``b = condition ⇒ expr ≤ 0``); use ``LXIndicatorTerm`` for another
-sense or right-hand side.
+``add_indicator(binary_var, condition, linear_expr, sense="<=", rhs=0.0)`` is a
+shorthand for ``LXIndicatorTerm(binary_var, condition, linear_expr, sense, rhs)``.
+``sense`` is ``"<="``, ``">="`` or ``"=="``; any other value raises
+``ValueError``:
+
+.. code-block:: python
+
+   # b = 1  ⇒  expr >= 3
+   objective.add_indicator(b, True, expr, sense=">=", rhs=3)
+
+.. versionchanged:: 0.3.0
+   ``sense`` and ``rhs``; the row was always ``<= 0`` before.
 
 A model with indicators must be linearized before it is solved
 (``enable_linearization()`` or :class:`~lumix.linearization.engine.LXLinearizer`);

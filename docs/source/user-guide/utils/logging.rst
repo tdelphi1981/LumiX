@@ -120,20 +120,40 @@ Advanced Features
 Logging Linearization
 ~~~~~~~~~~~~~~~~~~~~~
 
-When using automatic linearization, track the transformations:
+LumiX does not log every linearized term. What it reports:
+
+- **Relaxations** raise a ``UserWarning`` (a product of two continuous variables
+  linearized with McCormick envelopes), and the solution has
+  ``solution.relaxation = True``. Exact techniques warn only when they fall back
+  to ``big_m_value`` because a bound is open.
+- **Counts** come from ``LXLinearizer.get_statistics()``: linearized items per
+  kind, one per instance of a term (``bilinear_terms``, ``piecewise_terms``, ``absolute_terms``, ``minmax_terms``,
+  ``indicator_terms``), the number of ``auxiliary_variables`` (variable
+  families: the auxiliaries of a term on an indexed family form one family) and
+  of ``auxiliary_constraints``.
+- **Rows where a nonlinear term contributes nothing** (a row of an indexed
+  constraint whose data object is of the variable's type but not one of its
+  instances) are reported as a warning on the ``lumix.linearization.engine``
+  logger, once per variable family.
+
+To write the counts into your own log, linearize explicitly and pass them to
+``log_linearization``:
 
 .. code-block:: python
 
-   logger = LXModelLogger(name="linearize", level=logging.DEBUG)
+   from lumix import LXLinearizer
+   from lumix.solvers import ORTOOLS_CAPABILITIES
 
-   # Log when linearization is applied
+   linearizer = LXLinearizer(model, ORTOOLS_CAPABILITIES)
+   linearized = linearizer.linearize_model()      # the user's model is unchanged
+   stats = linearizer.get_statistics()
+
+   logger = LXModelLogger(name="linearize")
    logger.log_linearization(
        term_type="bilinear",
-       method="McCormick",
-       aux_vars=4
+       method="auto",
+       aux_vars=stats["auxiliary_variables"],
    )
-
-   # Output: Linearized bilinear using McCormick (added 4 auxiliary variables)
 
 Logging Scenario Analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
