@@ -64,29 +64,19 @@ class LXConstraint(Generic[TModel]):
     goal_metadata: Optional["LXGoalMetadata"] = None
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+        """Copy the constraint structure; share data instances and callables.
 
-        This method enables what-if analysis on constraints using ORM data sources by:
-        1. Materializing lazy-loaded ORM data before copying
-        2. Detaching ORM objects from database sessions
-        3. Safely copying lambda functions (index_func, rhs_func, etc.)
-        4. Deep copying constraint expressions and goal metadata
+        Data instances (plain objects and ORM objects alike) and callables are shared
+        with the original, so closures and identity checks behave the same in the copy.
+        An ORM-backed source is materialized once (its query runs at copy time).
 
         Args:
             memo: Dictionary for tracking circular references during deepcopy
 
-        Returns:
-            Deep copy of this constraint with all ORM dependencies resolved
-
-        Note:
-            After copying, the new constraint will have _session=None and all data
-            stored in _data as detached objects safe for pickling.
+        .. versionchanged:: 0.3.0
+           Instances are shared instead of deep-copied/detached (catalog A23, B15).
         """
         from copy import deepcopy
-        from ..utils.copy_utils import (
-            materialize_and_detach_list,
-            copy_function_detaching_closure
-        )
 
         # Create new instance without calling __init__
         cls = self.__class__
@@ -99,17 +89,9 @@ class LXConstraint(Generic[TModel]):
         result.rhs_value = self.rhs_value
         result.model_type = self.model_type
 
-        # Copy callable attributes - may have closures capturing ORM objects
-        result.index_func = (
-            copy_function_detaching_closure(self.index_func, memo)
-            if self.index_func is not None
-            else None
-        )
-        result.rhs_func = (
-            copy_function_detaching_closure(self.rhs_func, memo)
-            if self.rhs_func is not None
-            else None
-        )
+        # Callables are shared, not copied: closures keep seeing the user's own objects.
+        result.index_func = self.index_func
+        result.rhs_func = self.rhs_func
 
         # Deep copy LHS expression (may contain variables and terms)
         result.lhs = (
@@ -120,10 +102,10 @@ class LXConstraint(Generic[TModel]):
 
         # Handle data sources
         if self._session is not None:
-            # Materialize ORM data before copying
+            # Materialize the ORM query once; the instances themselves are shared
             try:
                 instances = self.get_instances()
-                result._data = materialize_and_detach_list(instances, memo)
+                result._data = list(instances)
             except Exception as e:
                 import warnings
                 warnings.warn(
@@ -134,8 +116,8 @@ class LXConstraint(Generic[TModel]):
                 result._data = []
             result._session = None
         elif self._data is not None:
-            # Already have data - just detach and copy
-            result._data = materialize_and_detach_list(self._data, memo)
+            # Data instances are shared (never copied or detached)
+            result._data = list(self._data)
             result._session = None
         else:
             result._data = None

@@ -9,7 +9,10 @@ provides specialized functions to handle:
 - Materializing lazy-loaded data before copying
 - Safely copying lambda functions that capture ORM objects
 
-The main use case is enabling what-if analysis on models built with ORM data sources.
+.. versionchanged:: 0.3.0
+   ``deepcopy(model)`` (what-if and scenario analysis) no longer uses these helpers: copies
+   share data instances with the original. Detaching is used when a model is pickled.
+   ``detach_orm_object`` now loads unloaded relationships while a session is available.
 
 Functions:
     detach_orm_object: Detach single ORM object from session
@@ -31,7 +34,7 @@ Examples:
         safe_func = copy_function_detaching_closure(profit_func, {})
 
 See Also:
-    - :class:`lumix.analysis.whatif.LXWhatIfAnalyzer`: Uses these utilities
+    - ``LXVariable.__getstate__`` and friends: use these utilities when pickling
     - Tutorial Step 7: Production Planning with What-If Analysis
 """
 
@@ -120,7 +123,7 @@ def _detach_sqlalchemy_object(obj: Any) -> Any:
     Strategy:
     1. Create new instance of same class (plain object, not ORM-instrumented)
     2. Copy all column attribute values as regular Python attributes
-    3. Optionally copy relationship attributes if they're already loaded
+    3. Copy relationship attributes; unloaded ones are loaded while a session exists
 
     Args:
         obj: SQLAlchemy model instance
@@ -151,19 +154,25 @@ def _detach_sqlalchemy_object(obj: Any) -> Any:
                 # Skip attributes that can't be accessed
                 pass
 
-        # Also copy relationship attributes if they're loaded (not lazy)
-        # This preserves any eagerly-loaded relationships
+        # Relationships: copy loaded ones; load unloaded (lazy) ones while the instance
+        # still has a session, so the detached copy does not fail on first access (B15).
         for rel_attr in state.mapper.relationships:
-            try:
-                # Check if the relationship is already loaded
-                if rel_attr.key in state.dict:
-                    value = getattr(obj, rel_attr.key)
-                    # For relationships, just copy the reference (don't deep copy here)
-                    # The caller will handle deep copying if needed
-                    new_obj.__dict__[rel_attr.key] = value
-            except Exception:
-                # Skip relationships that aren't loaded or can't be accessed
-                pass
+            key = rel_attr.key
+            if key in state.dict:
+                new_obj.__dict__[key] = state.dict[key]
+            elif state.session is not None:
+                try:
+                    new_obj.__dict__[key] = getattr(obj, key)
+                except Exception as exc:  # noqa: BLE001 - report, keep going
+                    warnings.warn(
+                        f"Could not load relationship '{key}' of {cls.__name__} while "
+                        f"detaching: {exc}. Accessing it on the detached copy will fail.",
+                        UserWarning, stacklevel=3)
+            else:
+                warnings.warn(
+                    f"Relationship '{key}' of {cls.__name__} is not loaded and the instance "
+                    "has no session; accessing it on the detached copy will fail.",
+                    UserWarning, stacklevel=3)
 
         return new_obj
 

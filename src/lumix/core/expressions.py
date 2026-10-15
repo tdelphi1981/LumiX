@@ -245,21 +245,19 @@ class LXLinearExpression(Generic[TModel]):
         default_factory=list)
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that handles variables and lambda functions.
+        """Copy the expression structure; share data instances and callables.
 
-        This method enables what-if analysis on expressions by:
-        1. Deep copying all variables in the expression
-        2. Safely copying coefficient and filter lambda functions
-        3. Preserving the expression structure
+        Data instances (plain objects and ORM objects alike) and callables are shared
+        with the original, so closures and identity checks behave the same in the copy.
+        An ORM-backed source is materialized once (its query runs at copy time).
 
         Args:
             memo: Dictionary for tracking circular references during deepcopy
 
-        Returns:
-            Deep copy of this expression with all dependencies resolved
+        .. versionchanged:: 0.3.0
+           Instances are shared instead of deep-copied/detached (catalog A23, B15).
         """
         from copy import deepcopy
-        from ..utils.copy_utils import copy_function_detaching_closure
 
         # Create new instance
         cls = self.__class__
@@ -273,23 +271,13 @@ class LXLinearExpression(Generic[TModel]):
         # Each term: (LXVariable, coeff_func, where_func)
         result.terms = {}
         for var_name, (var, coeff_func, where_func) in self.terms.items():
-            copied_var = deepcopy(var, memo)
-            copied_coeff = copy_function_detaching_closure(coeff_func, memo)
-            copied_where = copy_function_detaching_closure(where_func, memo)
-            result.terms[var_name] = (copied_var, copied_coeff, copied_where)
+            result.terms[var_name] = (deepcopy(var, memo), coeff_func, where_func)
 
         # Deep copy multi-terms list
         # Each multi-term: (LXVariable, coeff_func, where_func)
         result._multi_terms = []
         for var, coeff_func, where_func in self._multi_terms:
-            copied_var = deepcopy(var, memo)
-            copied_coeff = copy_function_detaching_closure(coeff_func, memo)
-            copied_where = (
-                copy_function_detaching_closure(where_func, memo)
-                if where_func is not None
-                else None
-            )
-            result._multi_terms.append((copied_var, copied_coeff, copied_where))
+            result._multi_terms.append((deepcopy(var, memo), coeff_func, where_func))
 
         return result
 

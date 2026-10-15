@@ -152,20 +152,19 @@ class LXCartesianProduct(Generic[TModel1, TModel2]):
         self._cross_filter: Optional[Callable] = None
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that handles dimensions and cross-filter functions.
+        """Copy the cartesian product structure; share data instances and callables.
 
-        This method enables what-if analysis on cartesian products by:
-        1. Deep copying all index dimensions (with ORM data materialization)
-        2. Safely copying the cross-filter lambda function
+        Data instances (plain objects and ORM objects alike) and callables are shared
+        with the original, so closures and identity checks behave the same in the copy.
+        An ORM-backed source is materialized once (its query runs at copy time).
 
         Args:
             memo: Dictionary for tracking circular references during deepcopy
 
-        Returns:
-            Deep copy of this cartesian product with all dependencies resolved
+        .. versionchanged:: 0.3.0
+           Instances are shared instead of deep-copied/detached (catalog A23, B15).
         """
         from copy import deepcopy
-        from ..utils.copy_utils import copy_function_detaching_closure
 
         # Create new instance without calling __init__
         cls = self.__class__
@@ -176,12 +175,8 @@ class LXCartesianProduct(Generic[TModel1, TModel2]):
         # Each dimension's __deepcopy__ will materialize and detach ORM data
         result.dimensions = [deepcopy(dim, memo) for dim in self.dimensions]
 
-        # Copy cross-filter function (may have closures capturing ORM objects)
-        result._cross_filter = (
-            copy_function_detaching_closure(self._cross_filter, memo)
-            if self._cross_filter is not None
-            else None
-        )
+        # Callables are shared, not copied: closures keep seeing the user's own objects.
+        result._cross_filter = self._cross_filter
 
         return result
 

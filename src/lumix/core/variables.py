@@ -95,29 +95,19 @@ class LXVariable(Generic[TModel, TValue]):
     _multi_filter: Optional[Callable[..., bool]] = None
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+        """Copy the family structure; share data instances and callables.
 
-        This method enables what-if analysis on variables using ORM data sources by:
-        1. Materializing lazy-loaded ORM data before copying
-        2. Detaching ORM objects from database sessions
-        3. Safely copying lambda functions (index_func, cost_func, filters, etc.)
-        4. Deep copying cartesian products and join configurations
+        Data instances (plain objects and ORM objects alike) and callables are shared
+        with the original, so closures and identity checks behave the same in the copy.
+        An ORM-backed source is materialized once (its query runs at copy time).
 
         Args:
             memo: Dictionary for tracking circular references during deepcopy
 
-        Returns:
-            Deep copy of this variable with all ORM dependencies resolved
-
-        Note:
-            After copying, the new variable will have _session=None and all data
-            stored in _data as detached objects safe for pickling.
+        .. versionchanged:: 0.3.0
+           Instances are shared instead of deep-copied/detached (catalog A23, B15).
         """
         from copy import deepcopy
-        from ..utils.copy_utils import (
-            materialize_and_detach_list,
-            copy_function_detaching_closure
-        )
 
         # Create new instance without calling __init__
         cls = self.__class__
@@ -131,39 +121,19 @@ class LXVariable(Generic[TModel, TValue]):
         result.upper_bound = self.upper_bound
         result.model_type = self.model_type
 
-        # Copy callable attributes - may have closures capturing ORM objects
-        result.index_func = (
-            copy_function_detaching_closure(self.index_func, memo)
-            if self.index_func is not None
-            else None
-        )
-        result.cost_func = (
-            copy_function_detaching_closure(self.cost_func, memo)
-            if self.cost_func is not None
-            else None
-        )
-        result._filter = (
-            copy_function_detaching_closure(self._filter, memo)
-            if self._filter is not None
-            else None
-        )
-        result._multi_filter = (
-            copy_function_detaching_closure(self._multi_filter, memo)
-            if self._multi_filter is not None
-            else None
-        )
-        result._multi_cost_func = (
-            copy_function_detaching_closure(self._multi_cost_func, memo)
-            if self._multi_cost_func is not None
-            else None
-        )
+        # Callables are shared, not copied: closures keep seeing the user's own objects.
+        result.index_func = self.index_func
+        result.cost_func = self.cost_func
+        result._filter = self._filter
+        result._multi_filter = self._multi_filter
+        result._multi_cost_func = self._multi_cost_func
 
         # Handle data sources
         if self._session is not None:
-            # Materialize ORM data before copying
+            # Materialize the ORM query once; the instances themselves are shared
             try:
                 instances = self.get_instances()
-                result._data = materialize_and_detach_list(instances, memo)
+                result._data = list(instances)
             except Exception as e:
                 import warnings
                 warnings.warn(
@@ -174,8 +144,8 @@ class LXVariable(Generic[TModel, TValue]):
                 result._data = []
             result._session = None
         elif self._data is not None:
-            # Already have data - just detach and copy
-            result._data = materialize_and_detach_list(self._data, memo)
+            # Data instances are shared (never copied or detached)
+            result._data = list(self._data)
             result._session = None
         else:
             result._data = None
@@ -193,12 +163,8 @@ class LXVariable(Generic[TModel, TValue]):
             result._join_config = {}
             result._join_config['primary'] = self._join_config['primary']
             result._join_config['related'] = self._join_config['related']
-            result._join_config['join_func'] = copy_function_detaching_closure(
-                self._join_config['join_func'], memo
-            )
-            result._join_config['key_func'] = copy_function_detaching_closure(
-                self._join_config['key_func'], memo
-            )
+            result._join_config['join_func'] = self._join_config['join_func']
+            result._join_config['key_func'] = self._join_config['key_func']
         else:
             result._join_config = None
 
