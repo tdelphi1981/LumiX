@@ -13,6 +13,8 @@ from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
+from ..core.enums import LXObjectiveSense
+from ._rhs import set_rhs, shift_rhs
 
 if TYPE_CHECKING:
     from ..visualization.scenario import LXScenarioCompare
@@ -47,7 +49,7 @@ class LXScenarioModification:
 
     target_type: str  # "constraint", "variable", "objective"
     target_name: str  # Name of the constraint/variable
-    modification_type: str  # "rhs_set", "rhs_add", "rhs_multiply", "bound_set", "coeff_multiply"
+    modification_type: str  # "rhs_set", "rhs_add", "rhs_multiply" (constraint); "bound_lower", "bound_upper" (variable)
     value: Union[float, Callable[[Any], float]]
     description: str = ""
 
@@ -135,6 +137,11 @@ class LXScenario(Generic[TModel]):
 
             # Increase capacity by 50%
             scenario.modify_constraint_rhs("capacity", multiply=1.5)
+
+        .. versionchanged:: 0.3.0
+           ``add``/``multiply`` apply row by row to constraints whose RHS is a function
+           (``.rhs(lambda row: ...)``); they used to be ignored (catalog A24).
+           ``set_value`` sets every row to the same value.
         """
         if set_value is not None:
             mod = LXScenarioModification(
@@ -450,23 +457,29 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         return "\n".join(lines)
 
-    def get_best_scenario(self, maximize: bool = True) -> Optional[str]:
+    def get_best_scenario(self, maximize: Optional[bool] = None) -> Optional[str]:
         """
-        Get name of best scenario by objective value.
+        Get the name of the best feasible scenario by objective value.
 
         Args:
-            maximize: True if objective is maximization, False for minimization
+            maximize: True to pick the largest objective, False the smallest; None (the
+                default) follows the base model's objective sense.
 
         Returns:
-            Name of best scenario, or None if no results
-        """
-        if not self.results:
-            return None
+            Name of the best scenario whose solution is feasible, or None if no result
+            is feasible.
 
-        if maximize:
-            return max(self.results.items(), key=lambda x: x[1].objective_value)[0]
-        else:
-            return min(self.results.items(), key=lambda x: x[1].objective_value)[0]
+        .. versionchanged:: 0.3.0
+           Infeasible results are skipped, and the default follows the model's sense
+           (it used to maximize unless told otherwise).
+        """
+        feasible = {n: s for n, s in self.results.items() if s.is_feasible()}
+        if not feasible:
+            return None
+        if maximize is None:
+            maximize = self.base_model.objective_sense == LXObjectiveSense.MAXIMIZE
+        pick = max if maximize else min
+        return pick(feasible.items(), key=lambda item: item[1].objective_value)[0]
 
     def sensitivity_to_parameter(
         self,
@@ -538,9 +551,11 @@ class LXScenarioAnalyzer(Generic[TModel]):
                 self._apply_constraint_modification(modified_model, mod)
             elif mod.target_type == "variable":
                 self._apply_variable_modification(modified_model, mod)
-            elif mod.target_type == "objective":
-                # Future: objective modifications
-                pass
+            else:
+                raise ValueError(
+                    f"Scenario '{scenario.name}': unsupported target type "
+                    f"'{mod.target_type}' (supported: constraint, variable; objective "
+                    "modifications are not implemented)")
 
         return modified_model
 
@@ -574,13 +589,15 @@ class LXScenarioAnalyzer(Generic[TModel]):
             raise ValueError(f"Constraint '{mod.target_name}' not found in model")
 
         if mod.modification_type == "rhs_set":
-            constraint.rhs_value = float(mod.value)  # type: ignore
+            set_rhs(constraint, mod.value)
         elif mod.modification_type == "rhs_add":
-            if constraint.rhs_value is not None:
-                constraint.rhs_value += float(mod.value)  # type: ignore
+            shift_rhs(constraint, add=float(mod.value))  # type: ignore[arg-type]
         elif mod.modification_type == "rhs_multiply":
-            if constraint.rhs_value is not None:
-                constraint.rhs_value *= float(mod.value)  # type: ignore
+            shift_rhs(constraint, multiply=float(mod.value))  # type: ignore[arg-type]
+        else:
+            raise ValueError(
+                f"Unsupported constraint modification type '{mod.modification_type}' "
+                "(supported: rhs_set, rhs_add, rhs_multiply)")
 
     def _apply_variable_modification(
         self,
@@ -599,9 +616,13 @@ class LXScenarioAnalyzer(Generic[TModel]):
             raise ValueError(f"Variable '{mod.target_name}' not found in model")
 
         if mod.modification_type == "bound_lower":
-            variable.lower_bound = float(mod.value)  # type: ignore
+            variable.lower_bound = float(mod.value)  # type: ignore[arg-type]
         elif mod.modification_type == "bound_upper":
-            variable.upper_bound = float(mod.value)  # type: ignore
+            variable.upper_bound = float(mod.value)  # type: ignore[arg-type]
+        else:
+            raise ValueError(
+                f"Unsupported variable modification type '{mod.modification_type}' "
+                "(supported: bound_lower, bound_upper)")
 
     def visualize(self) -> "LXScenarioCompare[TModel]":
         """

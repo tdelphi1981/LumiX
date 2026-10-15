@@ -165,3 +165,81 @@ def test_b15_detach_loads_unloaded_relationship():
         d = detach_orm_object(p)
     assert d.category.factor == 2.0
     s.close()
+
+
+# ---- Task 2: A24 / get_best_scenario ----------------------------------------
+
+def test_a24_scenario_add_and_multiply_on_rhs_func():
+    ps = [PlainP("a", 4, 3), PlainP("b", 6, 5)]
+    sa = LXScenarioAnalyzer(capacity_model(ps, lambda p: p.profit), opt())
+    sa.add_scenario(LXScenario("double_cap").modify_constraint_rhs("cap", multiply=2.0))
+    sa.add_scenario(LXScenario("plus_cap").modify_constraint_rhs("cap", add=-3.0))
+    sa.add_scenario(LXScenario("total_up").modify_constraint_rhs("total", add=2.0))
+    r = {k: v.objective_value for k, v in sa.run_all_scenarios().items()}
+    assert r == pytest.approx({"baseline": 36.0, "double_cap": 40.0,
+                               "plus_cap": 18.0, "total_up": 42.0})
+
+
+def test_a24_modifications_compose_in_order():
+    ps = [PlainP("a", 4, 3), PlainP("b", 6, 5)]
+    sa = LXScenarioAnalyzer(capacity_model(ps, lambda p: p.profit), opt(),
+                            include_baseline=False)
+    # caps: (4*0.5 - 1, 6*0.5 - 1) = (1, 2) -> 3 + 10 = 13
+    sa.add_scenario(LXScenario("s").modify_constraint_rhs("cap", multiply=0.5)
+                    .modify_constraint_rhs("cap", add=-1.0))
+    assert sa.run_all_scenarios()["s"].objective_value == pytest.approx(13.0)
+
+
+def test_a24_rhs_value_wins_over_rhs_func():
+    from lumix.analysis._rhs import shift_rhs
+    c = LXConstraint("c").expression(LXLinearExpression()).le().rhs(5)
+    c.rhs_func = lambda i: 100.0
+    shift_rhs(c, add=1.0)
+    assert c.rhs_value == 6.0
+
+
+def test_a24_unknown_modification_type_raises():
+    from lumix import LXScenarioModification
+    ps = [PlainP("a", 4, 3), PlainP("b", 6, 5)]
+    sa = LXScenarioAnalyzer(capacity_model(ps, lambda p: p.profit), opt())
+    sa.add_scenario(LXScenario("bad").add_custom_modification(LXScenarioModification(
+        target_type="constraint", target_name="total",
+        modification_type="coeff_multiply", value=2.0)))
+    with pytest.raises(ValueError, match="coeff_multiply"):
+        sa.run_scenario("bad")
+    sa.add_scenario(LXScenario("obj").add_custom_modification(LXScenarioModification(
+        target_type="objective", target_name="x", modification_type="rhs_set", value=1)))
+    with pytest.raises(ValueError, match="objective"):
+        sa.run_scenario("obj")
+
+
+def mincost_model():
+    def var(n):
+        return LXVariable[int, float](n).continuous().bounds(lower=0) \
+            .indexed_by(lambda k: k).from_data([1])
+    x, y = var("x"), var("y")
+    m = LXModel("mincost").add_variables(x, y)
+    m.add_constraint(LXConstraint("need_x").expression(LXLinearExpression().add_term(x))
+                     .ge().rhs(5))
+    m.add_constraint(LXConstraint("need_y").expression(LXLinearExpression().add_term(y))
+                     .ge().rhs(5))
+    m.minimize(LXLinearExpression().add_term(x, 10.0).add_term(y, 1.0))
+    return m
+
+
+def test_c_get_best_scenario_skips_infeasible_and_follows_sense():
+    sa = LXScenarioAnalyzer(mincost_model(), opt())
+    sa.add_scenario(LXScenario("cheaper").modify_constraint_rhs("need_x", set_value=4))
+    sa.add_scenario(LXScenario("infeasible").modify_variable_bound("x", upper=1))
+    sa.run_all_scenarios()
+    assert sa.results["infeasible"].status == "infeasible"
+    assert sa.get_best_scenario() == "cheaper"            # sense inferred: minimize
+    assert sa.get_best_scenario(maximize=False) == "cheaper"
+    assert sa.get_best_scenario(maximize=True) == "baseline"
+
+
+def test_c_get_best_scenario_none_when_nothing_feasible():
+    sa = LXScenarioAnalyzer(mincost_model(), opt(), include_baseline=False)
+    sa.add_scenario(LXScenario("infeasible").modify_variable_bound("x", upper=1))
+    sa.run_all_scenarios()
+    assert sa.get_best_scenario() is None
