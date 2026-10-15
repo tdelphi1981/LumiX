@@ -259,23 +259,24 @@ By the end of this tutorial, you'll understand:
 - Investment ROI comparison
 - Sensitivity range analysis (profit curves)
 - Risk assessment (downside scenarios)
-- **ORM-safe model copying** for what-if analysis
-- Model detachment from database sessions
+- **Model copying with ORM data** for what-if analysis
+- Building models with a `model_factory` and a fresh session
 
 **Key LumiX features**:
 - `LXWhatIfAnalyzer` for interactive exploration
 - `increase_constraint_rhs()` / `decrease_constraint_rhs()`
-- `find_bottlenecks()` for systematic testing
+- `find_bottlenecks()` for systematic testing (positive values = relaxing helps, for
+  maximization and minimization alike)
 - `relax_constraint()` / `tighten_constraint()`
-- **Deep copy with ORM detachment** (`copy_utils` module)
-- Automatic session detachment for SQLAlchemy/Django
+- **Model copies that share data** (instances and lambdas) with the original
+- `model_factory=` for ORM models whose session may close
 
 **Files**:
 - `production_whatif.py`: What-if analysis implementation
 - `report_generator.py`: Reports with what-if visualizations
 - `README.md`: What-if analysis and ORM copying documentation
 
-**New Feature**: This step demonstrates LumiX's ORM-safe model copying strategy, which enables what-if analysis on models using SQLAlchemy or Django data sources. The `copy_utils` module automatically detaches ORM objects from database sessions during deep copy operations.
+**New Feature**: This step demonstrates what-if analysis on a model built from SQLAlchemy data. Each what-if run works on a copy of the model that copies its structure but shares the ORM instances and lambdas with the original (LumiX 0.3.0), so the session stays open while the analysis runs. When that is not possible, pass a `model_factory` that opens a fresh session and builds a new model for every run. ORM objects are detached from their session only when a model is pickled.
 
 [📖 Go to Step 7](step7_whatif_analysis/)
 

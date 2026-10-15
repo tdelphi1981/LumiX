@@ -56,7 +56,8 @@ Define scenarios with constraint modifications:
 **Key Points**:
 
 - ``.modify_constraint_rhs()`` changes right-hand side of constraints
-- ``multiply=1.30`` increases capacity by 30%
+- ``multiply=1.30`` increases capacity by 30%; it also works row by row on constraints
+  whose right-hand side is a function (``.rhs(lambda row: ...)``)
 - ``.describe()`` adds explanation for reporting
 
 Batch Scenario Execution
@@ -90,7 +91,9 @@ Compare results across scenarios:
 - Tabular comparison of objective values
 - Status for each scenario
 - Percentage change vs baseline
-- Best/worst scenario identification
+- Best/worst scenario identification: ``get_best_scenario()`` picks the best feasible
+  scenario in the model's own objective sense; ``get_best_scenario(maximize=False)`` is
+  the smallest feasible objective (the worst case for this profit-maximization model)
 
 Parameter Sensitivity
 ~~~~~~~~~~~~~~~~~~~~~
@@ -265,7 +268,7 @@ Pattern 3: Multi-Parameter Scenario
        LXScenario[Model]("complex")
        .modify_constraint_rhs("capacity_Labor", multiply=1.3)
        .modify_constraint_rhs("capacity_Machine", multiply=0.8)
-       .modify_constraint_rhs("min_production", to=150.0)
+       .modify_constraint_rhs("min_production", set_value=150.0)  # every row
        .describe("Labor expansion with machine constraints")
    )
 

@@ -67,6 +67,28 @@ A constraint is **binding** if it's satisfied as an equality at the optimal solu
 - Potential bottleneck
 - Worth investigating for improvement
 
+Rows and Instances
+~~~~~~~~~~~~~~~~~~
+
+.. versionchanged:: 0.3.0
+   Sensitivity results are reported per constraint row and per variable instance.
+   Previously an indexed constraint family reported no shadow price, and an indexed
+   variable family returned only its first instance, without a reduced cost.
+
+Shadow prices belong to individual constraint **rows** and reduced costs to individual
+variable **instances**. The analyzer names them the way the solvers do:
+
+- A scalar constraint or variable keeps its own name: ``"budget"``, ``"x"``.
+- A row of an indexed constraint family is ``f"{family}[{key}]"``, for example
+  ``"capacity[3]"``. Tuple keys appear as their ``repr``: ``"c[('a', 1)]"``.
+- An instance of an indexed variable family is named the same way, for example
+  ``"production[widget]"``.
+
+``analyze_constraint`` and ``analyze_variable`` take such a single name. Passing the name
+of an **indexed family** raises ``ValueError`` that points you to
+``analyze_constraint_family`` / ``analyze_variable_family``, which return a dictionary
+keyed by index key (``{None: ...}`` for a scalar constraint or variable).
+
 Basic Usage
 -----------
 
@@ -77,7 +99,8 @@ Creating an Analyzer
 
    from lumix.analysis import LXSensitivityAnalyzer
 
-   # After solving your model
+   # After solving your model (LP, with sensitivity enabled)
+   optimizer = LXOptimizer().use_solver("ortools").enable_sensitivity()
    solution = optimizer.solve(model)
 
    # Create analyzer
@@ -88,8 +111,11 @@ Analyzing Constraints
 
 .. code-block:: python
 
-   # Analyze a specific constraint
-   capacity_sens = analyzer.analyze_constraint("capacity")
+   # Analyze a scalar constraint ...
+   budget_sens = analyzer.analyze_constraint("budget")
+
+   # ... or one row of an indexed constraint family
+   capacity_sens = analyzer.analyze_constraint("capacity[3]")
 
    print(f"Shadow Price: ${capacity_sens.shadow_price:.2f}")
    print(f"Slack: {capacity_sens.slack:.2f}")
@@ -99,17 +125,37 @@ Analyzing Constraints
    if capacity_sens.allowable_increase:
        print(f"Valid up to +{capacity_sens.allowable_increase:.2f}")
 
+   # Every row of the family, keyed by index key
+   for key, sens in analyzer.analyze_constraint_family("capacity").items():
+       print(f"capacity[{key}]: shadow price {sens.shadow_price}")
+
+   # analyzer.analyze_constraint("capacity")  # ValueError: indexed family
+
+.. versionadded:: 0.3.0
+   ``analyze_constraint_family`` and ``analyze_variable_family``.
+
 Analyzing Variables
 ~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   # Analyze a specific variable
-   production_sens = analyzer.analyze_variable("production")
+   # Analyze one instance of an indexed variable family
+   production_sens = analyzer.analyze_variable("production[widget]")
 
    print(f"Value: {production_sens.value:.2f}")
    print(f"Reduced Cost: ${production_sens.reduced_cost:.2f}")
    print(f"At Bound: {production_sens.is_at_bound}")
+
+   # Every instance of the family, keyed by index key
+   for key, sens in analyzer.analyze_variable_family("production").items():
+       print(f"production[{key}]: value {sens.value}, reduced cost {sens.reduced_cost}")
+
+   # analyzer.analyze_variable("production")  # ValueError: indexed family
+
+``analyze_all_constraints()`` and ``analyze_all_variables()`` return every row and every
+instance, keyed by those names. ``get_binding_constraints()``,
+``identify_bottlenecks()``, ``get_most_sensitive_constraints()`` and the reports use the
+same row and instance names.
 
 Generating Reports
 ~~~~~~~~~~~~~~~~~~
@@ -143,7 +189,7 @@ Finding All Bottlenecks
 
 .. code-block:: python
 
-   # Get all binding constraints
+   # Get all binding constraint rows (e.g. "capacity[3]", "budget")
    bottlenecks = analyzer.identify_bottlenecks()
 
    for constraint_name in bottlenecks:
@@ -238,8 +284,8 @@ Example 1: Production Planning
        )
    )
 
-   # Solve
-   optimizer = LXOptimizer().use_solver("gurobi")
+   # Solve (sensitivity enabled so the solver reports duals)
+   optimizer = LXOptimizer().use_solver("gurobi").enable_sensitivity()
    solution = optimizer.solve(model)
 
    # Analyze sensitivity
@@ -251,7 +297,7 @@ Example 1: Production Planning
    bottlenecks = analyzer.identify_bottlenecks()
    print(f"\nBottlenecks: {bottlenecks}")
 
-   # Should labor or material budget be increased?
+   # Should labor or material budget be increased? (scalar constraints)
    labor_sens = analyzer.analyze_constraint("labor")
    material_sens = analyzer.analyze_constraint("material_budget")
 
@@ -317,7 +363,7 @@ Some solvers (Gurobi, CPLEX) provide sensitivity ranges:
 
 .. code-block:: python
 
-   sens = analyzer.analyze_constraint("capacity")
+   sens = analyzer.analyze_constraint("capacity")  # a scalar constraint
 
    if sens.allowable_increase and sens.allowable_decrease:
        print(f"Current RHS: 1000")
@@ -426,14 +472,17 @@ Best Practices
 
       from lumix.analysis import LXWhatIfAnalyzer
 
-      # Sensitivity identifies bottleneck
+      # Sensitivity identifies bottleneck rows ("capacity[3]", "budget", ...)
       bottlenecks = analyzer.identify_bottlenecks()
+
+      # What-if changes whole constraint families: map rows to family names
+      families = list(dict.fromkeys(b.split("[", 1)[0] for b in bottlenecks))
 
       # What-if quantifies the impact
       whatif = LXWhatIfAnalyzer(model, optimizer)
-      for constraint in bottlenecks[:3]:  # Top 3
-           result = whatif.increase_constraint_rhs(constraint, by=100)
-           print(f"{constraint}: ${result.delta_objective:,.2f}")
+      for constraint in families[:3]:  # Top 3
+          result = whatif.relax_constraint(constraint, by=100)
+          print(f"{constraint}: ${result.delta_objective:,.2f}")
 
 Next Steps
 ----------

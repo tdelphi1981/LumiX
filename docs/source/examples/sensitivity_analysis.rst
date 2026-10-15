@@ -232,12 +232,31 @@ Pattern 1: Constraint Sensitivity Check
 
 .. code-block:: python
 
+   # A scalar constraint, or one row of an indexed family: "min_production[Widget A]"
    sens = analyzer.analyze_constraint("constraint_name")
 
    if sens.is_binding:
        print(f"Bottleneck: ${sens.shadow_price:.2f} per unit")
    else:
        print(f"Has slack: {sens.slack:.2f} units available")
+
+Pattern 1b: Indexed Families
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+``min_production`` is indexed by product, so it has one row (and one shadow price) per
+product. ``production`` has one value and one reduced cost per product:
+
+.. code-block:: python
+
+   for key, sens in analyzer.analyze_constraint_family("min_production").items():
+       print(f"min_production[{key}]: shadow price {sens.shadow_price}")
+
+   for key, sens in analyzer.analyze_variable_family("production").items():
+       print(f"production[{key}]: {sens.value:.1f} (reduced cost {sens.reduced_cost})")
+
+   # Passing a family name to analyze_constraint / analyze_variable raises ValueError
 
 Pattern 2: Investment Decision
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

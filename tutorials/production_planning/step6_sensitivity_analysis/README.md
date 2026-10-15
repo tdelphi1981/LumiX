@@ -494,13 +494,25 @@ print(f"Binding: {sens.is_binding}")
 ### 4. Analyze Individual Variables
 
 ```python
-# Get reduced cost and basis status
-var_sens = analyzer.analyze_variable("production")
+# "production" is indexed by (product id, period id); analyze one instance by name
+var_sens = analyzer.analyze_variable("production[(1, 1)]")
 
 print(f"Reduced Cost: ${var_sens.reduced_cost:.6f}")
 print(f"In Basis: {var_sens.is_basic}")
 print(f"At Bound: {var_sens.is_at_bound}")
+
+# Or every instance, keyed by (product id, period id)
+for (product_id, period_id), sens in analyzer.analyze_variable_family("production").items():
+    print(f"product {product_id}, period {period_id}: reduced cost {sens.reduced_cost}")
 ```
+
+> **LumiX 0.3.0:** sensitivity is reported per variable instance and per constraint row.
+> Instances of indexed families are named `"family[key]"`, with tuple keys written as
+> `"production[(1, 1)]"`. Passing an indexed family name to `analyze_variable()` or
+> `analyze_constraint()` raises `ValueError`; use `analyze_variable_family()` /
+> `analyze_constraint_family()`, which return a dictionary keyed by index key. The
+> constraints in this step are scalar (one named constraint per machine and period), so
+> `analyze_constraint("machine_1_period_1")` works as shown.
 
 ### 5. Get Binding Constraints
 

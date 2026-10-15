@@ -370,7 +370,7 @@ Systematically test all constraints to find bottlenecks:
 
 .. code-block:: python
 
-   # Test adding 10 units to every resource
+   # Test adding 10 units to every machine/period capacity
    test_amount = 10.0
    improvements = []
 
@@ -383,6 +383,15 @@ Systematically test all constraints to find bottlenecks:
 
    # Sort by marginal value
    bottlenecks = sorted(improvements, key=lambda x: x[1], reverse=True)
+
+For every constraint of the model at once, use the built-in helper. It relaxes each
+constraint by ``test_amount`` and returns ``(constraint_name, improvement_per_unit)``,
+best first; the improvement is positive when relaxing helps the objective in its own
+direction (more profit here, less cost in a minimization model):
+
+.. code-block:: python
+
+   bottlenecks = whatif.find_bottlenecks(test_amount=10.0, top_n=5)
 
 **Use Cases:**
 
@@ -520,63 +529,58 @@ Access Results
    result.original_solution    # Baseline solution
    result.new_solution         # New solution
 
-Model Copying with ORM Detachment
-----------------------------------
+Model Copying with ORM Data
+---------------------------
 
 Critical Implementation Detail
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-What-if analysis requires **copying the model** to apply changes without affecting the original. When using ORM (SQLAlchemy/Django), this presents a challenge:
-
-**Problem**: ORM objects are bound to database sessions and cannot be pickled/deep copied directly.
-
-**Solution**: LumiX implements an **ORM detachment strategy** in ``__deepcopy__`` methods:
+What-if analysis **copies the model** for every change, so the original model is never
+modified:
 
 .. code-block:: python
 
    from copy import deepcopy
 
-   # This works even with ORM data!
+   # What LXWhatIfAnalyzer does for every what-if run
    modified_model = deepcopy(model)
+
+.. versionchanged:: 0.3.0
+   Copies share data instances and lambdas with the original model; ORM objects are no
+   longer detached or deep-copied when a model is copied.
 
 How It Works
 ~~~~~~~~~~~~
 
-1. **Detect ORM Objects**: Check for SQLAlchemy (``_sa_instance_state``) or Django (``_state``, ``_meta``) markers
+1. **Structure is copied**: variable and constraint families, expressions and data lists
+   are new objects, so changing a right-hand side in the copy leaves the original intact.
 
-2. **Materialize Data**: Force-load lazy relationships before copying
+2. **Data is shared**: every ``Product``, ``Machine`` and ``Period`` instance (SQLAlchemy
+   objects here) and every lambda is shared with the original model. Lambdas that compare
+   instances by identity or look them up in dictionaries behave exactly as in the
+   original.
 
-3. **Detach from Session**: Create plain Python objects with same attributes
+3. **ORM queries run once**: a family bound with ``from_model(..., session=...)`` is
+   materialized when the copy is made.
 
-4. **Handle Lambda Closures**: Inspect function closures for captured ORM objects and detach them
+4. **The session must stay usable**: lambdas that read lazy relationships load them
+   through the instances' own session. The tutorial keeps its session open until the
+   analysis is finished (``session.close()`` runs in the ``finally`` block).
 
-5. **Deep Copy**: Use standard ``deepcopy`` with detached objects
-
-Implementation
-~~~~~~~~~~~~~~
-
-The strategy is implemented in:
-
-- ``lumix.utils.copy_utils``: Utility functions for ORM detachment
-- ``LXModel.__deepcopy__``: Model-level copying
-- ``LXVariable.__deepcopy__``: Variable-level copying with closure handling
-- ``LXConstraint.__deepcopy__``: Constraint-level copying
-
-Example:
+If you cannot keep the session open, pass a ``model_factory`` that opens a fresh session
+and builds a new model on every call:
 
 .. code-block:: python
 
-   from lumix.utils.copy_utils import detach_orm_object
+   def build_model():
+       session = get_session(engine)
+       model, _production, _inventory = build_multiperiod_model(session)
+       return model
 
-   # Detach single ORM object
-   product = session.query(Product).first()
-   detached = detach_orm_object(product)
-   # Now safe to pickle/deepcopy
+   whatif = LXWhatIfAnalyzer(optimizer=optimizer, model_factory=build_model)
 
-   # Automatically handled in model copying
-   modified_model = deepcopy(model)  # Works with ORM data
-
-For complete details, see :doc:`/user-guide/utils/model-copying`.
+Detaching ORM objects (``lumix.utils.copy_utils.detach_orm_object``) is now used only
+when a model is pickled. For complete details, see :doc:`/user-guide/utils/model-copying`.
 
 Business Decision Examples
 --------------------------
@@ -825,7 +829,7 @@ You've completed the Production Planning tutorial with what-if analysis!
 
 - :doc:`/examples/whatif_analysis` - Standalone what-if example
 - :doc:`/user-guide/analysis/whatif` - What-if analysis guide
-- :doc:`/user-guide/utils/model-copying` - ORM-safe copying guide
+- :doc:`/user-guide/utils/model-copying` - How model copies share data
 - :doc:`../timetabling/step4_scaled` - Large-scale scheduling
 
 See Also

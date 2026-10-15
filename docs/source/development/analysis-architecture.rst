@@ -28,8 +28,10 @@ Architecture Overview
        class LXSensitivityAnalyzer {
            +model: LXModel
            +solution: LXSolution
-           +analyze_constraint(name)
-           +analyze_variable(name)
+           +analyze_constraint(row_name)
+           +analyze_variable(instance_name)
+           +analyze_constraint_family(name)
+           +analyze_variable_family(name)
            +identify_bottlenecks()
            +generate_report()
        }
@@ -39,9 +41,11 @@ Architecture Overview
            +optimizer: LXOptimizer
            +scenarios: Dict
            +results: Dict
+           +result_store: LXResultStore
            +add_scenario(scenario)
            +run_all_scenarios()
            +compare_scenarios()
+           +get_best_scenario(maximize)
            -_apply_scenario()
            -_clone_model()
        }
@@ -50,10 +54,22 @@ Architecture Overview
            +model: LXModel
            +optimizer: LXOptimizer
            -_baseline_solution: LXSolution
+           +result_store: LXResultStore
            +increase_constraint_rhs()
            +decrease_constraint_rhs()
            +find_bottlenecks()
-           -_solve_with_change()
+           -_new_model()
+       }
+
+       class ModelSource {
+           +base: LXModel
+           +new() LXModel
+       }
+
+       class LXResultStore {
+           +record(scenario, solution, model, modifications)
+           +runs(analysis)
+           +values(run_id, kind)
        }
 
        class LXScenario {
@@ -85,6 +101,10 @@ Architecture Overview
        LXSensitivityAnalyzer --> LXVariableSensitivity
        LXSensitivityAnalyzer --> LXConstraintSensitivity
        LXWhatIfAnalyzer --> LXModel
+       LXScenarioAnalyzer --> ModelSource
+       LXWhatIfAnalyzer --> ModelSource
+       LXScenarioAnalyzer --> LXResultStore
+       LXWhatIfAnalyzer --> LXResultStore
 
 Module Structure
 ----------------
@@ -98,7 +118,11 @@ File Organization
    ├── __init__.py          # Public API exports
    ├── scenario.py          # Scenario analysis implementation
    ├── sensitivity.py       # Sensitivity analysis implementation
-   └── whatif.py            # What-if analysis implementation
+   ├── whatif.py            # What-if analysis implementation
+   ├── store.py             # LXResultStore / LXStoredRun (0.3.0)
+   ├── _store_tables.py     # SQLAlchemy tables, imported lazily by store.py
+   ├── _factory.py          # ModelSource: copy of a base model or model_factory()
+   └── _rhs.py              # set_rhs / shift_rhs, shared by scenario and what-if
 
 **Design Rationale:**
 
@@ -133,23 +157,42 @@ Component Details
        slack: Optional[float] = None
        is_binding: bool = False
 
+   def _constraint_rows(constraint) -> List[Tuple[Any, str]]:
+       """(index key, row name) per row; the names solvers key duals by."""
+       if constraint.index_func is None:
+           return [(None, constraint.name)]
+       return [(key, f"{constraint.name}[{key}]")
+               for key in (constraint.index_func(i) for i in constraint.get_instances())]
+
    class LXSensitivityAnalyzer(Generic[TModel]):
        def __init__(self, model: LXModel[TModel], solution: LXSolution[TModel]):
            self.model = model
            self.solution = solution
 
-       def analyze_constraint(self, name: str) -> LXConstraintSensitivity:
-           """Extract sensitivity info from solution."""
-           # Get shadow price from solution
-           shadow_price = self.solution.get_dual_value(name)
-           slack = self.solution.get_slack(name)
+       def analyze_constraint(self, constraint_name: str) -> LXConstraintSensitivity:
+           """One row: a scalar constraint or "family[key]"."""
+           family = self.model.get_constraint(constraint_name)
+           if family is not None and family.index_func is not None:
+               raise ValueError("... use analyze_constraint_family(...)")
 
+           shadow_price = self.solution.get_shadow_price(constraint_name)
+           is_binding = shadow_price is not None and abs(shadow_price) > 1e-6
            return LXConstraintSensitivity(
-               name=name,
-               shadow_price=shadow_price,
-               slack=slack,
-               is_binding=(abs(slack) < 1e-6) if slack is not None else False
-           )
+               name=constraint_name, shadow_price=shadow_price,
+               is_binding=is_binding, is_active=is_binding)
+
+       def analyze_constraint_family(self, constraint_name: str):
+           """Every row, keyed by index key ({None: ...} for a scalar)."""
+           family = self.model.get_constraint(constraint_name)
+           return {key: self.analyze_constraint(row)
+                   for key, row in _constraint_rows(family)}
+
+.. versionchanged:: 0.3.0
+   Sensitivity works per constraint row and per variable instance. Solvers key duals and
+   reduced costs by row / instance name (``"capacity[3]"``, ``"production[widget]"``),
+   and the analyzer now uses the same names. ``analyze_constraint`` /
+   ``analyze_variable`` reject an indexed family name with ``ValueError``; the
+   ``*_family`` methods return a dictionary keyed by index key.
 
 **Data Flow:**
 
@@ -160,12 +203,10 @@ Component Details
        participant Analyzer
        participant Solution
 
-       User->>Analyzer: analyze_constraint("capacity")
-       Analyzer->>Solution: get_dual_value("capacity")
+       User->>Analyzer: analyze_constraint("capacity[3]")
+       Analyzer->>Solution: get_shadow_price("capacity[3]")
        Solution-->>Analyzer: shadow_price = 50.0
-       Analyzer->>Solution: get_slack("capacity")
-       Solution-->>Analyzer: slack = 0.0
-       Analyzer-->>User: LXConstraintSensitivity(shadow_price=50, slack=0)
+       Analyzer-->>User: LXConstraintSensitivity(shadow_price=50, is_binding=True)
 
 **Performance:**
 
@@ -180,8 +221,10 @@ Component Details
 
 **Key Design:**
 
-- **Model cloning**: Deep copy to preserve original
-- **Modification pipeline**: Apply changes to cloned model
+- **Model source**: A copy of the base model per run, or a fresh ``model_factory()``
+  build (see `Model Sources`_)
+- **Modification pipeline**: Apply changes to that model; unknown target or
+  modification types raise ``ValueError``
 - **Batch solving**: Run all scenarios sequentially
 - **Result caching**: Store solutions for comparison
 
@@ -190,14 +233,13 @@ Component Details
 .. code-block:: python
 
    class LXScenarioAnalyzer(Generic[TModel]):
-       def __init__(
-           self,
-           base_model: LXModel[TModel],
-           optimizer: LXOptimizer[TModel],
-           include_baseline: bool = True
-       ):
-           self.base_model = base_model
+       def __init__(self, base_model=None, optimizer=None, include_baseline=True,
+                    *, model_factory=None, result_store=None):
+           self._source = ModelSource(base_model, model_factory, optimizer,
+                                      "LXScenarioAnalyzer")
+           self.base_model = self._source.base
            self.optimizer = optimizer
+           self.result_store = result_store
            self.scenarios: Dict[str, LXScenario[TModel]] = {}
            self.results: Dict[str, LXSolution[TModel]] = {}
 
@@ -205,33 +247,54 @@ Component Details
            """Run single scenario."""
            scenario = self.scenarios[scenario_name]
 
-           # 1. Clone model (preserve original)
-           modified_model = self._clone_model(self.base_model)
-
-           # 2. Apply modifications
+           # 1. New model (copy or factory) with modifications applied
            modified_model = self._apply_scenario(scenario)
 
-           # 3. Solve
+           # 2. Solve and cache
            solution = self.optimizer.solve(modified_model)
-
-           # 4. Cache result
            self.results[scenario_name] = solution
 
+           # 3. Record (no-op without a result store)
+           self._record(scenario_name, solution, modified_model, scenario.modifications)
            return solution
 
        def _clone_model(self, model: LXModel[TModel]) -> LXModel[TModel]:
-           """Deep copy model."""
-           return deepcopy(model)
+           """Independent model for one run (argument kept for subclasses)."""
+           return self._source.new()
 
        def _apply_scenario(self, scenario: LXScenario[TModel]) -> LXModel[TModel]:
-           """Apply modifications to model."""
+           """Apply modifications to a new model."""
+           modified_model = self._clone_model(self.base_model)
            for mod in scenario.modifications:
                if mod.target_type == "constraint":
                    self._apply_constraint_modification(modified_model, mod)
                elif mod.target_type == "variable":
                    self._apply_variable_modification(modified_model, mod)
-
+               else:
+                   raise ValueError(f"unsupported target type '{mod.target_type}'")
            return modified_model
+
+Constraint modifications go through the shared helpers in ``_rhs.py``:
+
+.. code-block:: python
+
+   def shift_rhs(constraint, *, add=0.0, multiply=1.0):
+       """rhs := rhs * multiply + add, for a scalar RHS or row by row."""
+       if constraint.rhs_value is not None:          # scalar wins, as when solving
+           constraint.rhs_value = constraint.rhs_value * multiply + add
+       elif constraint.rhs_func is not None:         # per-row RHS: wrap the function
+           inner = constraint.rhs_func
+           constraint.rhs_func = lambda row: inner(row) * multiply + add
+       else:
+           raise ValueError(...)
+
+``set_rhs`` replaces the right-hand side (a number becomes the RHS of every row).
+Because ``shift_rhs`` wraps the current function, several modifications of the same
+constraint compose in order.
+
+.. versionchanged:: 0.3.0
+   ``rhs_add``/``rhs_multiply`` used to ignore per-row right-hand sides, and unknown
+   modification or target types used to be skipped silently.
 
 **Data Flow:**
 
@@ -259,14 +322,18 @@ Component Details
 **Performance:**
 
 - **Time complexity**: O(S × T) where S = scenarios, T = solve time
-- **Space complexity**: O(S × M) where M = model size (due to cloning)
+- **Space complexity**: O(S × M) where M = model structure size; data instances are
+  shared between copies, not duplicated
 - **Optimization**: Could use copy-on-write for large models
 
 **Design Trade-offs:**
 
 - **Pro**: Simple, safe (no side effects on original model)
-- **Con**: Memory-intensive for large models
+- **Con**: Memory grows with the number of scenarios
 - **Alternative**: Modification history and rollback (more complex)
+
+``get_best_scenario(maximize=None)`` considers only feasible results (``None`` if there
+are none) and, by default, follows the base model's objective sense.
 
 3. What-If Analyzer
 ~~~~~~~~~~~~~~~~~~~
@@ -285,14 +352,13 @@ Component Details
 .. code-block:: python
 
    class LXWhatIfAnalyzer(Generic[TModel]):
-       def __init__(
-           self,
-           model: LXModel[TModel],
-           optimizer: LXOptimizer[TModel]
-       ):
-           self.model = model
+       def __init__(self, model=None, optimizer=None, baseline_solution=None,
+                    *, model_factory=None, result_store=None):
+           self._source = ModelSource(model, model_factory, optimizer, "LXWhatIfAnalyzer")
+           self.model = self._source.base
            self.optimizer = optimizer
-           self._baseline_solution: Optional[LXSolution[TModel]] = None
+           self.result_store = result_store
+           self._baseline_solution: Optional[LXSolution[TModel]] = baseline_solution
 
        def get_baseline_solution(self) -> LXSolution[TModel]:
            """Get or create cached baseline."""
@@ -309,11 +375,11 @@ Component Details
            # Get baseline
            baseline = self.get_baseline_solution()
 
-           # Clone and modify
-           modified_model = deepcopy(self.model)
+           # New model (copy or factory build) and modify
+           modified_model = self._new_model()
            constraint = modified_model.get_constraint(constraint_name)
-           original_rhs = constraint.rhs_value
-           constraint.rhs_value += by
+           original_rhs = constraint.rhs_value   # None for a per-row RHS
+           shift_rhs(constraint, add=by)         # scalar or row by row
 
            # Solve
            new_solution = self.optimizer.solve(modified_model)
@@ -360,12 +426,68 @@ Component Details
        Analyzer->>Analyzer: Calculate delta
        Analyzer-->>User: LXWhatIfResult
 
+``find_bottlenecks(test_amount, top_n)`` calls ``relax_constraint`` for every constraint
+family and scores ``sign * delta_objective / test_amount``, with ``sign = -1`` for
+minimization, so a positive score always means "relaxing helps". Unbounded relaxations
+score ``inf``; other non-feasible relaxations are skipped with a ``UserWarning``; an
+infeasible baseline raises ``ValueError``.
+
+.. versionchanged:: 0.3.0
+   Scores follow the objective sense (minimization used to rank backwards).
+
 **Performance:**
 
 - **First call**: 2 solves (baseline + modified)
 - **Subsequent calls**: 1 solve each (cached baseline)
 - **Memory**: 1 cached solution + 1 modified model
 - **Optimization**: Could use warm starts if solver supports
+
+Model Sources
+-------------
+
+.. versionadded:: 0.3.0
+
+Both re-solving analyzers obtain their models from a small internal ``ModelSource``
+(``lumix/analysis/_factory.py``):
+
+.. code-block:: python
+
+   class ModelSource:
+       def __init__(self, model, factory, optimizer, owner):
+           if optimizer is None:
+               raise TypeError(f"{owner} needs an optimizer")
+           if (model is None) == (factory is None):
+               raise ValueError(f"{owner} needs exactly one of a model or model_factory")
+           self._factory = factory
+           self.base = model if model is not None else factory()
+
+       def new(self):
+           if self._factory is None:
+               return deepcopy(self.base)
+           model = self._factory()       # must be a model it has not returned before
+           ...
+           return model
+
+- **Copy**: ``deepcopy`` copies the model structure (families, constraints,
+  expressions, data lists) and shares every data instance and every callable with the
+  base model. ORM-backed families are materialized once at copy time; nothing is
+  detached. This keeps identity-based closures (``p is a``, ``weights[p]``) correct in
+  copies. See :doc:`/user-guide/utils/model-copying`.
+- **Factory**: called for the base model and once per run. The source keeps every model
+  it returned (so ``id()`` comparisons stay valid) and raises ``ValueError`` if the
+  factory returns a model a second time.
+
+Result Store
+------------
+
+.. versionadded:: 0.3.0
+
+Each analyzer calls ``self._record(name, solution, model, modifications)`` after every
+solve; it is a no-op unless ``result_store`` was given. ``LXResultStore`` (``store.py``)
+writes one ``lumix_runs`` row and its ``lumix_run_values`` rows per call. SQLAlchemy is
+imported lazily from ``_store_tables.py``, so ``import lumix`` works without it. The
+value rows reuse the sensitivity analyzer's row and instance enumeration, so stored keys
+match ``LXSolution.variables``. See :doc:`/user-guide/analysis/result-store`.
 
 Type System
 -----------
@@ -390,8 +512,12 @@ All analyzers use generics for type safety:
    class LXScenarioAnalyzer(Generic[TModel]):
        def __init__(
            self,
-           base_model: LXModel[TModel],
-           optimizer: LXOptimizer[TModel]
+           base_model: Optional[LXModel[TModel]] = None,
+           optimizer: Optional[LXOptimizer[TModel]] = None,
+           include_baseline: bool = True,
+           *,
+           model_factory: Optional[Callable[[], LXModel[TModel]]] = None,
+           result_store: Optional[LXResultStore] = None,
        ):
            ...
 
@@ -499,8 +625,8 @@ Add new what-if operations:
            """What if we change an objective coefficient?"""
            baseline = self.get_baseline_solution()
 
-           # Modify objective
-           modified_model = deepcopy(self.model)
+           # Modify objective on a new model (copy or factory build)
+           modified_model = self._new_model()
            # Implementation: modify objective expression
            # ...
 
@@ -582,9 +708,9 @@ Sensitivity Analysis
 
 **Time Complexity:**
 
-- ``analyze_constraint()``: O(1)
-- ``analyze_variable()``: O(1)
-- ``identify_bottlenecks()``: O(N) where N = number of constraints
+- ``analyze_constraint()``: O(1) after the row index is built (O(R) once, R = rows)
+- ``analyze_variable()``: O(1) after the instance index is built
+- ``identify_bottlenecks()``: O(R) where R = number of constraint rows
 - ``generate_report()``: O(N + M) where M = number of variables
 
 **Optimization:**
@@ -603,7 +729,7 @@ Scenario Analysis
 
 **Memory Complexity:**
 
-- Model cloning: O(M) per scenario
+- Model copy: O(M) per scenario (structure only; data instances are shared)
 - Solution storage: O(V) per scenario where V = number of variables
 
 **Optimization:**

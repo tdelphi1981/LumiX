@@ -42,6 +42,12 @@ result = whatif.relax_constraint("min_production", by_percent=0.5)
 result = whatif.tighten_constraint("capacity_Raw Materials", by_percent=0.2)
 ```
 
+Since LumiX 0.3.0 these operations also work on indexed constraints whose right-hand
+side is a function, such as `min_production` (one row per product): `by` / `by_percent`
+change every row and `to=` sets every row to the same value. For such constraints the
+`LXWhatIfChange` entries in `result.changes_applied` have `original_value`, `new_value`
+and `delta` set to `None`, since there is no single right-hand side.
+
 ### 3. Bottleneck Discovery
 
 ```python
@@ -51,6 +57,19 @@ bottlenecks = whatif.find_bottlenecks(test_amount=10.0, top_n=5)
 for name, improvement_per_unit in bottlenecks:
     print(f"{name}: ${improvement_per_unit:.2f} per unit")
 ```
+
+`find_bottlenecks()` relaxes every constraint by `test_amount` and returns
+`(constraint_name, improvement_per_unit)` pairs, best first. Since LumiX 0.3.0 the
+improvement is positive whenever relaxing helps the objective in its own direction
+(more profit for maximization, less cost for minimization; minimization models used to
+get negative values ranked backwards). An indexed constraint family is relaxed in every
+row; relaxations that make the model unbounded rank as `inf`, other non-feasible ones are
+skipped with a warning, and an infeasible baseline raises `ValueError`.
+
+What-if runs work on copies of the model that share data instances and lambdas with the
+original. Pass `model_factory=` instead of a model to build a new model for every run
+(useful with ORM data whose session may close), and `result_store=LXResultStore(session)`
+to save every run to a database.
 
 ### 4. Sensitivity Range Analysis
 

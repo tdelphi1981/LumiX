@@ -41,6 +41,9 @@ A **what-if change** represents a hypothetical modification to explore:
 - New value (after change)
 - Delta (amount of change)
 
+For a constraint whose right-hand side is a per-row function, there is no single value,
+so ``original_value``, ``new_value`` and ``delta`` are ``None``.
+
 What-If Results
 ~~~~~~~~~~~~~~~
 
@@ -114,7 +117,7 @@ Setting Constraint RHS
 .. code-block:: python
 
    # What if we set capacity to exactly 1500?
-   result = analyzer.set_constraint_rhs("capacity", value=1500)
+   result = analyzer.increase_constraint_rhs("capacity", to=1500)
 
    print(f"Setting capacity to 1500 would change objective by {result.delta_percentage:.1f}%")
 
@@ -129,6 +132,69 @@ Relaxing Constraints
    print(f"Relaxing minimum production by 10%:")
    print(f"  Impact: ${result.delta_objective:,.2f}")
 
+Per-Row Right-Hand Sides
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionchanged:: 0.3.0
+   ``increase_constraint_rhs``, ``decrease_constraint_rhs``, ``relax_constraint`` and
+   ``tighten_constraint`` work on constraints whose right-hand side is a function.
+
+For an indexed constraint family defined with ``.rhs(lambda row: ...)``, every row
+changes:
+
+.. code-block:: python
+
+   # capacity[m] <= m.hours for every machine m
+   analyzer.increase_constraint_rhs("capacity", by=10)          # m.hours + 10
+   analyzer.increase_constraint_rhs("capacity", by_percent=0.2) # m.hours * 1.2
+   analyzer.relax_constraint("capacity", by=5)                  # m.hours + 5 (<= rows)
+   analyzer.increase_constraint_rhs("capacity", to=40)          # 40 for every row
+
+   change = analyzer.increase_constraint_rhs("capacity", by=10).changes_applied[0]
+   print(change.original_value, change.new_value, change.delta)  # None None None
+
+Building Models with a Factory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+By default the analyzer copies ``model`` for every what-if run (see
+`Model Copying and ORM Data`_). Instead you can pass a function that builds the model:
+
+.. code-block:: python
+
+   analyzer = LXWhatIfAnalyzer(optimizer=optimizer, model_factory=build_model)
+   result = analyzer.relax_constraint("capacity", by=100)
+
+- The factory is called once for the baseline model (``analyzer.model``) and once per
+  what-if run; nothing is copied.
+- It must return a **new** model on every call; returning one it already returned
+  raises ``ValueError``.
+- Pass exactly one of ``model`` and ``model_factory`` (``ValueError`` otherwise); a
+  missing ``optimizer`` raises ``TypeError``.
+- The analyzer keeps the models it built for as long as it lives.
+
+See `ORM Data with a Fresh Session`_ for the typical use.
+
+Recording Results
+~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+With ``result_store=`` every solve is written to the database: the baseline when it is
+computed, then each what-if run. The run is named after the what-if description
+(for example ``"Relax capacity RHS by 100"``) and its modifications are the applied
+changes.
+
+.. code-block:: python
+
+   from lumix import LXResultStore
+
+   store = LXResultStore(session, analysis="capacity-what-if")
+   analyzer = LXWhatIfAnalyzer(model, optimizer, result_store=store)
+
+See :doc:`result-store`.
+
 Finding Bottlenecks
 -------------------
 
@@ -138,7 +204,7 @@ Automatic Bottleneck Detection
 .. code-block:: python
 
    # Find top 5 bottlenecks
-   bottlenecks = analyzer.find_bottlenecks(top_n=5)
+   bottlenecks = analyzer.find_bottlenecks(test_amount=1.0, top_n=5)
 
    print("Top 5 Bottlenecks:")
    print("-" * 60)
@@ -154,6 +220,25 @@ Automatic Bottleneck Detection
    # material_budget                 :     $12.50/unit
    # min_quality_standard            :      $8.00/unit
 
+``find_bottlenecks`` relaxes every constraint of the model by ``test_amount`` (one
+re-solve per constraint) and returns ``(constraint_name, improvement_per_unit)`` pairs,
+best first:
+
+- The improvement is **positive when relaxing the constraint makes the objective
+  better** in the objective's own direction: larger for maximization, smaller for
+  minimization. For a cost-minimization model, ``("labor_hours", 35.0)`` means one more
+  unit of labor saves 35.
+- For an indexed constraint family, every row is relaxed by ``test_amount`` and the
+  family is ranked as a whole.
+- A relaxation that makes the model unbounded ranks as ``float("inf")``. Relaxations
+  with any other non-feasible status are left out with a ``UserWarning``.
+- A feasible baseline is required; otherwise ``ValueError`` is raised.
+
+.. versionchanged:: 0.3.0
+   Improvements follow the objective's sense; for minimization they used to come out
+   negative and were ranked backwards. Constraints with a per-row right-hand side are
+   supported.
+
 Comparing Bottleneck Relaxation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -164,8 +249,8 @@ Comparing Bottleneck Relaxation
 
    print("Bottleneck Comparison:")
    for name, _ in bottlenecks:
-       # Try increasing by 100 units
-       result = analyzer.increase_constraint_rhs(name, by=100)
+       # Try relaxing by 100 units (increases <= and decreases >= right-hand sides)
+       result = analyzer.relax_constraint(name, by=100)
        print(f"{name:30s}: ${result.delta_objective:>10,.2f}")
 
 Identifying Binding Constraints
@@ -366,7 +451,8 @@ Comparing with Sensitivity Analysis
    # Get baseline solution
    solution = optimizer.solve(model)
 
-   # Sensitivity analysis (no re-solve)
+   # Sensitivity analysis (no re-solve); "capacity" is a scalar constraint here.
+   # For a row of an indexed family use its row name, e.g. "capacity[3]".
    sens = LXSensitivityAnalyzer(model, solution)
    shadow_price = sens.analyze_constraint("capacity").shadow_price
 
@@ -414,7 +500,7 @@ Best Practices
 
       # Then explore the top bottlenecks
       for name, _ in bottlenecks[:3]:
-          result = analyzer.increase_constraint_rhs(name, by=100)
+          result = analyzer.relax_constraint(name, by=100)
           print(f"{name}: ${result.delta_objective:,.2f}")
 
 2. **Test Realistic Ranges**
@@ -436,14 +522,16 @@ Best Practices
 
    .. code-block:: python
 
-      # 1. Sensitivity analysis identifies opportunities
+      # 1. Sensitivity analysis identifies opportunities (constraint rows,
+      #    e.g. "capacity[3]" for an indexed family)
       sens = LXSensitivityAnalyzer(model, solution)
       bottlenecks = sens.identify_bottlenecks()
 
-      # 2. What-if analysis quantifies them exactly
+      # 2. What-if analysis quantifies them exactly; it changes whole
+      #    constraint families, so map rows to family names
       whatif = LXWhatIfAnalyzer(model, optimizer)
-      for constraint in bottlenecks:
-          result = whatif.increase_constraint_rhs(constraint, by=100)
+      for constraint in dict.fromkeys(b.split("[", 1)[0] for b in bottlenecks):
+          result = whatif.relax_constraint(constraint, by=100)
           print(f"{constraint}: ${result.delta_objective:,.2f}")
 
 4. **Document Assumptions**
@@ -527,13 +615,14 @@ When to Use What-If vs. Scenario Analysis
 - Use **scenario** for comparing complete alternative futures systematically
 - Use **both** together for comprehensive analysis
 
-Model Copying with ORM Integration
------------------------------------
+Model Copying and ORM Data
+--------------------------
 
 Under the Hood
 ~~~~~~~~~~~~~~
 
-What-if analysis requires creating modified copies of your model without affecting the original. The ``LXWhatIfAnalyzer`` uses Python's ``deepcopy`` internally:
+What-if analysis never changes the model you pass in. Unless you give a
+``model_factory``, each what-if run works on a copy made with ``copy.deepcopy``:
 
 .. code-block:: python
 
@@ -541,144 +630,112 @@ What-if analysis requires creating modified copies of your model without affecti
 
    # What-if analyzer does this internally
    modified_model = deepcopy(original_model)
-   modified_model.constraints[0].rhs_value = new_value
+   modified_model.get_constraint("capacity").rhs_value = new_value
    modified_solution = optimizer.solve(modified_model)
 
-ORM Challenges
-~~~~~~~~~~~~~~
+.. versionchanged:: 0.3.0
+   The copy shares data instances and callables with the original; nothing is
+   deep-copied or detached any more.
 
-When using ORM frameworks (SQLAlchemy, Django), model copying faces challenges:
+The copy has its own variable and constraint families, expressions and data lists, so
+changing a right-hand side or a bound in the copy leaves the original untouched. Every
+**data instance** (plain objects and ORM objects alike) and every **callable** (the
+lambdas you passed to ``.rhs()``, ``.add_term()``, ``.indexed_by()`` ...) is shared with
+the original. As a result:
 
-**Problem**: ORM objects are bound to database sessions and cannot be pickled/deep copied directly.
+- Closures that test identity (``lambda p: 1.0 if p is flagship else 0.0``) or look up
+  dictionaries keyed by instances (``lambda p: weights[p]``) behave in the copy exactly
+  as in the original.
+- An ORM-backed family (``from_model(Product, session=session)``) runs its query once,
+  when the copy is made; the copy then holds that list of (shared) instances.
+- ORM instances are not detached: a lambda that touches a lazy relationship
+  (``p.category.factor``) loads it through the instance's own session, as it would in the
+  original model.
 
-**Solution**: LumiX implements automatic **ORM detachment** in ``__deepcopy__`` methods.
+ORM Data with a Fresh Session
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-How It Works
-~~~~~~~~~~~~
-
-1. **Detect ORM Objects**: Identify SQLAlchemy (``_sa_instance_state``) or Django (``_state``, ``_meta``) instances
-2. **Materialize Data**: Force-load lazy relationships before copying
-3. **Detach from Session**: Create plain Python objects with same attributes
-4. **Handle Closures**: Inspect lambda closures for captured ORM objects and detach them
-5. **Deep Copy**: Use standard ``deepcopy`` with detached objects
-
-Example with SQLAlchemy
-~~~~~~~~~~~~~~~~~~~~~~~~
+Because instances are shared, a copied ORM model needs the instances' session to be
+usable whenever lambdas read attributes that are not loaded yet. If that session may be
+closed before or during the analysis, build the model with a factory that opens a fresh
+session:
 
 .. code-block:: python
 
    from sqlalchemy.orm import Session
-   from lumix import LXModel, LXVariable, LXWhatIfAnalyzer
+   from lumix import LXLinearExpression, LXModel, LXVariable, LXWhatIfAnalyzer
 
-   # Build model with ORM data (session-bound objects)
-   session = Session(engine)
-   products = session.query(Product).all()  # SQLAlchemy objects
+   sessions = []
 
-   production = LXVariable[Product, float]("production")
-       .continuous()
-       .indexed_by(lambda p: p.id)
-       .from_data(products)  # Uses ORM objects
+   def build_model():
+       session = Session(engine)
+       sessions.append(session)
+       products = session.query(Product).all()
 
-   model = LXModel("production").add_variable(production)
+       production = (
+           LXVariable[Product, float]("production")
+           .continuous()
+           .bounds(lower=0)
+           .indexed_by(lambda p: p.id)
+           .from_data(products)
+       )
+       model = LXModel("production").add_variable(production)
+       # ... add constraints ...
+       model.maximize(
+           LXLinearExpression().add_term(production, lambda p: p.profit * p.category.factor)
+       )
+       return model
 
-   # What-if analyzer handles ORM detachment automatically
-   analyzer = LXWhatIfAnalyzer(model, optimizer)
-
-   # This works! Model is copied with ORM detachment
+   analyzer = LXWhatIfAnalyzer(optimizer=optimizer, model_factory=build_model)
    result = analyzer.increase_constraint_rhs("capacity", by=100)
 
-**Behind the scenes:**
+   for session in sessions:
+       session.close()
 
-1. ``LXWhatIfAnalyzer`` calls ``deepcopy(model)``
-2. ``LXModel.__deepcopy__`` detaches all ORM objects
-3. Modified model is independent of database session
-4. Safe to solve and compare
+Alternatively, keep the session open for the lifetime of the analyzer, or eager-load the
+relationships your lambdas use (``joinedload``) before building the model.
 
-The copy_utils Module
-~~~~~~~~~~~~~~~~~~~~~~
+Pickling
+~~~~~~~~
 
-LumiX provides utilities in ``lumix.utils.copy_utils`` for ORM-safe copying:
-
-.. code-block:: python
-
-   from lumix.utils.copy_utils import (
-       detach_orm_object,
-       materialize_and_detach_list,
-       copy_function_detaching_closure
-   )
-
-   # Detach single ORM object
-   product = session.query(Product).first()
-   detached = detach_orm_object(product)
-   # Now safe to pickle/deepcopy
-
-   # Detach list of ORM objects
-   products = session.query(Product).all()
-   detached_list = materialize_and_detach_list(products, {})
-
-   # Copy lambda with ORM object in closure
-   profit_func = lambda p: product.profit * p.quantity
-   safe_func = copy_function_detaching_closure(profit_func, {})
-
-These utilities are automatically used by ``__deepcopy__`` methods in core classes.
-
-Supported ORMs
-~~~~~~~~~~~~~~
-
-- **SQLAlchemy**: Full support with automatic session detachment
-- **Django ORM**: Full support with field value copying
-- **Plain Python**: No modification needed (pass-through)
-
-For complete details, see :doc:`/user-guide/utils/model-copying`.
+Detaching ORM objects from their session (``lumix.utils.copy_utils.detach_orm_object``)
+is now used only when a model is **pickled**. When it detaches an instance that still has
+a session, it loads unloaded relationships first; without a session it warns that those
+relationships will not be available. See :doc:`/user-guide/utils/model-copying`.
 
 Best Practices with ORM
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
-1. **Use Eager Loading**
+1. **Prefer a model factory** when the session that loaded the data may be closed.
 
-   Load all needed data before what-if analysis to avoid lazy-loading errors:
-
-   .. code-block:: python
-
-      from sqlalchemy.orm import joinedload
-
-      products = session.query(Product).options(
-          joinedload(Product.materials),
-          joinedload(Product.machine_requirements)
-      ).all()
-
-2. **Close Session After Model Building**
-
-   Once the model is built, the session is no longer needed:
+2. **Or keep the session open** while the analyzer is in use:
 
    .. code-block:: python
 
-      model = build_model(session)
-      session.close()  # Safe to close
+      with Session(engine) as session:
+          model = build_model(session)
+          analyzer = LXWhatIfAnalyzer(model, optimizer)
+          result = analyzer.increase_constraint_rhs("capacity", by=100)
 
-      # What-if analysis still works
-      analyzer = LXWhatIfAnalyzer(model, optimizer)
-      result = analyzer.increase_constraint_rhs("capacity", by=100)
+3. **Avoid Session Queries in Lambdas**
 
-3. **Avoid Complex Closures**
-
-   Keep lambda functions simple to avoid pickling issues:
+   Lambdas run for every row; read attributes of the instance instead of querying:
 
    .. code-block:: python
 
-      # Bad: Complex closure with session
-      bad_func = lambda p: session.query(...).first().cost  # ❌
+      # Bad: a query per coefficient
+      bad_func = lambda p: session.query(Cost).filter_by(product_id=p.id).one().value  # ❌
 
-      # Good: Simple value capture
-      cost = product.cost
-      good_func = lambda p: cost * p.quantity  # ✓
+      # Good: use loaded attributes
+      good_func = lambda p: p.cost  # ✓
 
 Next Steps
 ----------
 
 - :doc:`sensitivity` - Understand shadow prices and reduced costs
 - :doc:`scenario` - Compare multiple scenarios systematically
-- :doc:`/user-guide/utils/model-copying` - Deep dive into ORM-safe copying
+- :doc:`/user-guide/utils/model-copying` - How model copies share data
+- :doc:`result-store` - Persist what-if results
 - :doc:`/api/analysis/index` - Complete API reference
 - :doc:`/tutorials/production_planning/step7_whatif` - Tutorial with what-if analysis
 - :doc:`/development/analysis-architecture` - Architecture details

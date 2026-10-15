@@ -38,8 +38,14 @@ results = analyzer.run_all_scenarios()
 
 ```python
 print(analyzer.compare_scenarios())
-best = analyzer.get_best_scenario(maximize=True)
+best = analyzer.get_best_scenario()                 # follows the model's objective sense
+worst = analyzer.get_best_scenario(maximize=False)  # smallest feasible profit
 ```
+
+`get_best_scenario()` only considers feasible results (it returns `None` if none is
+feasible). Since LumiX 0.3.0 its default follows the base model's objective sense, so it
+picks the highest profit here and the lowest cost in a minimization model;
+`maximize=True`/`False` forces the direction.
 
 ### 4. Parameter Sensitivity Analysis
 
@@ -50,6 +56,19 @@ labor_sensitivity = analyzer.sensitivity_to_parameter(
     modification_type="rhs_multiply"
 )
 ```
+
+### 5. Notes for 0.3.0
+
+- `modify_constraint_rhs(..., add=..., multiply=...)` also works on indexed constraints
+  whose right-hand side is a function (`.rhs(lambda row: ...)`): every row is changed.
+  `set_value=` sets every row to the same value, and several modifications of one
+  constraint compose in order.
+- Unknown modification or target types (for example `"objective"`) raise `ValueError`
+  instead of being ignored.
+- Scenarios run on copies of the model that share the data instances and lambdas with
+  the original; pass `model_factory=` instead of a model to build a new model per
+  scenario (useful with ORM data), and `result_store=LXResultStore(session)` to save
+  every run to a database.
 
 ## Running the Example
 

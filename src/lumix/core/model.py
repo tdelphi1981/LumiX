@@ -164,11 +164,11 @@ class LXModel(Generic[TModel]):
         self._goal_programming_prepared: bool = False
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that enables what-if analysis with ORM data sources.
+        """Copy the model structure for what-if and scenario analysis.
 
-        This method orchestrates deep copying of the entire model including:
-        1. All variable families (with ORM data materialization)
-        2. All constraint families (with ORM data materialization)
+        This method orchestrates copying of the entire model including:
+        1. All variable families (an ORM query is materialized once)
+        2. All constraint families (an ORM query is materialized once)
         3. Objective expression
         4. Goal programming metadata
 
@@ -179,12 +179,16 @@ class LXModel(Generic[TModel]):
             memo: Dictionary for tracking circular references during deepcopy
 
         Returns:
-            Deep copy of this model with all ORM dependencies resolved
+            Copy of this model whose families, constraints and expressions are new
+            objects
 
         Note:
-            After copying, all variables and constraints will have their ORM sessions
-            detached and data materialized. The copy is completely independent and safe
-            for serialization/pickling.
+            Data instances (plain and ORM objects) and callables are shared with the
+            original, so closures behave the same in the copy. ORM objects are not
+            detached; pickling a model detaches them.
+
+        .. versionchanged:: 0.3.0
+           Data instances are shared instead of deep-copied/detached (catalog A23, B15).
 
         Example:
             >>> original_model = build_model_with_orm(session)
@@ -206,11 +210,11 @@ class LXModel(Generic[TModel]):
         result._goal_prepared_mode = getattr(self, "_goal_prepared_mode", None)
 
         # Deep copy all variable families
-        # Each variable's __deepcopy__ will materialize and detach ORM data
+        # Each variable's __deepcopy__ shares its data instances and callables
         result.variables = [deepcopy(var, memo) for var in self.variables]
 
         # Deep copy all constraint families
-        # Each constraint's __deepcopy__ will materialize and detach ORM data
+        # Each constraint's __deepcopy__ shares its data instances and callables
         result.constraints = [deepcopy(constr, memo) for constr in self.constraints]
 
         # Deep copy objective expression (if present)

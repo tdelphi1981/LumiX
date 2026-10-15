@@ -406,6 +406,44 @@ result.original_solution    # Baseline solution
 result.new_solution         # New solution
 ```
 
+### 6. Built-in Bottleneck Search
+
+```python
+# Relax every constraint by 10 units; best first
+bottlenecks = whatif.find_bottlenecks(test_amount=10.0, top_n=5)
+for name, improvement_per_unit in bottlenecks:
+    print(f"{name}: {improvement_per_unit:.2f} per unit")
+```
+
+The improvement is positive when relaxing the constraint helps the objective in its own
+direction (more profit here, less cost for a minimization model). Since LumiX 0.3.0 this
+holds for minimization too (values used to come out negative and rank backwards).
+Relaxations that make the model unbounded rank as `inf`; other non-feasible ones are
+skipped with a warning; an infeasible baseline raises `ValueError`.
+
+### 7. Model Copies and ORM Data
+
+Every what-if run solves a copy of the model, so `model` itself never changes. Since
+LumiX 0.3.0 the copy duplicates the model structure (constraints, bounds, expressions)
+but **shares** the SQLAlchemy instances and the lambdas with the original; nothing is
+detached. Lambdas that read lazy relationships therefore still use this step's session,
+which is why the session stays open until the analysis is finished.
+
+If the session cannot stay open, build the model with a factory and a fresh session:
+
+```python
+def build_model():
+    session = get_session(engine)
+    model, _production, _inventory = build_multiperiod_model(session)
+    return model
+
+whatif = LXWhatIfAnalyzer(optimizer=optimizer, model_factory=build_model)
+```
+
+The factory is called for the baseline and once per what-if run, and must return a new
+model every time. To keep a record of every run, also pass
+`result_store=LXResultStore(session)` (requires `lumix-opt[orm]`).
+
 ## Business Decision Examples
 
 ### Example 1: Capacity Investment Decision

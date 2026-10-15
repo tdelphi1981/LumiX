@@ -38,7 +38,7 @@ class LXWhatIfChange:
             )
     """
 
-    change_type: str  # "constraint_rhs", "variable_bound", "objective_coeff"
+    change_type: str  # "constraint_rhs" or "variable_bound"
     target_name: str
     description: str
     original_value: Optional[float] = None

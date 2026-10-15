@@ -79,6 +79,12 @@ Various ways to modify constraints:
    # Tighten by percentage (make more restrictive)
    result = whatif.tighten_constraint("capacity", by_percent=0.2)
 
+.. versionchanged:: 0.3.0
+   These operations also work on indexed constraints whose right-hand side is a function
+   (``.rhs(lambda row: ...)``): ``by``/``by_percent`` change every row, ``to`` sets every
+   row to the same value. For such constraints the result's ``changes_applied`` entries
+   have ``original_value``, ``new_value`` and ``delta`` set to ``None``.
+
 Bottleneck Discovery
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -87,6 +93,13 @@ Test all constraints to find bottlenecks:
 .. literalinclude:: ../../../examples/10_whatif_analysis/whatif_analysis.py
    :language: python
    :lines: 204-206
+
+The built-in ``whatif.find_bottlenecks(test_amount=1.0, top_n=10)`` does the same for
+every constraint of the model. It returns ``(constraint_name, improvement_per_unit)``
+pairs, best first. The improvement is positive when relaxing the constraint makes the
+objective better in its own direction (more profit here; lower cost in a minimization
+model). Unbounded relaxations rank as ``inf``; other non-feasible ones are skipped with a
+warning.
 
 Sensitivity Range Analysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

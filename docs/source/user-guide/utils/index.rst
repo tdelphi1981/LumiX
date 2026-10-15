@@ -117,11 +117,16 @@ The :doc:`rational-conversion` guide covers float-to-rational conversion:
 Model Copying
 ~~~~~~~~~~~~~
 
-The :doc:`model-copying` guide covers ORM-safe model copying:
+The :doc:`model-copying` guide covers how models are copied:
 
-- **Purpose**: Safely copy models with ORM data sources for analysis
-- **Key Features**: Automatic ORM detachment, session independence, lambda closure handling
+- **Purpose**: Independent copies of a model for what-if and scenario analysis
+- **Key Features**: Copies share data instances and lambdas with the original (identity
+  checks keep working); ORM queries are materialized once at copy time; ORM detaching
+  only when pickling
 - **When to Use**: What-if analysis, scenario analysis, any workflow requiring model copies
+
+.. versionchanged:: 0.3.0
+   Copies share data instances and callables instead of deep-copying and detaching them.
 
 **Quick Example:**
 
@@ -132,11 +137,11 @@ The :doc:`model-copying` guide covers ORM-safe model copying:
 
    # Build model with SQLAlchemy data
    production = LXVariable[Product, float]("production")
-       .from_model(session)  # Uses ORM session
+       .from_model(Product, session=session)  # Uses ORM session
 
    model = LXModel("production").add_variable(production)
 
-   # Copy works automatically! ORM objects detached
+   # Structure is copied; the query runs once and the ORM instances are shared
    modified_model = deepcopy(model)  # ✓ Success
 
    # Use for what-if analysis
@@ -315,7 +320,7 @@ Explore each component in detail:
 - :doc:`logging` - Complete logging guide
 - :doc:`orm-integration` - ORM integration patterns
 - :doc:`rational-conversion` - Rational conversion algorithms
-- :doc:`model-copying` - ORM-safe model copying strategy
+- :doc:`model-copying` - How model copies share data with the original
 
 Or continue to:
 

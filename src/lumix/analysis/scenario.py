@@ -48,7 +48,7 @@ class LXScenarioModification:
             )
     """
 
-    target_type: str  # "constraint", "variable", "objective"
+    target_type: str  # "constraint" or "variable" (anything else raises ValueError)
     target_name: str  # Name of the constraint/variable
     modification_type: str  # "rhs_set", "rhs_add", "rhs_multiply" (constraint); "bound_lower", "bound_upper" (variable)
     value: Union[float, Callable[[Any], float]]

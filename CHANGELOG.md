@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SEQUENTIAL_TOLERANCE` in `lumix.goal_programming.solver`: relative slack of the sequential stage bounds (default `0.0`, exact).
 - `final_objective(model, custom_goals)` in `lumix.goal_programming.objective_builder`: the model's objective combined with the priority-0 goals.
 - Goals whose expression is an `LXNonLinearExpression` (e.g. `add_abs`); solve them with `enable_linearization()`.
+- `model_factory=` on `LXScenarioAnalyzer` and `LXWhatIfAnalyzer`: a function that builds the model, called once for the base model and once per scenario or what-if run instead of copying the model (for ORM models, open a fresh session inside it). It must return a new model on every call.
+- `LXResultStore` and `LXStoredRun` (`lumix.analysis.store`, needs `lumix-opt[orm]`): pass `result_store=` to either analyzer to write every solve to the `lumix_runs` / `lumix_run_values` tables (SQLAlchemy), with optional shadow prices and reduced costs; read them back with `runs()` and `values()`.
+- `LXSensitivityAnalyzer.analyze_constraint_family(name)` and `analyze_variable_family(name)`: every row or instance of a family, keyed by index key.
 
 ### Changed
 - Same-type constraint narrowing applies only to one-argument coefficients and filters, decided for each `add_term` separately (also after `e1 + e2` or `expr * 2`). Parameters with a default value do not count, so `lambda item, g=g: ...` is a one-argument filter.
@@ -64,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Solving a model prepared with `prepare_goal_programming()` after `set_goal_mode` changed its mode raises `ValueError` (sequential → weighted ignored the goals).
 - `LXSolution.is_goal_satisfied` (and the "Goals Satisfied" line of `summary()`) checks only the undesired deviations: exceeding a `>=` goal or staying below a `<=` goal is satisfied.
 - A sequential stage that is not solved to optimality is reported with a warning on the `lumix.goal_programming.solver` logger instead of `print`.
+- Model copies (`copy.deepcopy(model)`, used by what-if and scenario analysis) share data instances and callables with the original instead of deep-copying them; ORM objects are no longer detached by `deepcopy` (an ORM-backed family is queried once at copy time). Detaching is used only when a model is pickled.
+- `LXSensitivityAnalyzer.analyze_variable` / `analyze_constraint` take an instance or row name (`"production[widget]"`, `"capacity[3]"`) or a scalar name, and raise `ValueError` for an indexed family name; `analyze_all_variables()` / `analyze_all_constraints()` and the methods built on them (binding constraints, bottlenecks, reports) are keyed per instance and per row.
+- `LXWhatIfAnalyzer.find_bottlenecks` returns the improvement per unit in the objective's own direction (positive is better, also for minimization), ranks an unbounded relaxation as `inf`, skips other relaxations that are not feasible with a warning, and raises `ValueError` without a feasible baseline.
+- `LXScenarioAnalyzer.get_best_scenario()` considers only feasible results and, by default (`maximize=None`), follows the base model's objective sense; it used to maximize unless told otherwise.
+- Unknown scenario modification types and target types (e.g. `"objective"`) raise `ValueError` instead of being ignored.
+- What-if `to=` on a constraint whose right-hand side is a function sets every row to that value; the change record's `original_value` / `new_value` / `delta` are `None` for such a constraint. `modify_variable_bound` fills `changes_applied`.
+- `LXScenarioAnalyzer` and `LXWhatIfAnalyzer` accept the model and optimizer as keyword arguments (`base_model=` / `model=`, `optimizer=`).
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
@@ -108,6 +118,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A25: priority-0 goals optimized nothing, and the model's own objective was silently replaced by the goal objective.
 - A26: goals were solved as hard constraints unless `prepare_goal_programming()` was called first.
 - Goals with an `LXNonLinearExpression` crashed during relaxation.
+- A23: what-if and scenario copies deep-copied data instances while lambdas kept the originals, so identity checks and instance-keyed dicts in closures gave wrong results or `KeyError`.
+- A24: scenario `add=` / `multiply=` did nothing on a constraint whose right-hand side is a function; they now apply row by row and compose in order.
+- B11: sensitivity analysis reported no shadow prices for indexed constraints and only the first instance (without a reduced cost) for a variable family.
+- B12: `find_bottlenecks` ranked minimization models backwards and failed on constraints whose right-hand side is a function.
+- B15: a copy of a model built from SQLAlchemy objects with unloaded relationships failed; `detach_orm_object` now loads them while a session is available.
+- `get_best_scenario` could return an infeasible scenario.
 
 ### Security
 

@@ -112,11 +112,15 @@ Analyzes how changes in parameters affect the optimal solution using shadow pric
    # Get shadow prices for all constraints
    report = analyzer.generate_report()
 
-   # Identify bottlenecks
+   # Identify bottlenecks (one entry per constraint row, e.g. "capacity[3]")
    bottlenecks = analyzer.identify_bottlenecks()
    for name in bottlenecks:
        sensitivity = analyzer.analyze_constraint(name)
        print(f"{name}: shadow price = ${sensitivity.shadow_price:.2f}")
+
+   # Every row of an indexed constraint family, keyed by index key
+   for key, sens in analyzer.analyze_constraint_family("capacity").items():
+       print(f"capacity[{key}]: {sens.shadow_price}")
 
 2. Scenario Analysis
 ~~~~~~~~~~~~~~~~~~~~~
@@ -179,10 +183,49 @@ Provides interactive exploration of parameter changes with immediate feedback.
    result = analyzer.increase_constraint_rhs("capacity", by=100)
    print(f"Increasing capacity by 100 would improve profit by ${result.delta_objective:,.2f}")
 
-   # Find bottlenecks automatically
+   # Find bottlenecks automatically (best first; positive = relaxing helps,
+   # whether the model maximizes or minimizes)
    bottlenecks = analyzer.find_bottlenecks(top_n=5)
    for name, improvement in bottlenecks:
        print(f"{name}: ${improvement:.2f} per unit")
+
+4. Result Store
+~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+Records every solve made by the scenario and what-if analyzers in two SQLAlchemy tables,
+so results can be queried, compared across sessions and shared.
+
+.. code-block:: python
+
+   from lumix import LXResultStore
+
+   LXResultStore.create_tables(engine)
+   store = LXResultStore(session, analysis="q3-capacity")
+   analyzer = LXScenarioAnalyzer(model, optimizer, result_store=store)
+
+See :doc:`result-store`.
+
+How Analyzers Build Modified Models
+-----------------------------------
+
+.. versionchanged:: 0.3.0
+
+Scenario and what-if analysis never modify the model you pass in. For every run they need
+an independent model, which they get in one of two ways:
+
+- **Copy** (``LXScenarioAnalyzer(model, optimizer)``): the model is copied with
+  ``copy.deepcopy``. The copy has its own variable and constraint families, expressions
+  and data lists, but it **shares** every data instance and every callable (lambda) with
+  the original. Closures that check identity (``p is a``) or look up instance-keyed
+  dictionaries (``weights[p]``) therefore behave exactly as in the original model.
+  An ORM-backed family (``from_model(..., session=...)``) is materialized once, when the
+  copy is made. See :doc:`/user-guide/utils/model-copying`.
+- **Factory** (``LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model)``):
+  your function builds a new model for the baseline and for every run; nothing is copied.
+  This is the recommended route for ORM-backed models whose session may be closed, because
+  the factory can open a fresh session each time.
 
 Choosing the Right Tool
 -----------------------
@@ -256,6 +299,7 @@ Dive deeper into each analysis tool:
    sensitivity
    scenario
    whatif
+   result-store
 
 Next Steps
 ----------
@@ -263,5 +307,6 @@ Next Steps
 - :doc:`sensitivity` - Understand shadow prices and reduced costs
 - :doc:`scenario` - Compare multiple scenarios systematically
 - :doc:`whatif` - Interactively explore parameter changes
+- :doc:`result-store` - Persist analysis runs to a database
 - :doc:`/api/analysis/index` - Detailed API reference
 - :doc:`/development/analysis-architecture` - Architecture and extension guide

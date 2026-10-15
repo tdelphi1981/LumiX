@@ -20,10 +20,16 @@ After solving a production planning optimization problem, a manufacturing compan
 ```python
 analyzer = LXSensitivityAnalyzer(model, solution)
 
-# Analyze constraint sensitivity
+# Analyze constraint sensitivity (a scalar constraint)
 sens = analyzer.analyze_constraint("capacity_Labor Hours")
 print(f"Shadow Price: ${sens.shadow_price:.2f}")
 print(f"Binding: {sens.is_binding}")
+
+# Indexed constraint family: one row per product, keyed by index key
+for key, row in analyzer.analyze_constraint_family("min_production").items():
+    print(f"min_production[{key}]: {row.shadow_price}")
+# ... or a single row by its name
+row = analyzer.analyze_constraint("min_production[Widget A]")
 ```
 
 **Shadow Price Interpretation**:
@@ -34,11 +40,23 @@ print(f"Binding: {sens.is_binding}")
 ### 2. Reduced Cost Analysis
 
 ```python
-# Analyze variable sensitivity
-var_sens = analyzer.analyze_variable("production")
+# Analyze one instance of the indexed "production" family (product id 1)
+var_sens = analyzer.analyze_variable("production[1]")
 print(f"Reduced Cost: ${var_sens.reduced_cost:.6f}")
 print(f"In Basis: {var_sens.is_basic}")
+
+# Every instance, keyed by index key
+for key, sens in analyzer.analyze_variable_family("production").items():
+    print(f"{sens.name}: value {sens.value:.2f}, reduced cost {sens.reduced_cost}")
 ```
+
+> **LumiX 0.3.0:** sensitivity is reported per constraint row and per variable
+> instance. Rows of indexed families are named `"family[key]"` (for example
+> `"min_production[Widget A]"`, `"production[1]"`). Passing a family name to
+> `analyze_constraint()` / `analyze_variable()` raises `ValueError`; use
+> `analyze_constraint_family()` / `analyze_variable_family()` instead.
+> `analyze_all_constraints()`, `get_binding_constraints()`, `identify_bottlenecks()` and
+> the reports list individual rows and instances.
 
 **Reduced Cost Interpretation**:
 - Reduced cost = opportunity cost of forcing variable to increase

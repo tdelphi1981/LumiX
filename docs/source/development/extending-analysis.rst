@@ -108,6 +108,7 @@ Add scenario generation and comparison features.
 .. code-block:: python
 
    from lumix.analysis import LXScenario, LXScenarioAnalyzer
+   from lumix.core.enums import LXObjectiveSense
    from typing import List
 
    class LXAutomatedScenarioAnalyzer(LXScenarioAnalyzer[TModel]):
@@ -155,11 +156,12 @@ Add scenario generation and comparison features.
            """Generate enhanced comparison report with rankings."""
            results = self.run_all_scenarios()
 
-           # Rank scenarios
+           # Rank feasible scenarios, best first in the model's own sense
+           maximize = self.base_model.objective_sense == LXObjectiveSense.MAXIMIZE
            ranked = sorted(
-               results.items(),
+               ((n, s) for n, s in results.items() if s.is_feasible()),
                key=lambda x: x[1].objective_value,
-               reverse=True  # Assume maximization
+               reverse=maximize
            )
 
            # Build report
@@ -203,8 +205,8 @@ Add new what-if operations.
 .. code-block:: python
 
    from lumix.analysis import LXWhatIfAnalyzer, LXWhatIfResult
-   from typing import Dict
-   from copy import deepcopy
+   from lumix.core.enums import LXObjectiveSense
+   from typing import Dict, List
 
    class LXMultiParameterWhatIfAnalyzer(LXWhatIfAnalyzer[TModel]):
        """What-if analyzer supporting multi-parameter changes."""
@@ -231,12 +233,17 @@ Add new what-if operations.
            """
            baseline = self.get_baseline_solution()
 
-           # Clone and apply all changes
-           modified_model = deepcopy(self.model)
+           # New model (a copy of self.model, or a model_factory() build)
+           modified_model = self._new_model()
            for constraint_name, delta in changes.items():
                constraint = modified_model.get_constraint(constraint_name)
-               if constraint:
+               if constraint is None:
+                   raise ValueError(f"Constraint '{constraint_name}' not found")
+               if constraint.rhs_value is not None:      # scalar RHS
                    constraint.rhs_value += delta
+               else:                                     # per-row RHS function
+                   inner = constraint.rhs_func
+                   constraint.rhs_func = lambda row, f=inner, d=delta: f(row) + d
 
            # Solve
            new_solution = self.optimizer.solve(modified_model)
@@ -278,11 +285,13 @@ Add new what-if operations.
            Returns:
                Dict mapping constraint names to recommended relaxation amounts
            """
-           # Get marginal value of each constraint
+           # Get marginal value of each constraint (relaxing helps for <= and >= alike;
+           # flip the sign for minimization so larger is always better)
+           sign = -1.0 if self.model.objective_sense == LXObjectiveSense.MINIMIZE else 1.0
            marginal_values = {}
            for name in constraint_names:
-               result = self.increase_constraint_rhs(name, by=1)
-               marginal_values[name] = result.delta_objective
+               result = self.relax_constraint(name, by=1)
+               marginal_values[name] = sign * result.delta_objective
 
            # Calculate ROI for each constraint
            roi = {
@@ -307,6 +316,10 @@ Add new what-if operations.
                remaining_budget -= best_cost
 
            return allocation
+
+Use ``self._new_model()`` rather than ``deepcopy(self.model)`` in subclasses: it honours a
+``model_factory`` and otherwise returns a copy that shares data instances and lambdas
+with ``self.model`` (see :doc:`/user-guide/utils/model-copying`).
 
 **Usage:**
 
@@ -396,6 +409,10 @@ Create a completely new analyzer type.
 
            baseline_solution = self.optimizer.solve(self.model)
            baseline_obj = baseline_solution.objective_value
+
+           # Copies share data instances and lambdas with self.model; only the
+           # structure (constraints, bounds) is independent. This example assumes a
+           # scalar RHS; LXScenarioAnalyzer also handles per-row RHS functions.
 
            # Test worst case (-uncertainty)
            worst_model = deepcopy(self.model)
@@ -520,14 +537,17 @@ Combine multiple analyzers for comprehensive analysis.
            # 2. Sensitivity analysis
            from lumix.analysis import LXSensitivityAnalyzer
            sens_analyzer = LXSensitivityAnalyzer(self.model, solution)
-           bottlenecks = sens_analyzer.identify_bottlenecks()
+           bottlenecks = sens_analyzer.identify_bottlenecks()   # rows, e.g. "cap[3]"
+
+           # What-if and scenarios change whole constraint families
+           families = list(dict.fromkeys(b.split("[", 1)[0] for b in bottlenecks))
 
            # 3. What-if analysis on bottlenecks
            from lumix.analysis import LXWhatIfAnalyzer
            whatif_analyzer = LXWhatIfAnalyzer(self.model, self.optimizer)
            whatif_results = {}
-           for constraint in bottlenecks[:3]:  # Top 3
-               result = whatif_analyzer.increase_constraint_rhs(constraint, by=100)
+           for constraint in families[:3]:  # Top 3
+               result = whatif_analyzer.relax_constraint(constraint, by=100)
                whatif_results[constraint] = result
 
            # 4. Scenario analysis
@@ -535,7 +555,7 @@ Combine multiple analyzers for comprehensive analysis.
            scenario_analyzer = LXScenarioAnalyzer(self.model, self.optimizer)
            scenario_analyzer.add_scenario(
                LXScenario("optimistic")
-               .modify_constraint_rhs(bottlenecks[0], multiply=1.5)
+               .modify_constraint_rhs(families[0], multiply=1.5)
            )
            scenario_results = scenario_analyzer.run_all_scenarios()
 
