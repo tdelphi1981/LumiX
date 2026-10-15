@@ -16,7 +16,7 @@ from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
-from .base import LXSolverInterface
+from .base import LXSolverInterface, native_name
 from .capabilities import GLPK_CAPABILITIES
 
 
@@ -60,9 +60,11 @@ class LXGLPKSolver(LXSolverInterface):
     def build_model(self, model: LXModel) -> Any:
         """Build a GLPK problem from the canonical form of ``model``."""
         canon = self._canonicalize(model)
+        if self._model is not None:
+            glpk.glp_delete_prob(self._model)   # GLPK problems are not garbage-collected
         self._model = glpk.glp_create_prob()
         gm = self._model
-        glpk.glp_set_prob_name(gm, model.name)
+        glpk.glp_set_prob_name(gm, native_name(model.name))
         if canon.variables:
             glpk.glp_add_cols(gm, len(canon.variables))
         if canon.rows:
@@ -71,14 +73,14 @@ class LXGLPKSolver(LXSolverInterface):
                 LXVarType.BINARY: glpk.GLP_BV}
         handles = []
         for col, v in enumerate(canon.variables, start=1):
-            glpk.glp_set_col_name(gm, col, v.name)
+            glpk.glp_set_col_name(gm, col, native_name(v.name))
             glpk.glp_set_col_kind(gm, col, kind[v.var_type])
             self._set_bounds(glpk.glp_set_col_bnds, col, v.lower, v.upper)
             handles.append(col)
         self._handles = handles
         self._variable_map = self._family_map(canon, handles)
         for r, row in enumerate(canon.rows, start=1):
-            glpk.glp_set_row_name(gm, r, row.name)
+            glpk.glp_set_row_name(gm, r, native_name(row.name))
             lo, hi = {LXConstraintSense.LE: (-math.inf, row.rhs),
                       LXConstraintSense.GE: (row.rhs, math.inf),
                       LXConstraintSense.EQ: (row.rhs, row.rhs)}[row.sense]
@@ -105,7 +107,10 @@ class LXGLPKSolver(LXSolverInterface):
         """Feasibility of the integer problem, found with a zero objective."""
         for col in range(1, glpk.glp_get_num_cols(glpk_model) + 1):
             glpk.glp_set_obj_coef(glpk_model, col, 0.0)
-        if glpk.glp_simplex(glpk_model, smcp) != 0:
+        ret = glpk.glp_simplex(glpk_model, smcp)
+        if ret == glpk.GLP_ENOPFS:      # presolve proved the relaxation infeasible
+            return False
+        if ret != 0:
             return None
         if glpk.glp_get_status(glpk_model) == glpk.GLP_NOFEAS:
             return False
@@ -173,6 +178,11 @@ class LXGLPKSolver(LXSolverInterface):
 
         start_time = time.time()
         ret = glpk.glp_simplex(glpk_model, smcp)
+        if ret == glpk.GLP_ENODFS and smcp.presolve == glpk.GLP_ON:
+            # Presolve reports "no dual feasible solution" for infeasible and unbounded
+            # LPs alike; the simplex without presolve tells them apart.
+            smcp.presolve = glpk.GLP_OFF
+            ret = glpk.glp_simplex(glpk_model, smcp)
         is_mip = False
         if has_integer and ret == 0 and glpk.glp_get_status(glpk_model) in (glpk.GLP_OPT, glpk.GLP_FEAS):
             iocp = glpk.glp_iocp()

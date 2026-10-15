@@ -20,7 +20,8 @@ from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
-from .base import LXSolverInterface
+from ..utils._warn import warn_user
+from .base import LXSolverInterface, native_name
 from .capabilities import CPLEX_CAPABILITIES
 
 
@@ -84,7 +85,7 @@ class LXCPLEXSolver(LXSolverInterface):
             is_mip = any(v.var_type != LXVarType.CONTINUOUS for v in canon.variables)
             args = dict(lb=[v.lower if math.isfinite(v.lower) else -cplex.infinity for v in canon.variables],
                         ub=[v.upper if math.isfinite(v.upper) else cplex.infinity for v in canon.variables],
-                        names=[v.name for v in canon.variables])
+                        names=[native_name(v.name) for v in canon.variables])
             if is_mip:   # types turn the problem into a MIP; keep pure LPs as LPs
                 args["types"] = [kinds[v.var_type] for v in canon.variables]
             cm.variables.add(**args)
@@ -95,7 +96,7 @@ class LXCPLEXSolver(LXSolverInterface):
         for row in canon.rows:
             idx = cm.linear_constraints.add(
                 lin_expr=[cplex.SparsePair(ind=list(row.coeffs), val=list(row.coeffs.values()))],
-                senses=[senses[row.sense]], rhs=[row.rhs], names=[row.name])[0]
+                senses=[senses[row.sense]], rhs=[row.rhs], names=[native_name(row.name)])[0]
             self._register_row(row, idx)
         if canon.sense is not None:
             if canon.objective:
@@ -132,7 +133,9 @@ class LXCPLEXSolver(LXSolverInterface):
                 - mip_emphasis: MIP emphasis (0=balanced, 1=feasibility, 2=optimality, 3=bound, 4=hidden)
                 - preprocessing_presolve: Presolve level (0=off, 1=on)
                 - lpmethod: Algorithm for LP (0=auto, 1=primal, 2=dual, 3=network, 4=barrier)
-                - output_clonelog: Show solver output (0=off, 1=on)
+                - verbose: print the CPLEX log (True/False)
+                - any other CPLEX parameter by its path with ``_`` for ``.``,
+                  e.g. ``mip_limits_cutsfactor`` for ``parameters.mip.limits.cutsfactor``
 
         Returns:
             Solution object with results
@@ -145,11 +148,12 @@ class LXCPLEXSolver(LXSolverInterface):
         # Build the model
         cplex_model = self.build_model(model)
 
-        # Suppress output by default
-        cplex_model.set_log_stream(None)
-        cplex_model.set_error_stream(None)
-        cplex_model.set_warning_stream(None)
-        cplex_model.set_results_stream(None)
+        # Suppress output unless verbose=True
+        if not solver_params.pop("verbose", False):
+            cplex_model.set_log_stream(None)
+            cplex_model.set_error_stream(None)
+            cplex_model.set_warning_stream(None)
+            cplex_model.set_results_stream(None)
 
         # Set time limit
         if time_limit is not None:
@@ -177,9 +181,13 @@ class LXCPLEXSolver(LXSolverInterface):
                 elif param_name == "output_clonelog":
                     cplex_model.parameters.output.clonelog.set(int(param_value))
                 else:
-                    self.logger.logger.warning(
-                        f"Unknown CPLEX parameter '{param_name}', skipping"
-                    )
+                    parameter = self._parameter(cplex_model.parameters, param_name)
+                    if parameter is None:
+                        self.logger.logger.warning(
+                            f"Unknown CPLEX parameter '{param_name}', skipping"
+                        )
+                    else:
+                        parameter.set(param_value)
             except Exception as e:
                 self.logger.logger.warning(
                     f"Failed to set CPLEX parameter '{param_name}': {e}"
@@ -190,10 +198,15 @@ class LXCPLEXSolver(LXSolverInterface):
         try:
             cplex_model.solve()
             st = cplex_model.solution.status
-            if cplex_model.solution.get_status() in (st.infeasible_or_unbounded,
-                                                     st.MIP_infeasible_or_unbounded):
-                # Presolve could not tell infeasible from unbounded; ask once more.
+            code = cplex_model.solution.get_status()
+            if code in (st.infeasible_or_unbounded, st.MIP_infeasible_or_unbounded, st.unbounded):
+                # Presolve could not tell infeasible from unbounded, or the dual simplex
+                # found a ray without a feasible point; ask once more without presolve,
+                # with the primal simplex for an LP (its phase 1 proves feasibility).
                 cplex_model.parameters.preprocessing.presolve.set(0)
+                if code != st.MIP_infeasible_or_unbounded:
+                    cplex_model.parameters.lpmethod.set(
+                        cplex_model.parameters.lpmethod.values.primal)
                 cplex_model.solve()
         except CplexError as e:
             self.logger.logger.error(f"CPLEX solve error: {e}")
@@ -204,6 +217,21 @@ class LXCPLEXSolver(LXSolverInterface):
         solution = self._parse_solution(model, cplex_model, solve_time, enable_sensitivity)
 
         return solution
+
+    @staticmethod
+    def _parameter(parameters: Any, name: str) -> Any:
+        """The CPLEX parameter at ``name`` read as a path (``mip_limits_cutsfactor``)."""
+        def walk(node: Any, parts: List[str]) -> Any:
+            if not parts:
+                return node if hasattr(node, "set") else None
+            for i in range(len(parts), 0, -1):    # names may contain "_" themselves
+                child = getattr(node, "_".join(parts[:i]), None)
+                if child is not None:
+                    found = walk(child, parts[i:])
+                    if found is not None:
+                        return found
+            return None
+        return walk(parameters, name.split("_"))
 
     @staticmethod
     def _status_name(st: Any, code: int, has_solution: bool) -> str:
@@ -378,6 +406,13 @@ class LXCPLEXSolver(LXSolverInterface):
         has_solution = sol.get_solution_type() != sol.type.none and code not in (
             st.unbounded, st.MIP_unbounded, st.infeasible_or_unbounded,
             st.MIP_infeasible_or_unbounded, st.infeasible, st.MIP_infeasible)
+        if has_solution and not sol.is_primal_feasible():
+            has_solution = False    # an LP stopped by a limit keeps an infeasible point
+        if code == st.relaxation_unbounded:
+            warn_user(
+                "CPLEX could not bound the objective (its relaxation is unbounded); the "
+                "model may be unbounded, and any point returned is only feasible",
+                UserWarning)
         lx_status = self._status_name(sol.status, code, has_solution)
         obj_value = sol.get_objective_value() if has_solution else 0.0
         if has_solution:

@@ -173,7 +173,7 @@ class LXCPSATSolver(LXSolverInterface):
             elif row.sense == LXConstraintSense.GE:
                 ct = cm.Add(expr >= rhs)
             else:
-                band = self._grid_band(ints) if self._relax_grid else 0
+                band = self._grid_band(ints, rhs) if self._relax_grid else 0
                 ct = cm.AddLinearConstraint(expr, rhs - band, rhs + band) if band else cm.Add(expr == rhs)
             ct.with_name(row.name)
             self._register_row(row, ct)
@@ -194,18 +194,27 @@ class LXCPSATSolver(LXSolverInterface):
         return cm
 
     def _int_bound(self, value: float, rounding: Any, pos: int, open_bound: int) -> int:
-        if math.isfinite(value):
+        if math.isfinite(value) and abs(value) <= open_bound:
             return int(rounding(value - 1e-9 if rounding is math.ceil else value + 1e-9))
+        # open, or so large that rows could overflow: capped like an open bound
         self._open[pos] = open_bound
         return open_bound if value > 0 else -open_bound
 
-    def _grid_band(self, ints: Dict[int, int]) -> int:
+    def _grid_band(self, ints: Dict[int, int], rhs: int) -> int:
         """Half-width of an equality row's band when its continuous variables live on
         the 1/scaling_factor grid. Rounding each of them to the nearest grid point moves
-        the row by at most half the sum of their integer coefficients (``_relax_grid``
-        == 1); a bound that is itself off the grid can cost a whole step (== 2)."""
+        the row by at most half the sum of their integer coefficients; a bound that is
+        itself off the grid can cost a whole step.
+
+        ``_relax_grid`` == 1 widens (by half a step) only rows with no integer solution
+        at all (the gcd of their coefficients does not divide the right-hand side);
+        == 2 widens every such row by half a step, == 3 by a whole step."""
         total = sum(abs(c) for pos, c in ints.items() if self._scales[pos] > 1)
-        return total if self._relax_grid > 1 else (total + 1) // 2
+        if not total:
+            return 0
+        if self._relax_grid == 1 and rhs % math.gcd(*ints.values()) == 0:
+            return 0
+        return total if self._relax_grid > 2 else (total + 1) // 2
 
     def _expr(self, ints: Dict[int, int]) -> Any:
         if not ints:
@@ -347,7 +356,7 @@ class LXCPSATSolver(LXSolverInterface):
                 # An equality on continuous variables can miss the 1/scaling_factor grid
                 # (3x == 1). Solve again with each such equality as a band one grid step
                 # wide per variable (as CP-SAT's own MIP import does).
-                for steps in (1, 2):           # half a grid step, then a whole one
+                for steps in (1, 2, 3):        # rows without a grid solution, then all rows
                     self._relax_grid = steps
                     cpsat_model = self.build_model(model)
                     status = solver.Solve(cpsat_model)
@@ -355,6 +364,7 @@ class LXCPSATSolver(LXSolverInterface):
                         break
                 self._grid_relaxed = True
             solve_time = time.time() - start_time
+            self._stopped_by_time_limit = status == cp_model.UNKNOWN and time_limit is not None
         finally:
             self._approximate = False
             self._relax_grid = 0
@@ -437,6 +447,8 @@ class LXCPSATSolver(LXSolverInterface):
         }
 
         lx_status = status_map.get(status, "unknown")
+        if getattr(self, "_stopped_by_time_limit", False):
+            lx_status = "time_limit"
         has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
         variables: Dict[str, Any] = {}
         mapped: Dict[str, Any] = {}

@@ -94,6 +94,8 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `model_factory` must return new constraint and variable objects on every call.
 - `LXResultStore` tables: `lumix_runs.scenario` and `lumix_run_values.name` are `TEXT`.
 - `LXSolution._undesired_deviations` moved to the end of the dataclass fields and is excluded from comparisons.
+- OR-Tools and CP-SAT report `time_limit` (it was `not_solved` / `unknown`) when the time limit stops the search before any solution, as Gurobi and GLPK do.
+
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
@@ -164,6 +166,13 @@ Models that were solved wrongly before now give different (correct) results; eve
 - Documentation pages called API that does not exist (`identify_binding_constraints`, `set_variable_bound`, `apply_change`, `get_non_binding_constraints`, `LXCustomLinearizer`, `lower_bound_func`), used goals with data but no `indexed_by`, treated a goal's deviations as a number, and described a linearization engine LumiX no longer has; code includes in the examples pages had drifted into docstrings.
 - `LXRationalConverter` reported an error of `2|x|` for exact negative values with `method="continued_fraction"`, and an error of 0 for any value it rounded to an integer.
 - The README's "Advanced Analysis" snippet used constraint names that the Simple Example does not define.
+- CPLEX reported an LP stopped by a limit as `feasible` with a point that violates the constraints; such a stop is now `time_limit` without values.
+- CPLEX reported some infeasible LPs as `unbounded`, GLPK reported infeasible LPs as `unbounded` and infeasible MIPs as `inf_or_unbounded`, and OR-Tools (SCIP) reported a feasible unbounded MIP as `infeasible`.
+- GLPK aborted the Python process, and Gurobi raised, on a variable or constraint name longer than 255 characters or with a control character; names given to the solvers are now shortened (with a hash) and cleaned.
+- GLPK never freed its problems, so memory grew with every solve.
+- CP-SAT widened equalities that have an exact solution on its grid when another equality had none (`x + y == 1` gave 1.001), and failed with a raw `TypeError` on a very large finite bound (it is now capped like an open bound).
+- Gurobi's documented `LogToConsole=1` printed nothing; documented CPLEX parameters such as `mip_limits_cutsfactor` were skipped as unknown, and the CPLEX log could not be shown (`verbose=True` now shows it; any CPLEX parameter can be given by its path, `_` for `.`).
+- CPLEX warns when it cannot bound a nonconvex objective (status 133) instead of reporting the point it stopped at as an ordinary feasible solution.
 
 ## [0.2.1] - 2026-10-14
 

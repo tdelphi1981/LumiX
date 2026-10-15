@@ -17,7 +17,7 @@ from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
-from .base import LXSolverInterface
+from .base import LXSolverInterface, native_name
 from .capabilities import GUROBI_CAPABILITIES
 
 
@@ -82,7 +82,7 @@ class LXGurobiSolver(LXSolverInterface):
         gm = self._model
         vtype = {LXVarType.CONTINUOUS: GRB.CONTINUOUS, LXVarType.INTEGER: GRB.INTEGER,
                  LXVarType.BINARY: GRB.BINARY}
-        handles = [gm.addVar(lb=v.lower, ub=v.upper, vtype=vtype[v.var_type], name=v.name)
+        handles = [gm.addVar(lb=v.lower, ub=v.upper, vtype=vtype[v.var_type], name=native_name(v.name))
                    for v in canon.variables]
         self._handles = handles
         self._variable_map = self._family_map(canon, handles)
@@ -91,7 +91,7 @@ class LXGurobiSolver(LXSolverInterface):
                  LXConstraintSense.EQ: GRB.EQUAL}
         for row in canon.rows:
             expr = gp.LinExpr([c for c in row.coeffs.values()], [handles[p] for p in row.coeffs])
-            self._register_row(row, gm.addLConstr(expr, sense[row.sense], row.rhs, name=row.name))
+            self._register_row(row, gm.addLConstr(expr, sense[row.sense], row.rhs, name=native_name(row.name)))
         if canon.sense is not None:
             expr = gp.LinExpr([c for c in canon.objective.values()],
                               [handles[p] for p in canon.objective])
@@ -148,7 +148,8 @@ class LXGurobiSolver(LXSolverInterface):
         if gap_tolerance is not None:
             gurobi_model.setParam(GRB.Param.MIPGap, gap_tolerance)
 
-        if solver_params.pop("verbose", False):
+        if solver_params.pop("verbose", False) or solver_params.get("LogToConsole"):
+            # The environment is created with OutputFlag=0, which LogToConsole cannot override.
             gurobi_model.setParam(GRB.Param.OutputFlag, 1)
 
         # Set additional solver parameters

@@ -148,12 +148,34 @@ class LXORToolsSolver(LXSolverInterface):
             params.SetIntegerParam(pywraplp.MPSolverParameters.PRESOLVE,
                                    pywraplp.MPSolverParameters.PRESOLVE_OFF)
             status = solver.Solve(params)
+        elif status == pywraplp.Solver.INFEASIBLE and self._is_mip:
+            # SCIP reports "infeasible or unbounded" as INFEASIBLE. A model with a
+            # feasible point is therefore unbounded.
+            if self._has_feasible_point(solver, params):
+                status = pywraplp.Solver.UNBOUNDED
         solve_time = time.time() - start_time
+        self._stopped_by_time_limit = (status == pywraplp.Solver.NOT_SOLVED
+                                       and time_limit is not None)
 
         # Parse and return solution
         solution = self._parse_solution(model, solver, status, solve_time, enable_sensitivity)
 
         return solution
+
+    @staticmethod
+    def _has_feasible_point(solver: pywraplp.Solver, params: pywraplp.MPSolverParameters) -> bool:
+        objective = solver.Objective()
+        handles = solver.variables()
+        coeffs = [objective.GetCoefficient(v) for v in handles]
+        offset, maximize = objective.offset(), objective.maximization()
+        objective.Clear()
+        try:
+            return solver.Solve(params) in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
+        finally:
+            for v, c in zip(handles, coeffs):
+                objective.SetCoefficient(v, c)
+            objective.SetOffset(offset)
+            objective.SetOptimizationDirection(maximize)
 
     @staticmethod
     def _solver_parameters(gap_tolerance: Optional[float]) -> pywraplp.MPSolverParameters:
@@ -322,6 +344,8 @@ class LXORToolsSolver(LXSolverInterface):
         }
 
         lx_status = status_map.get(status, "unknown")
+        if getattr(self, "_stopped_by_time_limit", False):
+            lx_status = "time_limit"
 
         # Extract objective value
         if status in [pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE]:

@@ -1,5 +1,6 @@
 """Base solver interface for LumiX."""
 
+import hashlib
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Generic, List, Literal, Optional, Tuple, TypeVar
 
@@ -16,6 +17,22 @@ from ..utils.rational import LXRationalConverter
 from .capabilities import LXSolverCapability
 
 TModel = TypeVar("TModel")
+
+
+def native_name(name: Any, limit: int = 255) -> str:
+    """A name every solver accepts for ``name``.
+
+    Control characters become ``_`` and a name longer than ``limit`` bytes is cut and
+    ends in a hash of the full name, so distinct names stay distinct. GLPK aborts the
+    process on such names and Gurobi raises; the names are only labels, LumiX never
+    reads them back.
+    """
+    text = "".join(ch if ch.isprintable() else "_" for ch in str(name))
+    if len(text.encode("utf-8")) <= limit:
+        return text
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    head = text.encode("utf-8")[: limit - len(digest) - 1].decode("utf-8", "ignore")
+    return f"{head}~{digest}"
 
 
 class LXSolverInterface(ABC, Generic[TModel]):
