@@ -137,3 +137,62 @@ def test_a20_fractional_power_of_negative_input_raises():
     from lumix.linearization.functions import LXNonLinearFunctions as F
     with pytest.raises(ValueError, match="not real"):
         _solve_function(lambda x, pl: F.power(x, 0.5, pl), -1, 4, "max")
+# --- Görev 2: canonical nonlinear items (A16, spec §3.1 rule 2) ----------------------
+def test_a16_canonical_items_are_per_instance():
+    x = fam("x", ["p", "q"], lower=-10, upper=10)
+    m = LXModel("m").add_variable(x).minimize(LXNonLinearExpression().add_abs(x, coeff=2.0))
+    items = m.to_canonical().objective_nonlinear
+    assert [(i.kind, i.variables, i.coeff, i.key) for i in items] == [
+        ("abs", (0,), 2.0, "p"), ("abs", (1,), 2.0, "q")]
+
+
+def test_a16_single_variable_is_broadcast_over_a_family():
+    x = fam("x", ["p", "q"], lower=0, upper=5)
+    s = fam("s", ["only"], lower=0, upper=5)
+    m = LXModel("m").add_variables(x, s).maximize(LXNonLinearExpression().add_min(x, s))
+    items = m.to_canonical().objective_nonlinear
+    assert [(i.kind, i.variables, i.key, i.params["coefficients"]) for i in items] == [
+        ("min", (0, 2), "p", (1.0, 1.0)), ("min", (1, 2), "q", (1.0, 1.0))]
+
+
+def test_a16_families_with_different_keys_raise():
+    x = fam("x", ["p", "q"], lower=0, upper=5)
+    y = fam("y", ["p", "r"], lower=0, upper=5)
+    m = LXModel("m").add_variables(x, y).maximize(LXNonLinearExpression().add_product(x, y))
+    with pytest.raises(ValueError, match="different index keys"):
+        m.to_canonical()
+
+
+def test_canonical_piecewise_item_has_numeric_points():
+    x = fam("x", ["k"], lower=0, upper=4)
+    m = LXModel("m").add_variable(x).minimize(LXNonLinearExpression().add_piecewise(
+        x, lambda t: t * t, breakpoints=[0, 2, 4], method="incremental"))
+    (item,) = m.to_canonical().objective_nonlinear
+    assert item.kind == "piecewise" and item.params == {
+        "breakpoints": (0.0, 2.0, 4.0), "values": (0.0, 4.0, 16.0), "method": "incremental"}
+
+
+def test_nonlinear_expression_constant_is_kept():
+    x = fam("x", ["k"], lower=1, upper=4)
+    e = LXNonLinearExpression().add_linear(lin((x, 1.0)))
+    e.constant = 5.0
+    m = LXModel("m").add_variable(x).minimize(e)
+    assert m.to_canonical().objective_constant == 5.0
+    assert solve_with("ortools", m).objective_value == pytest.approx(6.0)
+
+
+def test_indicator_in_objective_needs_linearization_for_canonical():
+    from lumix.nonlinear.terms import LXIndicatorTerm
+    x, b = fam("x", ["k"], lower=0, upper=4), fam("b", ["k"], "binary")
+    e = LXNonLinearExpression().add_nonlinear_term(LXIndicatorTerm(b, True, lin((x, 1)), "<=", 2))
+    m = LXModel("m").add_variables(x, b).maximize(e)
+    with pytest.raises(ValueError, match="indicator"):
+        m.to_canonical()
+
+
+@pytest.mark.parametrize("solver", AVAILABLE)
+def test_solvers_still_require_linearization(solver):
+    x = fam("x", ["k"], lower=-3, upper=5)
+    m = LXModel("m").add_variable(x).minimize(LXNonLinearExpression().add_abs(x))
+    with pytest.raises(ValueError, match="enable_linearization"):
+        solve_with(solver, m)

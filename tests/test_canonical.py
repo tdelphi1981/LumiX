@@ -234,12 +234,13 @@ def test_unknown_variable_in_expression_raises():
 
 
 def test_nonlinear_objective_requires_linearization():
-    from lumix import LXNonLinearExpression
+    from lumix import LXNonLinearExpression, LXOptimizer
     x = fam("x", ["k"], lower=0, upper=5)
     m = LXModel("m").add_variable(x)
     m.minimize(LXNonLinearExpression().add_abs(x))
+    assert [i.kind for i in m.to_canonical().objective_nonlinear] == ["abs"]
     with pytest.raises(ValueError, match="enable_linearization"):
-        m.to_canonical()
+        LXOptimizer().use_solver("ortools").solve(m)
 
 
 def test_a4_scalar_variable_without_data_source():

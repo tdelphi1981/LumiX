@@ -54,6 +54,10 @@ class LXCanonicalNonlinear:
     variables: Tuple[int, ...]
     coeff: float
     params: Dict[str, Any] = field(default_factory=dict)
+    #: Position of the source term in its expression; the items of one term share it.
+    term: int = 0
+    #: Index key of the instance the item applies to (``None`` for single variables).
+    key: Any = None
 
 
 @dataclass(frozen=True)
@@ -154,16 +158,33 @@ class LXInstanceCache:
 class LXCanonicalBuilder:
     """Build the canonical form of one model."""
 
-    def __init__(self, model: "LXModel", cache: Optional[LXInstanceCache] = None) -> None:
+    def __init__(self, model: "LXModel", cache: Optional[LXInstanceCache] = None,
+                 config: Any = None) -> None:
         self.model = model
+        self._config = config
+        self.variables: List[LXCanonicalVariable] = []
+        self.nonlinear_items: List[LXCanonicalNonlinear] = []
         self.cache = cache or LXInstanceCache()
         self.families: Dict[str, Dict[Any, int]] = {}
         self.scalars: List[str] = []
         self.quadratic: Dict[Tuple[int, int], float] = {}
         self._missing_rows: Dict[Tuple[str, str], None] = {}
 
+    @property
+    def config(self) -> Any:
+        if self._config is None:
+            from ..linearization.config import LXLinearizerConfig
+            self._config = LXLinearizerConfig()
+        return self._config
+
+    def prepare(self) -> List[LXCanonicalVariable]:
+        """Number the variables (positions and ``families``); done once per build."""
+        if not self.variables:
+            self.variables = self._variables()
+        return self.variables
+
     def build(self) -> LXCanonicalModel:
-        variables = self._variables()
+        variables = self.prepare()
         rows: List[LXCanonicalRow] = []
         for constraint in self.model.constraints:
             rows.extend(self._rows(constraint))
@@ -179,7 +200,7 @@ class LXCanonicalBuilder:
             rows=tuple(rows),
             objective=objective,
             objective_constant=constant,
-            objective_nonlinear=(),
+            objective_nonlinear=tuple(self.nonlinear_items),
             sense=sense,
             scalar_families=tuple(self.scalars),
             objective_quadratic=self.quadratic,
@@ -265,6 +286,16 @@ class LXCanonicalBuilder:
             expr = self.model.objective_expr
         if expr is None:
             return {}, 0.0, None
+        if isinstance(expr, LXNonLinearExpression):
+            from ..nonlinear.terms import LXIndicatorTerm
+            if any(isinstance(t, LXIndicatorTerm) for t in expr.nonlinear_terms):
+                raise ValueError(
+                    "The objective has indicator terms, which are constraints; call "
+                    "LXOptimizer().enable_linearization() or LXLinearizer(...).linearize_model() "
+                    "before solving")
+            self.nonlinear_items = self.nonlinear(expr, "the objective")
+            coeffs, constant = self.linear_row(expr.linear_terms, None, where="the objective")
+            return coeffs, constant + float(expr.constant), self.model.objective_sense
         if isinstance(expr, LXQuadraticExpression):
             coeffs, constant = self.linear_row(expr.linear_terms, None, where="the objective")
             self.quadratic = self._quadratic(expr)
@@ -275,6 +306,7 @@ class LXCanonicalBuilder:
     def linear_row(self, expr: Any, row: Any = None,
                    where: str = "an expression") -> Tuple[Dict[int, float], float]:
         """Coefficients per canonical variable position (summed) and the constant."""
+        extra = float(expr.constant) if isinstance(expr, LXNonLinearExpression) else 0.0
         expr = self._linear_part(expr, where)
         acc: Dict[int, float] = {}
         size: Dict[int, float] = {}   # sum of |value| per slot, to recognise cancellation noise
@@ -309,7 +341,73 @@ class LXCanonicalBuilder:
                     acc[slot] = acc.get(slot, 0.0) + value
                     size[slot] = size.get(slot, 0.0) + abs(value)
         return ({k: v for k, v in acc.items() if abs(v) > NOISE * size[k]},
-                float(expr.constant))
+                float(expr.constant) + extra)
+
+    def nonlinear(self, expr: LXNonLinearExpression, where: str) -> List[LXCanonicalNonlinear]:
+        """The nonlinear terms of ``expr`` as per-instance items (W4, spec §3.1 rule 2).
+        A term on variable families applies to each instance and the results are
+        summed; the families of one term must have the same index keys, and a single
+        variable (a scalar or a one-instance family) is used for every instance.
+        Indicator terms are constraints and are left to the linearizer."""
+        from ..nonlinear.terms import (LXAbsoluteTerm, LXBilinearTerm, LXIndicatorTerm,
+                                       LXMinMaxTerm, LXPiecewiseLinearTerm)
+        items: List[LXCanonicalNonlinear] = []
+        for index, term in enumerate(expr.nonlinear_terms):
+            if isinstance(term, LXIndicatorTerm):
+                continue
+            if isinstance(term, LXAbsoluteTerm):
+                for key, ps in self._aligned([term.var], where):
+                    items.append(LXCanonicalNonlinear("abs", ps, float(term.coefficient), {},
+                                                      index, key))
+            elif isinstance(term, LXMinMaxTerm):
+                coeffs = tuple(float(c) for c in (term.coefficients or [1.0] * len(term.vars)))
+                if len(coeffs) != len(term.vars):
+                    raise ValueError(f"{where.capitalize()}: {term.operation}() has "
+                                     f"{len(term.vars)} variables but {len(coeffs)} coefficients")
+                for key, ps in self._aligned(term.vars, where):
+                    items.append(LXCanonicalNonlinear(term.operation, ps, 1.0,
+                                                      {"coefficients": coeffs}, index, key))
+            elif isinstance(term, LXBilinearTerm):
+                for key, ps in self._aligned([term.var1, term.var2], where):
+                    items.append(LXCanonicalNonlinear("product", ps, float(term.coefficient), {},
+                                                      index, key))
+            elif isinstance(term, LXPiecewiseLinearTerm):
+                params = self._piecewise_params(term)
+                for key, ps in self._aligned([term.var], where):
+                    items.append(LXCanonicalNonlinear("piecewise", ps, 1.0, params, index, key))
+            else:
+                raise ValueError(f"Unsupported nonlinear term type: {type(term).__name__}")
+        return items
+
+    def _aligned(self, variables: List["LXVariable"], where: str) -> List[Tuple[Any, Tuple[int, ...]]]:
+        """``(key, positions)`` per instance of the term's families (see :meth:`nonlinear`)."""
+        maps = [self._positions(v, where) for v in variables]
+        keys: Optional[List[Any]] = None
+        for v, positions in zip(variables, maps):
+            if len(positions) == 1:
+                continue
+            if keys is None:
+                keys = list(positions)
+            elif set(positions) != set(keys):
+                names = ", ".join(sorted({u.name for u in variables}))
+                raise ValueError(
+                    f"{where.capitalize()}: a nonlinear term combines variable families with "
+                    f"different index keys ({names}); use families over the same keys, or "
+                    "single variables")
+        if keys is None:
+            return [(None, tuple(next(iter(m.values())) for m in maps))]
+        return [(k, tuple(m[k] if len(m) != 1 else next(iter(m.values())) for m in maps))
+                for k in keys]
+
+    def _piecewise_params(self, term: Any) -> Dict[str, Any]:
+        from ..linearization.techniques.piecewise import piecewise_points
+        lower, upper = canonical_bounds(term.var)
+        points, values = piecewise_points(
+            term.func, None if math.isinf(lower) else lower, None if math.isinf(upper) else upper,
+            self.config, name=term.var.name, num_segments=term.num_segments, x_min=term.x_min,
+            x_max=term.x_max, adaptive=term.adaptive, breakpoints=term.breakpoints)
+        return {"breakpoints": tuple(points), "values": tuple(values),
+                "method": term.method or self.config.pwl_method}
 
     def _row_outside_family(self, var: "LXVariable", row: Any) -> bool:
         """A row of the variable's own (user-defined) data type that is not one of its

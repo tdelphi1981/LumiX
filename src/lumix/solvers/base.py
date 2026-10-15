@@ -96,6 +96,10 @@ class LXSolverInterface(ABC, Generic[TModel]):
         self._constraint_map = {}
         self._constraint_list = []
         self._canonical = LXCanonicalBuilder(model, self._instance_cache).build()
+        if self._canonical.objective_nonlinear:
+            raise ValueError(
+                "The objective has nonlinear terms; call LXOptimizer().enable_linearization() "
+                "or LXLinearizer(...).linearize_model() before solving")
         if self._canonical.objective_quadratic and not self.capability.can_solve_quadratic():
             raise ValueError(
                 f"{self.capability.name} has no quadratic objective; call "
