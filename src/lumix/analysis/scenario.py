@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 
@@ -14,10 +13,12 @@ from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
 from ..core.enums import LXObjectiveSense
+from ._factory import ModelSource
 from ._rhs import set_rhs, shift_rhs
 
 if TYPE_CHECKING:
     from ..visualization.scenario import LXScenarioCompare
+    from .store import LXResultStore
 
 TModel = TypeVar("TModel")
 
@@ -270,21 +271,38 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
     def __init__(
         self,
-        base_model: LXModel[TModel],
-        optimizer: LXOptimizer[TModel],
+        base_model: Optional[LXModel[TModel]] = None,
+        optimizer: Optional[LXOptimizer[TModel]] = None,
         include_baseline: bool = True,
+        *,
+        model_factory: Optional[Callable[[], LXModel[TModel]]] = None,
+        result_store: Optional["LXResultStore"] = None,
     ):
         """
         Initialize scenario analyzer.
 
         Args:
-            base_model: Base optimization model
+            base_model: Base optimization model (copied for every scenario)
             optimizer: Optimizer to use for solving scenarios
             include_baseline: Whether to include baseline (unmodified) scenario
+            model_factory: Instead of ``base_model``: a function that builds the model.
+                It is called once for the baseline and once per scenario, so nothing is
+                copied (recommended for ORM-backed models: open a session inside it).
+                It must return a new model on every call; the analyzer keeps the
+                models it built until it is discarded.
+            result_store: Optional :class:`~lumix.analysis.store.LXResultStore` that
+                records every solve.
+
+        .. versionchanged:: 0.3.0
+           ``model_factory`` and ``result_store`` added; ``base_model`` and
+           ``optimizer`` may be passed by keyword.
         """
-        self.base_model = base_model
+        self._source = ModelSource(base_model, model_factory, optimizer,
+                                   "LXScenarioAnalyzer")
+        self.base_model = self._source.base
         self.optimizer = optimizer
         self.include_baseline = include_baseline
+        self.result_store = result_store
         self.scenarios: Dict[str, LXScenario[TModel]] = {}
         self.results: Dict[str, LXSolution[TModel]] = {}
 
@@ -561,16 +579,17 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
     def _clone_model(self, model: LXModel[TModel]) -> LXModel[TModel]:
         """
-        Clone a model (deep copy).
+        Return an independent model for one scenario run.
 
         Args:
-            model: Model to clone
+            model: Ignored (kept for subclass compatibility); the model comes from the
+                analyzer's source: a deep copy of ``base_model``, or a fresh
+                ``model_factory()`` build.
 
         Returns:
-            Cloned model
+            A model that can be modified without touching ``base_model``
         """
-        # Deep copy is safest approach
-        return deepcopy(model)
+        return self._source.new()
 
     def _apply_constraint_modification(
         self,

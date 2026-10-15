@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 
 from typing_extensions import Self
 
@@ -14,7 +13,11 @@ from ..core.enums import LXConstraintSense, LXObjectiveSense
 from ..core.model import LXModel
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
+from ._factory import ModelSource
 from ._rhs import set_rhs, shift_rhs
+
+if TYPE_CHECKING:
+    from .store import LXResultStore
 
 TModel = TypeVar("TModel")
 
@@ -108,20 +111,36 @@ class LXWhatIfAnalyzer(Generic[TModel]):
 
     def __init__(
         self,
-        model: LXModel[TModel],
-        optimizer: LXOptimizer[TModel],
+        model: Optional[LXModel[TModel]] = None,
+        optimizer: Optional[LXOptimizer[TModel]] = None,
         baseline_solution: Optional[LXSolution[TModel]] = None,
+        *,
+        model_factory: Optional[Callable[[], LXModel[TModel]]] = None,
+        result_store: Optional["LXResultStore"] = None,
     ):
         """
         Initialize what-if analyzer.
 
         Args:
-            model: Optimization model
+            model: Optimization model (copied for every what-if run)
             optimizer: Optimizer to use for solving
             baseline_solution: Pre-computed baseline solution (optional)
+            model_factory: Instead of ``model``: a function that builds the model. It is
+                called once for the baseline and once per what-if run, so nothing is
+                copied (recommended for ORM-backed models: open a session inside it).
+                It must return a new model on every call; the analyzer keeps the
+                models it built until it is discarded.
+            result_store: Optional :class:`~lumix.analysis.store.LXResultStore` that
+                records every solve.
+
+        .. versionchanged:: 0.3.0
+           ``model_factory`` and ``result_store`` added; ``model`` and ``optimizer``
+           may be passed by keyword.
         """
-        self.model = model
+        self._source = ModelSource(model, model_factory, optimizer, "LXWhatIfAnalyzer")
+        self.model = self._source.base
         self.optimizer = optimizer
+        self.result_store = result_store
         self._baseline_solution = baseline_solution
         self._result_cache: Dict[str, LXWhatIfResult[TModel]] = {}
 
@@ -563,7 +582,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
 
     def _new_model(self) -> LXModel[TModel]:
         """A fresh, independent model to modify for one what-if run."""
-        return deepcopy(self.model)
+        return self._source.new()
 
     def _build_result(
         self,

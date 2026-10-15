@@ -387,3 +387,75 @@ def test_b11_tuple_keyed_rows():
     assert set(rows) == {"cap[('x', 1)]", "cap[('y', 1)]"}
     assert rows["cap[('y', 1)]"].shadow_price == pytest.approx(5.0)
     assert set(an.analyze_constraint_family("cap")) == {("x", 1), ("y", 1)}
+
+
+# ---- Task 5: model_factory ---------------------------------------------------
+
+def test_w6_scenario_factory_builds_a_model_per_run():
+    calls = []
+
+    def build():
+        calls.append(1)
+        ps = [PlainP("a", 4, 3), PlainP("b", 6, 5)]      # fresh data every call
+        return capacity_model(ps, lambda p: p.profit)
+
+    sa = LXScenarioAnalyzer(optimizer=opt(), model_factory=build)
+    sa.add_scenario(LXScenario("double_cap").modify_constraint_rhs("cap", multiply=2.0))
+    sa.add_scenario(LXScenario("total_up").modify_constraint_rhs("total", add=2.0))
+    r = {k: v.objective_value for k, v in sa.run_all_scenarios().items()}
+    assert r == pytest.approx({"baseline": 36.0, "double_cap": 40.0, "total_up": 42.0})
+    assert len(calls) == 3                                 # base + one per scenario
+    assert sa.base_model.get_constraint("total").rhs_value == 8
+
+
+def test_w6_whatif_factory():
+    wa = LXWhatIfAnalyzer(optimizer=opt(), model_factory=mincost_model)
+    assert wa.relax_constraint("need_x", by=1).new_objective == pytest.approx(45.0)
+    assert wa.model.get_constraint("need_x").rhs_value == 5
+
+
+def test_w6_factory_must_build_new_models():
+    shared = mincost_model()
+    sa = LXScenarioAnalyzer(optimizer=opt(), model_factory=lambda: shared)
+    sa.add_scenario(LXScenario("s").modify_constraint_rhs("need_x", set_value=4))
+    with pytest.raises(ValueError, match="new model"):
+        sa.run_scenario("s")
+    assert shared.get_constraint("need_x").rhs_value == 5
+
+
+def test_w6_analyzer_arguments_are_validated():
+    m = mincost_model()
+    with pytest.raises(ValueError, match="model_factory"):
+        LXScenarioAnalyzer(m, opt(), model_factory=mincost_model)
+    with pytest.raises(ValueError, match="model_factory"):
+        LXWhatIfAnalyzer(optimizer=opt())
+    with pytest.raises(TypeError, match="optimizer"):
+        LXScenarioAnalyzer(m)
+
+
+def test_w6_orm_factory_with_fresh_session():
+    m, s, Product = _lazy_orm_model()
+    engine = s.get_bind()
+    s.close()
+    from sqlalchemy.orm import Session
+    sessions = []
+
+    def build():
+        sess = Session(engine)
+        sessions.append(sess)
+        prods = sess.query(Product).all()
+        y = LXVariable[Product, float]("y").continuous().bounds(lower=0, upper=10) \
+            .indexed_by(lambda p: p.id).from_data(prods)
+        mm = LXModel("mm").add_variable(y).maximize(
+            LXLinearExpression().add_term(y, lambda p: p.profit * p.category.factor))
+        mm.add_constraint(LXConstraint("cap").expression(LXLinearExpression().add_term(y))
+                          .le().rhs(10))
+        return mm
+
+    sa = LXScenarioAnalyzer(optimizer=opt(), model_factory=build)
+    sa.add_scenario(LXScenario("half").modify_constraint_rhs("cap", set_value=5))
+    r = sa.run_all_scenarios()
+    assert r["baseline"].objective_value == pytest.approx(60.0)
+    assert r["half"].objective_value == pytest.approx(30.0)
+    for sess in sessions:
+        sess.close()
