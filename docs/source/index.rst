@@ -224,7 +224,8 @@ Linearization
 
 Automatic linearization of non-linear terms:
 
-- Bilinear products (x × y) using McCormick envelopes
+- Bilinear products (x × y): exact for binary and integer factors, McCormick
+  envelopes (a flagged relaxation) for two continuous variables
 - Absolute values (|x|)
 - Min/max functions
 - Piecewise-linear functions

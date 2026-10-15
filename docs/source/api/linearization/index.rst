@@ -146,7 +146,6 @@ Basic Linearization
 
    # Configure linearization
    config = LXLinearizerConfig(
-       default_method=LXLinearizationMethod.MCCORMICK,
        big_m_value=1e5,
        pwl_num_segments=30,
        adaptive_breakpoints=True

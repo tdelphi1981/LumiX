@@ -34,7 +34,8 @@ For z = min(x₁, x₂, ..., xₙ), introduce auxiliary variable z with constrai
 
    z \leq x_i \quad \forall i
 
-When minimizing z in the objective, z will equal the minimum.
+When z is pushed up (maximized, or in a ``>=`` constraint), z will equal the
+minimum.
 
 Maximum
 ~~~~~~~
@@ -45,13 +46,29 @@ For z = max(x₁, x₂, ..., xₙ), introduce auxiliary variable z with constrai
 
    z \geq x_i \quad \forall i
 
-When maximizing z in the objective, z will equal the maximum.
+When z is pushed down (minimized, or in a ``<=`` constraint), z will equal the
+maximum.
+
+Other Uses (Exact Form)
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A minimized min, a maximized max, a ``==`` constraint, or a negative use cannot
+rely on the objective. LumiX then adds one selection binary :math:`p_i` per
+argument, :math:`\sum_i p_i = 1`, and constraints that make z equal to the chosen
+argument (for min: :math:`z \geq x_i - M_i (1 - p_i)`). The constants come from the
+bounds of the arguments, so this form needs finite bounds on every argument and
+raises ``ValueError`` without them.
+
+.. versionchanged:: 0.3.0
+   Before 0.3.0 only the bounding constraints were added, so a minimized min or a
+   maximized max returned wrong (often unbounded) results.
 
 **Key Properties:**
 
-- Adds 1 auxiliary variable per min/max operation
-- Adds n constraints (one per input variable)
-- Requires appropriate objective sense (min for minimum, max for maximum)
+- Adds 1 auxiliary variable per instance (plus n binaries in the exact form)
+- Adds n constraints (one per input variable; 2n + 1 in the exact form)
+- On variable families the term applies per instance:
+  ``add_max(a, b)`` is :math:`\sum_k \max(a_k, b_k)`
 
 Basic Usage
 -----------
@@ -319,6 +336,7 @@ Minimization Problems
 
    # Objective: minimize min_of_costs
    # Result: z = min(cost_a, cost_b, cost_c)
+   # (exact form: selection binaries; the costs need finite bounds)
 
    # Minimize the maximum cost (more common - minimax)
    max_of_costs = LXMinMaxTerm(
@@ -376,19 +394,17 @@ For large numbers of alternatives:
 Common Pitfalls
 ---------------
 
-Wrong Objective Sense
-~~~~~~~~~~~~~~~~~~~~~
+Objective Sense and Model Size
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   # ✗ WRONG: Minimizing a "max" term without proper objective
+   # Both senses are correct since 0.3.0, but they differ in cost:
    max_cost = LXMinMaxTerm(vars=[...], operation="max", coefficients=[...])
-   # If you minimize, you get the correct max
-   # If you maximize, the result is unbounded!
+   # minimize max_cost → minimax: plain form, no binaries
+   # maximize max_cost → exact form: selection binaries, needs finite bounds
 
-   # ✓ CORRECT: Match operation with objective sense
-   # minimize max_cost → minimax (reduce worst case)
-   # maximize min_benefit → maximin (improve worst case)
+   # maximize min_benefit → maximin: plain form, no binaries
 
 Missing Coefficients
 ~~~~~~~~~~~~~~~~~~~~

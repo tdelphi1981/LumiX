@@ -6,8 +6,9 @@ of nonlinear terms commonly found in optimization models.
 
 Techniques:
     - :class:`~lumix.linearization.techniques.bilinear.LXBilinearLinearizer`:
-      Linearizes bilinear products (x * y) using McCormick envelopes, Big-M method,
-      or Binary AND logic depending on variable types.
+      Linearizes bilinear products (x * y): exactly with AND logic, bound rows or a
+      binary expansion when a factor is binary or integer; with McCormick envelopes (a
+      relaxation) when both are continuous.
 
     - :class:`~lumix.linearization.techniques.piecewise.LXPiecewiseLinearizer`:
       Approximates arbitrary nonlinear functions using piecewise-linear segments
@@ -17,8 +18,9 @@ Mathematical Background:
     **Bilinear Linearization:**
 
     - Binary × Binary: Uses AND logic with 3 constraints
-    - Binary × Continuous: Big-M method with 4 constraints
-    - Continuous × Continuous: McCormick envelopes with 4 constraints
+    - Binary × bounded variable: 4 bound rows (exact)
+    - Integer × (integer | continuous): binary expansion of the integer factor (exact)
+    - Continuous × Continuous: McCormick envelopes with 4 constraints (a relaxation)
 
     **Piecewise-Linear Approximation:**
 

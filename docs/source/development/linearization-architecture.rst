@@ -3,16 +3,28 @@ Linearization Architecture
 
 Deep dive into the linearization module's architecture and design patterns.
 
+.. versionchanged:: 0.3.0
+   The linearizer was rebuilt on the canonical expansion of the model: terms are
+   expanded per variable instance, each item is linearized by a pure technique
+   function on references to single solver variables, and the user's model is never
+   modified. The sections below describe this design.
+
 Design Philosophy
 -----------------
 
 The linearization module follows these key principles:
 
 1. **Automatic Detection**: Scan models for nonlinear terms without user intervention
-2. **Type-Based Selection**: Choose techniques based on variable types (binary, continuous, integer)
-3. **Solver Awareness**: Leverage native solver features when available
-4. **Pluggable Techniques**: Easy to add new linearization methods
-5. **Late Binding**: Linearization happens during model building, not variable creation
+2. **One Expansion**: Nonlinear terms are expanded per instance by the same
+   canonical builder that :meth:`LXModel.to_canonical()
+   <lumix.core.model.LXModel.to_canonical>` uses, so the linearizer and external
+   engines see the same items
+3. **Type- and Use-Based Selection**: Choose techniques from the variable types and
+   from the direction in which each item is used (pushed down, pushed up, fixed)
+4. **Exact by Default**: Every technique is exact except McCormick envelopes for
+   continuous × continuous products, which are reported as a relaxation
+5. **No Side Effects**: The user's model and expressions are never modified; every
+   ``linearize_model()`` call starts afresh
 
 Architecture Overview
 ---------------------
@@ -26,59 +38,62 @@ Architecture Overview
            +config: LXLinearizerConfig
            +auxiliary_vars: List
            +auxiliary_constraints: List
+           +relaxation_terms: List
            +needs_linearization() bool
            +linearize_model() LXModel
-           -_linearize_expression() LXLinearExpression
-           -_linearize_absolute() LXVariable
-           -_linearize_minmax() LXVariable
-           -_linearize_indicator() None
+           +get_statistics() dict
+           -_linearize_items(items, sign) List
+           -_technique(item, refs, tag, sign) LXVarRef
+           -_indicator(builder, term) None
        }
 
-       class LXBilinearLinearizer {
-           +config: LXLinearizerConfig
-           +auxiliary_vars: List
-           +auxiliary_constraints: List
-           +linearize_bilinear() LXVariable
-           -_binary_and() LXVariable
-           -_big_m_product() LXVariable
-           -_mccormick_envelope() LXVariable
+       class LXCanonicalBuilder {
+           +prepare() List
+           +nonlinear(expr, where) List
+           +quadratic_items(expr) List
+           +linear_row(expr, row, where) Tuple
        }
 
-       class LXPiecewiseLinearizer {
-           +config: LXLinearizerConfig
-           +auxiliary_vars: List
-           +auxiliary_constraints: List
-           +approximate_function() LXVariable
-           -_generate_adaptive_breakpoints() List
-           -_sos2_formulation() LXVariable
-           -_incremental_formulation() LXVariable
-           -_logarithmic_formulation() LXVariable
+       class LXCanonicalNonlinear {
+           +kind: str
+           +variables: Tuple
+           +coeff: float
+           +params: Dict
+           +term: int
+           +key: Any
        }
 
-       class LXLinearizerConfig {
-           +default_method: LXLinearizationMethod
-           +big_m_value: float
-           +pwl_num_segments: int
-           +pwl_method: str
-           +adaptive_breakpoints: bool
-           +mccormick_tighten_bounds: bool
+       class LXVarRef {
+           +var: LXVariable
+           +key: Any
+           +lower: float
+           +upper: float
+           +var_type: LXVarType
+           +add_to(expr, coeff)
        }
 
-       class LXNonLinearFunctions {
-           +exp() LXVariable
-           +log() LXVariable
-           +sqrt() LXVariable
-           +power() LXVariable
-           +sigmoid() LXVariable
-           +sin() LXVariable
-           +cos() LXVariable
-           +custom() LXVariable
+       class LXAuxFactory {
+           +variables: List
+           +constraints: List
+           +tag(kind, names) str
+           +var(tag, role, key, kind, lower, upper) LXVarRef
+           +row(tag, role, key, terms, sense, rhs) None
        }
 
-       LXLinearizer --> LXBilinearLinearizer
-       LXLinearizer --> LXPiecewiseLinearizer
-       LXLinearizer --> LXLinearizerConfig
-       LXNonLinearFunctions --> LXPiecewiseLinearizer
+       class Techniques {
+           <<module functions>>
+           +absolute(aux, tag, key, x, convex)
+           +minmax(aux, tag, key, op, refs, coefficients, convex)
+           +product(aux, tag, key, x, y, config, relaxation)
+           +piecewise(aux, tag, key, x, breakpoints, values, method)
+       }
+
+       LXLinearizer --> LXCanonicalBuilder
+       LXCanonicalBuilder --> LXCanonicalNonlinear
+       LXLinearizer --> LXVarRef
+       LXLinearizer --> LXAuxFactory
+       LXLinearizer --> Techniques
+       Techniques --> LXAuxFactory
 
 Component Details
 -----------------
@@ -86,138 +101,117 @@ Component Details
 LXLinearizer: The Main Engine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Responsibilities:**
+:class:`~lumix.linearization.engine.LXLinearizer` (``lumix/linearization/engine.py``)
+orchestrates one run:
 
-- Scan model for nonlinear terms
-- Coordinate linearization techniques
-- Build linearized model
-- Track statistics
+1. ``_reset()`` creates a new :class:`~lumix.linearization.refs.LXAuxFactory`, so
+   auxiliary names, counters and relaxation records never carry over between calls.
+2. An :class:`~lumix.core.canonical.LXCanonicalBuilder` is built on the user's model;
+   ``builder.prepare()`` lists every variable instance, and each becomes an
+   :class:`~lumix.linearization.refs.LXVarRef` (family, index key, bounds, type).
+3. The objective and every constraint are rewritten into new expressions:
 
-**Key Design Decisions:**
+   - ``builder.nonlinear(expr, where)`` expands the nonlinear terms into
+     :class:`~lumix.core.canonical.LXCanonicalNonlinear` items;
+   - ``_linearize_items(items, sign)`` returns one output reference per item;
+   - the new expression is the linear part, the constant, and
+     ``coeff * output`` for each item.
 
-1. **Immutability**: Original model is never modified
-2. **Delegation**: Delegates to specialized linearizers
-3. **Statistics**: Tracks all created auxiliary elements
+   A quadratic objective is rewritten the same way from
+   ``builder.quadratic_items(expr)`` when the solver cannot solve it natively.
+4. A new ``LXModel`` named ``<name>_linearized`` receives the original variables,
+   the rewritten objective and constraints, and the auxiliary variables and
+   constraints. ``relaxation_terms`` lists the McCormick products; the optimizer
+   sets ``solution.relaxation`` from it.
 
-**Implementation Pattern:**
-
-.. code-block:: python
-
-   class LXLinearizer:
-       def __init__(self, model, capability, config):
-           self.model = model
-           self.capability = capability
-           self.config = config or LXLinearizerConfig()
-
-           # Technique instances
-           self._bilinear_linearizer = LXBilinearLinearizer(self.config)
-           self._piecewise_linearizer = LXPiecewiseLinearizer(self.config)
-
-       def linearize_model(self):
-           # Create new model (don't modify original)
-           linearized = LXModel(f"{self.model.name}_linearized")
-
-           # Process each nonlinear term
-           for term in self.model.objective_expr.nonlinear_terms:
-               self._linearize_term(term, linearized)
-
-           # Collect auxiliary elements
-           self._collect_auxiliary_elements(linearized)
-
-           return linearized
-
-LXBilinearLinearizer: Product Linearization
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Responsibilities:**
-
-- Detect variable type combinations
-- Select appropriate linearization method
-- Create auxiliary variables and constraints
-
-**Type Dispatch Pattern:**
+**Direction (``sign``):** ``_linearize_items`` receives where the items' values are
+pushed: ``+1`` pushed down (a minimized objective, a ``<=`` row), ``-1`` pushed up
+(a maximized objective, a ``>=`` row), ``0`` fixed (an ``==`` row; a quadratic
+objective, whose products are always exact or McCormick). ``_technique`` combines
+the sign with the item's coefficient to choose the cheap or the exact form:
 
 .. code-block:: python
 
-   def linearize_bilinear(self, term):
-       x, y = term.var1, term.var2
+   if item.kind == "abs":
+       return absolute(aux, tag, key, refs[0], convex=sign * item.coeff > 0)
+   if item.kind in ("min", "max"):
+       convex = sign < 0 if item.kind == "min" else sign > 0
+       return minmax(aux, tag, key, item.kind, refs, item.params["coefficients"], convex)
 
-       # Dispatch based on types
-       if x.var_type == BINARY and y.var_type == BINARY:
-           return self._binary_and(x, y, term.coefficient)
-       elif x.var_type == BINARY and y.var_type == CONTINUOUS:
-           return self._big_m_product(x, y, term.coefficient)
-       elif x.var_type == CONTINUOUS and y.var_type == CONTINUOUS:
-           return self._mccormick_envelope(x, y, term.coefficient)
-       else:
-           raise ValueError(f"Unsupported combination")
+**Indexed constraints:** for a constraint with ``indexed_by``, ``_row_terms`` adds
+the outputs with row-dependent coefficients: a row that is an instance of the term's
+family takes only that instance's item; a row from other data takes all items (the
+narrowing rule of :doc:`canonical-model`).
 
-**Auxiliary Variable Naming:**
+**Indicators** are not items: ``_indicator`` turns each
+:class:`~lumix.nonlinear.terms.LXIndicatorTerm` into Big-M rows, with M from the
+bounds of the expression (``linear_row`` + ``scaled_bounds``).
 
-.. code-block:: python
+Canonical Expansion
+~~~~~~~~~~~~~~~~~~~
 
-   def _generate_aux_name(self, prefix, name1, name2):
-       self._aux_counter += 1
-       return f"aux_{prefix}_{name1}_{name2}_{self._aux_counter}"
+``LXCanonicalBuilder.nonlinear`` (``lumix/core/canonical.py``) applies the
+per-instance rule: for every term it aligns the term's families by index key
+(``_aligned``), raises ``ValueError`` for families with different keys, and
+broadcasts single variables. Each item carries the positions of its variables,
+the term's position (``term``) and the instance key (``key``). Piecewise items get
+numeric ``breakpoints`` and ``values``, with the settings the term leaves as
+``None`` taken from the configuration (``piecewise_points``). The same items fill
+``LXCanonicalModel.objective_nonlinear``; see :doc:`canonical-model`.
 
-LXPiecewiseLinearizer: Function Approximation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+LXVarRef and LXAuxFactory
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Responsibilities:**
+``lumix/linearization/refs.py`` holds the two building blocks of the techniques.
 
-- Generate breakpoints (uniform or adaptive)
-- Evaluate function at breakpoints
-- Apply formulation method (SOS2, incremental, logarithmic)
+- ``LXVarRef`` is one solver variable: an instance (``key``) of a family
+  (``var``), with its bounds (±inf when open) and type. ``add_to(expr, coeff)``
+  adds it to a linear expression with ``keys=[key]``. ``LXVarRef.single(var, what)``
+  makes a reference to a variable with exactly one instance (used by the public
+  wrappers and by indicators).
+- ``LXAuxFactory`` creates the auxiliary elements of one run. ``tag(kind, names)``
+  numbers a term (``aux_abs_x_1``); ``var(tag, role, key, ...)`` adds an instance
+  ``key`` to the family ``<tag>_<role>`` and returns its reference; ``row(tag, role,
+  key, terms, sense, rhs)`` adds the constraint ``<tag>_<role>[<key>]``. An
+  auxiliary family is indexed by the instance keys of its term, so the solution
+  reports ``{"p": 3.0, "q": 4.0}`` for ``aux_abs_x_1_z``.
 
-**Adaptive Breakpoint Algorithm:**
+Techniques
+~~~~~~~~~~
 
-.. code-block:: python
+The techniques are pure functions on references; they create elements only through
+the factory and return the reference of the item's value:
 
-   def _generate_adaptive_breakpoints(self, func, x_min, x_max, num_points):
-       # 1. Sample function densely
-       n_sample = num_points * 10
-       x_sample = np.linspace(x_min, x_max, n_sample)
-       y_sample = np.array([func(x) for x in x_sample])
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
 
-       # 2. Compute second derivative (curvature)
-       second_deriv = np.abs(np.diff(np.diff(y_sample)))
+   * - Function
+     - Formulation
+   * - ``absminmax.absolute``
+     - ``z >= x``, ``z >= -x``; when not ``convex``, a binary and two rows
+       ``z <= ±x + M(...)`` make it exact (needs finite bounds)
+   * - ``absminmax.minmax``
+     - ``z <= c_i x_i`` (min) / ``z >= c_i x_i`` (max); when not ``convex``, one
+       selection binary per argument
+   * - ``bilinear.product``
+     - binary × binary: AND; binary × variable: four bound rows (``big_m_value``
+       for open bounds, with a warning); integer factor: binary expansion; two
+       continuous: McCormick, appended to ``relaxation`` with a warning
+   * - ``piecewise.piecewise``
+     - SOS2 (segment binaries), incremental, or logarithmic, from numeric
+       breakpoints and values
 
-       # 3. Convert to probability distribution
-       weights = second_deriv / (np.sum(second_deriv) + 1e-10)
+Public Wrappers
+~~~~~~~~~~~~~~~
 
-       # 4. Sample according to curvature
-       indices = np.random.choice(
-           len(x_sample),
-           size=num_points - 2,
-           replace=False,
-           p=weights
-       )
-
-       # 5. Include endpoints and sort
-       breakpoints = [x_min] + sorted([x_sample[i] for i in indices]) + [x_max]
-       return breakpoints
-
-**Formulation Selection:**
-
-.. code-block:: python
-
-   def approximate_function(self, func, var, num_segments, method, ...):
-       # Generate breakpoints
-       if adaptive:
-           breakpoints = self._generate_adaptive_breakpoints(...)
-       else:
-           breakpoints = np.linspace(x_min, x_max, num_segments + 1)
-
-       # Evaluate function
-       values = [func(bp) for bp in breakpoints]
-
-       # Apply formulation
-       if method == "sos2":
-           return self._sos2_formulation(var, breakpoints, values)
-       elif method == "incremental":
-           return self._incremental_formulation(var, breakpoints, values)
-       elif method == "logarithmic":
-           return self._logarithmic_formulation(var, breakpoints, values)
+:class:`~lumix.linearization.techniques.bilinear.LXBilinearLinearizer` and
+:class:`~lumix.linearization.techniques.piecewise.LXPiecewiseLinearizer` keep the
+public API for direct use. Each owns an ``LXAuxFactory`` whose lists are exposed as
+``auxiliary_vars`` / ``auxiliary_constraints``; ``linearize_bilinear(term)`` and
+``approximate_function(func, var, ...)`` take **single** variables
+(``LXVarRef.single``), call ``product`` / ``piecewise``, and return the output
+variable. The engine does not use them.
 
 LXLinearizerConfig: Configuration Management
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -228,27 +222,14 @@ LXLinearizerConfig: Configuration Management
 
    @dataclass
    class LXLinearizerConfig:
-       # General settings
-       default_method: LXLinearizationMethod = MCCORMICK
-       tolerance: float = 1e-6
-       verbose_logging: bool = True
-
-       # Big-M settings
-       big_m_value: float = 1e6
-
-       # PWL settings
-       pwl_num_segments: int = 20
-       pwl_method: Literal["sos2", "incremental", "logarithmic"] = "sos2"
-       adaptive_breakpoints: bool = True
-
-       # McCormick settings
-       mccormick_tighten_bounds: bool = True
-
-**Benefits:**
-
-- Type-safe configuration
-- Clear defaults
-- Easy to extend
+       big_m_value: float = 1e6            # open bounds in binary products, indicators
+       pwl_num_segments: int = 20          # piecewise terms with num_segments=None
+       pwl_method: str = "sos2"            # piecewise terms with method=None
+       adaptive_breakpoints: bool = True   # piecewise terms with adaptive=None
+       binary_expansion_bits: int = 10     # largest integer factor in a product
+       # default_method, tolerance, verbose_logging, prefer_sos2,
+       # auto_detect_bounds, mccormick_tighten_bounds: no effect,
+       # DeprecationWarning when set (removed in 0.4.0)
 
 Data Flow
 ---------
@@ -261,52 +242,23 @@ Linearization Process
    sequenceDiagram
        participant User
        participant Linearizer
-       participant Scanner
-       participant BilinearLin
-       participant PiecewiseLin
-       participant Model
+       participant Builder as LXCanonicalBuilder
+       participant Techniques
+       participant Factory as LXAuxFactory
 
        User->>Linearizer: linearize_model()
-       Linearizer->>Scanner: Scan objective
-       Scanner-->>Linearizer: [bilinear_term, pwl_term]
-
-       Linearizer->>BilinearLin: linearize_bilinear(term)
-       BilinearLin->>BilinearLin: Detect types (continuous × continuous)
-       BilinearLin->>BilinearLin: Apply McCormick
-       BilinearLin-->>Linearizer: aux_var, constraints
-
-       Linearizer->>PiecewiseLin: approximate_function(term)
-       PiecewiseLin->>PiecewiseLin: Generate adaptive breakpoints
-       PiecewiseLin->>PiecewiseLin: Apply SOS2 formulation
-       PiecewiseLin-->>Linearizer: aux_var, constraints
-
-       Linearizer->>Model: Build linearized model
-       Model-->>User: Linearized model
-
-Auxiliary Element Collection
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   def linearize_model(self):
-       linearized = LXModel(f"{self.model.name}_linearized")
-
-       # ... process terms ...
-
-       # Collect from bilinear linearizer
-       for aux_var in self._bilinear_linearizer.auxiliary_vars:
-           if aux_var not in self.auxiliary_vars:
-               linearized.add_variable(aux_var)
-               self.auxiliary_vars.append(aux_var)
-
-       # Collect from piecewise linearizer
-       for aux_var in self._piecewise_linearizer.auxiliary_vars:
-           if aux_var not in self.auxiliary_vars:
-               linearized.add_variable(aux_var)
-               self.auxiliary_vars.append(aux_var)
-
-       # Similar for constraints
-       ...
+       Linearizer->>Factory: new factory (fresh state)
+       Linearizer->>Builder: prepare()
+       Builder-->>Linearizer: variable instances (LXVarRef)
+       Linearizer->>Builder: nonlinear(objective)
+       Builder-->>Linearizer: items (kind, variables, coeff, params, term, key)
+       loop For each item
+           Linearizer->>Techniques: technique(item refs, sign)
+           Techniques->>Factory: var() / row()
+           Techniques-->>Linearizer: output LXVarRef
+       end
+       Linearizer->>Linearizer: same for each constraint (sign from its sense)
+       Linearizer-->>User: new LXModel (original model unchanged)
 
 Extension Points
 ----------------
@@ -314,41 +266,27 @@ Extension Points
 Adding New Linearization Techniques
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To add a new linearization technique:
+To add a new kind of term:
 
-1. **Create New Linearizer Class:**
+1. **Expand it into items** in ``LXCanonicalBuilder.nonlinear`` (a new ``kind``,
+   its variables aligned with ``_aligned``, numeric ``params``).
 
-.. code-block:: python
-
-   class LXConicLinearizer:
-       """Linearize second-order cone constraints."""
-
-       def __init__(self, config: LXLinearizerConfig):
-           self.config = config
-           self.auxiliary_vars = []
-           self.auxiliary_constraints = []
-
-       def linearize_cone(self, term: LXConicTerm) -> LXVariable:
-           # Implementation
-           ...
-
-2. **Integrate into Main Engine:**
+2. **Write a technique function** on references:
 
 .. code-block:: python
 
-   class LXLinearizer:
-       def __init__(self, model, capability, config):
-           # ... existing code ...
-           self._conic_linearizer = LXConicLinearizer(self.config)
+   from lumix.linearization.refs import LXAuxFactory, LXVarRef
 
-       def _linearize_expression(self, expr):
-           # ... existing code ...
-           elif isinstance(term, LXConicTerm):
-               if self.capability.needs_linearization_for_conic():
-                   aux_var = self._conic_linearizer.linearize_cone(term)
-                   linear_expr = linear_expr + aux_var
+   def square_root(aux: LXAuxFactory, tag: str, key, x: LXVarRef) -> LXVarRef:
+       """z = sqrt(x), exact on the breakpoints."""
+       z = aux.var(tag, "z", key, "continuous", 0.0, x.upper ** 0.5)
+       # ... aux.row(tag, "...", key, [(z, 1.0), (x, -c)], "<=", rhs) ...
+       return z
 
-3. **Add Configuration:**
+3. **Dispatch it** in ``LXLinearizer._technique`` and add a tag in ``_TAG`` (the
+   ``<kind>`` part of the auxiliary names).
+
+4. **Add Configuration** only for settings a technique reads:
 
 .. code-block:: python
 
@@ -394,23 +332,27 @@ Test individual linearization techniques:
        config = LXLinearizerConfig()
        linearizer = LXBilinearLinearizer(config)
 
-       # Create bilinear term
-       x = LXVariable[Model, float]("x").bounds(lower=0, upper=10)
-       y = LXVariable[Model, float]("y").bounds(lower=0, upper=5)
+       # Create bilinear term on two single variables
+       x = LXVariable[None, float]("x").continuous().bounds(lower=0, upper=10)
+       y = LXVariable[None, float]("y").continuous().bounds(lower=0, upper=5)
        term = LXBilinearTerm(x, y, 1.0)
 
        # Linearize
-       z = linearizer.linearize_bilinear(term)
+       with pytest.warns(UserWarning, match="McCormick"):
+           z = linearizer.linearize_bilinear(term)
 
        # Verify
        assert z is not None
        assert len(linearizer.auxiliary_vars) == 1
        assert len(linearizer.auxiliary_constraints) == 4  # McCormick
+       assert linearizer.relaxation_terms == ["x * y"]
 
 Integration Tests
 ~~~~~~~~~~~~~~~~~
 
-Test end-to-end linearization:
+Test end-to-end linearization, and compare small models with a brute-force
+enumeration (``tests/test_w4_linearization.py`` does this for random models on
+every available solver):
 
 .. code-block:: python
 
@@ -418,9 +360,7 @@ Test end-to-end linearization:
        """Test linearization of production planning model."""
        model = build_production_model()  # Contains bilinear revenue
 
-       config = LXLinearizerConfig()
-       optimizer = LXOptimizer().use_solver("glpk")
-       linearizer = LXLinearizer(model, optimizer.get_capability(), config)
+       linearizer = LXLinearizer(model, GLPK_CAPABILITIES, LXLinearizerConfig())
 
        # Linearize
        linearized = linearizer.linearize_model()
@@ -430,7 +370,7 @@ Test end-to-end linearization:
        assert len(linearized.variables) > len(model.variables)
 
        # Solve
-       solution = optimizer.solve(linearized)
+       solution = LXOptimizer().use_solver("glpk").solve(linearized)
        assert solution.is_optimal()
 
 Accuracy Tests
@@ -443,20 +383,15 @@ Validate approximation accuracy:
    def test_pwl_approximation_accuracy():
        """Test piecewise-linear approximation accuracy."""
        import numpy as np
+       from lumix.linearization.techniques.piecewise import adaptive_breakpoints
 
-       config = LXLinearizerConfig(pwl_num_segments=50)
-       linearizer = LXPiecewiseLinearizer(config)
+       points = adaptive_breakpoints(math.exp, 0.0, 5.0, 50)
+       values = [math.exp(p) for p in points]
 
-       # Test exponential approximation
-       x_test = np.linspace(0, 5, 100)
-       max_error = 0
-
-       for x in x_test:
-           true_value = math.exp(x)
-           # Evaluate PWL approximation at x
-           approx_value = evaluate_pwl_at_point(linearizer, x)
-           error = abs(true_value - approx_value) / true_value
-           max_error = max(max_error, error)
+       # Compare the interpolation with the function between the breakpoints
+       x_test = np.linspace(0, 5, 1000)
+       approx = np.interp(x_test, points, values)
+       max_error = float(np.max(np.abs(approx - np.exp(x_test)) / np.exp(x_test)))
 
        # Verify accuracy
        assert max_error < 0.01, f"Approximation error too large: {max_error}"
@@ -469,25 +404,10 @@ Memory Management
 
 **Auxiliary Variable Storage:**
 
-- Each linearizer maintains its own auxiliary lists
-- Main engine collects and deduplicates
-- Use generator patterns for large models
-
-**Optimization:**
-
-.. code-block:: python
-
-   # Good: Lazy evaluation
-   def get_auxiliary_vars(self):
-       for linearizer in self._linearizers:
-           yield from linearizer.auxiliary_vars
-
-   # Avoid: Eagerly creating large lists
-   all_vars = (
-       self._bilinear_linearizer.auxiliary_vars +
-       self._piecewise_linearizer.auxiliary_vars +
-       ...  # Memory spike!
-   )
+- One ``LXAuxFactory`` per run holds all auxiliary elements
+- The auxiliary elements of one term and role form one family indexed by the
+  instance keys, so a term on a large family adds a few families, not one
+  variable object per instance
 
 Computational Complexity
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -499,21 +419,24 @@ Computational Complexity
    * - Operation
      - Complexity
      - Notes
-   * - Scan model
-     - O(terms)
-     - Linear in number of terms
+   * - Expand terms
+     - O(instances)
+     - One item per instance of each term
    * - Bilinear linearization
-     - O(1) per term
-     - Fixed number of constraints
+     - O(1) per item
+     - O(K) for an integer factor with K digits
+   * - Abs / min / max
+     - O(n) per item
+     - n = number of arguments
    * - PWL (SOS2)
-     - O(n) per term
+     - O(n) per item
      - n = num_segments
    * - PWL (incremental)
-     - O(n) per term
+     - O(n) per item
      - More variables than SOS2
    * - Adaptive breakpoints
-     - O(n²) per function
-     - Dense sampling + sorting
+     - O(n) per term
+     - 10 n + 1 function evaluations
 
 Future Enhancements
 -------------------
@@ -521,16 +444,17 @@ Future Enhancements
 Planned Features
 ~~~~~~~~~~~~~~~~
 
-1. **Logarithmic Formulation**: Complete implementation of Gray code encoding
+1. **Native Solver Features**: Pass SOS2 sets, indicator and general constraints to
+   solvers that support them
 2. **Bound Tightening**: Automatic bound propagation for McCormick
 3. **Conic Constraints**: Linearization of second-order cone constraints
 4. **Custom SOS Types**: Support for SOS1 and higher-order SOS
-5. **Parallel Linearization**: Process terms in parallel for large models
 
 See Also
 --------
 
 - :doc:`extending-linearization` - How to extend linearization
+- :doc:`canonical-model` - Canonical model and nonlinear items
 - :doc:`design-decisions` - Design rationale
 - :doc:`/user-guide/linearization/index` - User guide
 - :doc:`/api/linearization/index` - API reference

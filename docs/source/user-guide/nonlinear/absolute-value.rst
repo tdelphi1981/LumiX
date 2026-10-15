@@ -34,12 +34,31 @@ LumiX automatically linearizes |x| by introducing an auxiliary variable z:
    z \geq x \\
    z \geq -x
 
-**Result**: z equals |x| in the optimal solution.
+**Result**: z equals |x| in the optimal solution, as long as the optimizer pushes
+z down: a minimized objective with a positive coefficient, a maximized objective
+with a negative coefficient, or a ``<=`` constraint.
+
+In every other use (a maximized ``|x|``, a negative coefficient in a minimized
+objective, a ``>=`` or ``==`` constraint) LumiX adds one binary p and two more
+constraints that force z = |x|:
+
+.. math::
+
+   z \leq x + 2 L^{-} (1 - p) \\
+   z \leq -x + 2 U^{+} p
+
+with :math:`L^{-} = \max(0, -L)` and :math:`U^{+} = \max(0, U)` for x ∈ [L, U].
+This exact form needs finite bounds on x and raises ``ValueError`` without them.
+
+.. versionchanged:: 0.3.0
+   Before 0.3.0 the two-constraint form was used everywhere, so maximizing |x|
+   was unbounded or wrong.
 
 **Key Properties:**
 
-- Adds 1 auxiliary variable per absolute value term
-- Adds 2 linear constraints per term
+- Adds 1 auxiliary variable per instance (2 in the exact form)
+- Adds 2 linear constraints per instance (4 in the exact form)
+- On a variable family the term is :math:`\sum_i |x_i|` (one z per instance)
 - Works for both continuous and integer variables
 - No configuration required
 
@@ -298,9 +317,11 @@ Performance Considerations
 Computational Cost
 ~~~~~~~~~~~~~~~~~~
 
-- **Variables Added**: 1 auxiliary variable per term
-- **Constraints Added**: 2 constraints per term
-- **Solve Time**: Minimal overhead, standard LP relaxation
+- **Variables Added**: 1 auxiliary variable per instance (plus 1 binary in the
+  exact form)
+- **Constraints Added**: 2 constraints per instance (4 in the exact form)
+- **Solve Time**: Minimal overhead when minimized (an LP stays an LP); the exact
+  form makes the model a MIP
 
 **Recommendation**: Absolute value terms are efficient and well-supported by all solvers.
 

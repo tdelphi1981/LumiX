@@ -14,8 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CP-SAT: `approximate_coefficients=True` (on `solve()` or `use_solver("cpsat", ...)`) accepts coefficients that cannot be represented exactly.
 - `LXVariable.cost_expression()`, `LXModel.cost_objective()`, and `minimize()` / `maximize()` without an argument, which use the variables' `cost()` / `cost_multi()`.
 - `indexed_by_join(...)` builds the `(first, second)` pairs returned by `join_func`, keyed by `key_func`.
-- Quadratic objectives: Gurobi and CPLEX solve them natively (nonconvex included); `add_quadratic` covers every instance pair of two families with a numeric or `coeff(a, b)` coefficient, `add_squared` the diagonal; `add_quadratic_term` is an alias of `add_quadratic`. Other solvers raise a clear error, or, with `enable_linearization()`, linearize products of two single variables when one of them is binary.
+- Quadratic objectives: Gurobi and CPLEX solve them natively (nonconvex included); `add_quadratic` covers every instance pair of two families with a numeric or `coeff(a, b)` coefficient, `add_squared` the diagonal; `add_quadratic_term` is an alias of `add_quadratic`. Other solvers raise a clear error, or, with `enable_linearization()`, linearize the products (see Changed).
 - Expression arithmetic: `-`, unary `-`, `+=`, `*=`, `sum([...])`, right-hand `+`/`*`, and any real constant (NumPy scalars included).
+- `LXSolution.relaxation`: `True` when the solved model was linearized with a relaxation (McCormick envelopes for a product of two continuous variables); the objective value is then a bound.
+- `LXModel.to_canonical().objective_nonlinear` lists the nonlinear objective terms as `LXCanonicalNonlinear` items, one per variable instance (kinds `abs`, `min`, `max`, `product`, `piecewise`; piecewise items carry numeric breakpoints, values and method). `LXCanonicalNonlinear` has the new fields `term` (position of the source term in the expression) and `key` (instance key, `None` for single variables); `schema_version` stays 1.
+- Quadratic expression arithmetic: `lin - quad`, `quad - lin`, `quad - 3`, `-quad`, `quad * k` and `k * quad`.
+- On `indexed_by_product` and join families, `.cost(...)` and the callable coefficients of `add_quadratic` / `add_squared` may take one argument per part (`lambda d, t: ...`), like `cost_multi`.
+- Nonlinear terms in constraints are linearized; the direction comes from the constraint sense, and in an indexed constraint a row that is an instance of the term's family uses only that instance.
+- `adaptive_breakpoints(func, x_min, x_max, num_segments)` and `piecewise_points(...)` in `lumix.linearization.techniques.piecewise`.
 
 ### Changed
 - Same-type constraint narrowing applies only to one-argument coefficients and filters, decided for each `add_term` separately (also after `e1 + e2` or `expr * 2`). Parameters with a default value do not count, so `lambda item, g=g: ...` is a one-argument filter.
@@ -34,8 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A quadratic expression in a constraint raises `ValueError`.
 - `where_multi()` on a variable with a single index raises `ValueError` (it was ignored); use `where()`.
 - Assigning `model.objective_expr` replaces an objective set by `minimize()` / `maximize()` without an argument.
+- `LXNonLinearExpression` terms (`add_abs`, `add_min`, `add_max`, `add_product`, `add_piecewise`) on variable families apply to every instance and the results are summed (`add_abs(x)` is the sum of `|x[i]|`). The families of one term must have the same index keys (else `ValueError`); a single variable is broadcast to every instance. `LXQuadraticExpression.add_quadratic` still multiplies all pairs.
+- Absolute values, min and max that the plain epigraph form cannot represent exactly (a maximized `|x|`, a negative weight, a minimized `min`, a maximized `max`, `>=` and `==` rows) get binary variables and are exact; they need finite bounds on their variables (else `ValueError`).
+- Products: binary × bounded variable and integer × (integer or continuous) are exact (the integer factor is expanded in binary digits, limited by `LXLinearizerConfig.binary_expansion_bits`); binary × unbounded uses `big_m_value` with a `UserWarning`; continuous × continuous uses McCormick envelopes with a `UserWarning` and sets `solution.relaxation`.
+- With `enable_linearization()`, quadratic objectives on OR-Tools, GLPK and CP-SAT are linearized with the same product rules (families, integer and continuous factors included); on Gurobi and CPLEX they stay native.
+- `linearize_model()` never modifies the user's model and starts afresh on every call. Auxiliary variables are families `aux_<kind>_<vars>_<n>_<role>` indexed by the instance keys of their term; their values appear per instance in `solution.variables`.
+- Indicator Big-M constants are computed from the bounds of the expression; `big_m_value` is used (with a `UserWarning`) only when the expression is unbounded. An indicator's binary must be a single variable.
+- Adaptive piecewise breakpoints are deterministic (quantiles of the curvature mixed with a uniform density) and exactly `num_segments + 1`; a linear function gets uniform breakpoints.
+- `num_segments`, `adaptive` and `method` of `add_piecewise`, `LXPiecewiseLinearTerm` and `LXPiecewiseLinearizer.approximate_function` default to `None` and are taken from `LXLinearizerConfig` (`pwl_num_segments`, `adaptive_breakpoints`, `pwl_method`); values given on the term win.
+- `LXBilinearLinearizer.linearize_bilinear` and `LXPiecewiseLinearizer.approximate_function` take single variables (a scalar or a one-instance family).
 
 ### Deprecated
+- `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
 
 ### Removed
 
@@ -61,6 +77,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A13: `where_multi` before `indexed_by_product`, and `.where()` on product variables, were ignored.
 - B5: `indexed_by_join` did nothing.
 - B6: quadratic objectives crashed every adapter; `LXQuadraticExpression.__add__` dropped the other expression.
+- A14: binary × continuous products had wrong signs in two of their four constraints, and the product's bounds excluded 0 when the continuous variable's lower bound was positive.
+- A15: linearization modified the user's objective expression, so repeated solves drifted and a second `linearize_model()` call added duplicate auxiliary variables.
+- A16: nonlinear terms on variable families acted on the sum of the family instead of each instance.
+- A17: a maximized `|x|`, a minimized `min` or a maximized `max` returned wrong optima; two terms on the same variables created auxiliary variables with the same name.
+- A18: McCormick relaxations were reported as optimal without a warning; integer × integer products were relaxed instead of exact.
+- A19: indicator Big-M rows had a wrong sign, `>=` and `==` indicators crashed, and the constant of the expression was dropped.
+- A20: `LXNonLinearFunctions.power` returned 0 for negative inputs; a fractional exponent on a domain with negative values raises `ValueError`.
+- B7: nonlinear terms in constraints crashed.
+- B8: adaptive piecewise breakpoints were random and one short of `num_segments + 1`.
+- B9: `LXLinearizerConfig` settings were never applied to piecewise terms.
+- The constant of an `LXNonLinearExpression` objective was dropped.
 
 ### Security
 

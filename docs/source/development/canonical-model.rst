@@ -26,8 +26,85 @@ Structure (``schema_version`` 1):
   ``rhs``.
 - ``objective``, ``objective_constant``, ``sense`` (``None`` when there is no
   objective).
+- ``objective_quadratic``: ``{(i, j): c}`` with ``i <= j``, the objective term
+  ``c * x_i * x_j`` of a quadratic objective.
+- ``objective_nonlinear``: the nonlinear terms of an ``LXNonLinearExpression``
+  objective, one :class:`~lumix.core.canonical.LXCanonicalNonlinear` per variable
+  instance (see `Nonlinear objective items`_).
 
 Adding fields keeps the schema version; changing or removing fields increments it.
+
+Nonlinear objective items
+-------------------------
+
+.. versionchanged:: 0.3.0
+   ``objective_nonlinear`` is filled (it was always empty), the items have the new
+   fields ``term`` and ``key``, and the constant of an ``LXNonLinearExpression`` is
+   kept in ``objective_constant`` (it was dropped). ``schema_version`` stays 1.
+
+Each term of the objective expression is expanded per instance, with the same
+rule the linearizer uses (see :doc:`/user-guide/linearization/engine`): a term on
+variable families gives one item per index key, the families of one term must have
+the same keys, and a single variable is broadcast to every key. The item for a key
+is the term's contribution for that instance; the objective is the linear part
+plus the sum of all items.
+
+Fields of :class:`~lumix.core.canonical.LXCanonicalNonlinear`:
+
+- ``kind``: ``"abs"``, ``"min"``, ``"max"``, ``"product"`` or ``"piecewise"``
+- ``variables``: positions in ``variables`` (a tuple)
+- ``coeff``: the factor the item's value is multiplied by
+- ``params``: kind-specific data (below)
+- ``term``: position of the source term in the expression's ``nonlinear_terms``;
+  the items of one term share it
+- ``key``: index key of the instance the item applies to, ``None`` when every
+  variable of the term is single (a scalar or a one-instance family)
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 26 20 40
+
+   * - ``kind``
+     - ``variables``
+     - ``coeff``
+     - ``params``
+   * - ``abs``
+     - ``(i,)``
+     - term coefficient
+     - ``{}``; value ``coeff * |x_i|``
+   * - ``min`` / ``max``
+     - the term's variables, in order
+     - ``1.0``
+     - ``{"coefficients": (c_1, ..., c_n)}``; value ``min(c_k * x_k)`` /
+       ``max(c_k * x_k)``
+   * - ``product``
+     - ``(i, j)``
+     - term coefficient
+     - ``{}``; value ``coeff * x_i * x_j``
+   * - ``piecewise``
+     - ``(i,)``
+     - ``1.0``
+     - ``{"breakpoints": (...), "values": (...), "method": "sos2" | "incremental"
+       | "logarithmic"}``; the breakpoints are numbers (generated ones resolved
+       with ``LXLinearizerConfig``), value the piecewise-linear interpolation
+
+.. code-block:: python
+
+   # x is a family over keys "p", "q"
+   model.minimize(LXNonLinearExpression().add_abs(x, coeff=2.0))
+   model.to_canonical().objective_nonlinear
+   # (LXCanonicalNonlinear(kind='abs', variables=(0,), coeff=2.0, params={}, term=0, key='p'),
+   #  LXCanonicalNonlinear(kind='abs', variables=(1,), coeff=2.0, params={}, term=0, key='q'))
+
+Indicator terms are constraints, not objective values: ``to_canonical()`` raises
+``ValueError`` for an objective that contains them. A nonlinear term in a
+constraint also raises, because ``rows`` are linear; such a model is solved through
+the linearizer, whose output is linear.
+
+Solver adapters do not read ``objective_nonlinear``: an objective with nonlinear
+terms raises ``ValueError`` asking for ``enable_linearization()``. The items are
+for engines outside LumiX and for the linearizer, which builds its auxiliary
+variables from the same expansion.
 
 Row semantics
 -------------

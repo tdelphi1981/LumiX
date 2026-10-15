@@ -37,6 +37,7 @@
       ~LXSolution.gap
       ~LXSolution.iterations
       ~LXSolution.nodes
+      ~LXSolution.relaxation
       ~LXSolution.objective_value
       ~LXSolution.status
       ~LXSolution.solve_time

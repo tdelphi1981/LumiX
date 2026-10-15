@@ -26,6 +26,7 @@ Basic Structure
        gap: Optional[float] = None
        iterations: Optional[int] = None
        nodes: Optional[int] = None
+       relaxation: bool = False
 
 Accessing Variable Values
 --------------------------
@@ -274,6 +275,30 @@ Some solvers provide additional information:
    # Node count (for branch-and-bound)
    if solution.nodes is not None:
        print(f"Nodes explored: {solution.nodes}")
+
+Relaxation Flag
+~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+``solution.relaxation`` is ``True`` when ``LXOptimizer`` solved a linearized model
+(through ``enable_linearization()``, or a model returned by
+``LXLinearizer.linearize_model()``) in which the linearizer had to use a
+relaxation: McCormick envelopes for a product of two continuous variables. The objective value is then
+a bound on the true optimum (an upper bound when maximizing, a lower bound when
+minimizing), and the variable values may not attain it. All other linearizations
+are exact, and the flag is ``False``.
+
+.. code-block:: python
+
+   solution = LXOptimizer().use_solver("glpk").enable_linearization().solve(model)
+
+   if solution.relaxation:
+       print(f"Bound on the optimum: {solution.objective_value}")
+   else:
+       print(f"Optimum: {solution.objective_value}")
+
+See :doc:`/user-guide/linearization/bilinear` for ways to get an exact model.
 
 Solution Summary
 ~~~~~~~~~~~~~~~~

@@ -10,6 +10,14 @@ The :class:`~lumix.linearization.functions.LXNonLinearFunctions` class provides
 pre-built approximations for frequently used nonlinear functions, eliminating
 the need to manually configure piecewise-linear formulations.
 
+Each function calls
+:meth:`LXPiecewiseLinearizer.approximate_function
+<lumix.linearization.techniques.piecewise.LXPiecewiseLinearizer.approximate_function>`
+and returns the output variable; the input must be a **single variable** (a
+scalar, or a family with one instance). For a variable family use
+``LXNonLinearExpression().add_piecewise(x, func)``, which applies to every
+instance (see :doc:`piecewise`).
+
 Available Functions
 -------------------
 
@@ -132,6 +140,15 @@ Power Function
           exponent=0.3,
           linearizer=linearizer
       )
+
+   An integer exponent works on the whole real line (``(-3)**2 = 9``,
+   ``(-2)**3 = -8``). A fractional exponent is not real for negative inputs: if
+   the variable's domain includes negative values, ``power`` raises
+   ``ValueError`` ("not real"); bound the variable at 0 from below.
+
+   .. versionchanged:: 0.3.0
+      Negative inputs returned 0 before 0.3.0, so even powers of negative values
+      were wrong.
 
 Sigmoid Function
 ~~~~~~~~~~~~~~~~

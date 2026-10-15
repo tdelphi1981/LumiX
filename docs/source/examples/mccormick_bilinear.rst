@@ -191,10 +191,7 @@ Step 4: Apply Linearization
 
    from lumix.linearization import LXLinearizer, LXLinearizerConfig
 
-   config = LXLinearizerConfig(
-       mccormick_tighten_bounds=True,
-       verbose_logging=True
-   )
+   config = LXLinearizerConfig()
    linearizer = LXLinearizer(model, solver_capabilities, config)
 
    if linearizer.needs_linearization():

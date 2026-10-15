@@ -52,25 +52,26 @@ LumiX handles linearization automatically:
 
 .. code-block:: python
 
+   from lumix import LXModel, LXNonLinearExpression
    from lumix.linearization import LXLinearizer, LXLinearizerConfig
-   from lumix.solvers.capabilities import LXSolverCapability
+   from lumix.solvers import GLPK_CAPABILITIES, LXOptimizer
 
    # Build model with nonlinear terms (naturally)
    model = LXModel("production")
-   profit_expr = production * price  # Bilinear term
+   profit_expr = LXNonLinearExpression().add_product(production, price)  # Bilinear term
 
    model.maximize(profit_expr)
 
    # Configure linearization
-   config = LXLinearizerConfig(
-       default_method=LXLinearizationMethod.MCCORMICK,
-       adaptive_breakpoints=True
-   )
+   config = LXLinearizerConfig(adaptive_breakpoints=True)
 
    # Automatic linearization
-   linearizer = LXLinearizer(model, solver_capability, config)
+   linearizer = LXLinearizer(model, GLPK_CAPABILITIES, config)
    if linearizer.needs_linearization():
        linearized_model = linearizer.linearize_model()
+
+   # Or let the optimizer do it while solving
+   solution = LXOptimizer().use_solver("glpk").enable_linearization().solve(model)
 
 **Benefits:**
 
@@ -83,6 +84,9 @@ LumiX handles linearization automatically:
 Supported Nonlinear Terms
 --------------------------
 
+Terms on a variable family apply to every instance and are summed:
+``add_abs(x)`` is :math:`\sum_i |x_i|` (see :doc:`engine`).
+
 Bilinear Products (x × y)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -90,20 +94,23 @@ Linearization depends on variable types:
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 30 40
+   :widths: 30 40 30
 
    * - Variable Types
      - Technique
-     - Complexity
+     - Result
    * - Binary × Binary
      - AND logic
-     - 3 constraints
-   * - Binary × Continuous
-     - Big-M method
-     - 4 constraints
+     - Exact
+   * - Binary × bounded variable
+     - Four bound constraints
+     - Exact
+   * - Integer × integer or continuous
+     - Binary expansion of the integer factor
+     - Exact
    * - Continuous × Continuous
      - McCormick envelopes
-     - 4 constraints
+     - Relaxation (``UserWarning``, ``solution.relaxation``)
 
 See :doc:`bilinear` for details.
 
@@ -114,7 +121,11 @@ Linearized using two constraints:
 
 - z ≥ x
 - z ≥ -x
-- z minimized (if in objective) or bounded appropriately
+
+This is exact where z is pushed down (minimized with a positive weight, or in a
+``<=`` constraint). Other uses (maximized, negative weight, ``>=`` or ``==``
+constraints) add a binary per instance and need finite bounds; see
+:doc:`engine`.
 
 Piecewise-Linear Functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -132,8 +143,11 @@ Min/Max Functions
 
 Linearized using auxiliary variables and constraints:
 
-- min(x₁, x₂, ..., xₙ): z ≤ xᵢ for all i (z minimized)
-- max(x₁, x₂, ..., xₙ): z ≥ xᵢ for all i (z maximized)
+- min(x₁, x₂, ..., xₙ): z ≤ xᵢ for all i (exact when z is maximized)
+- max(x₁, x₂, ..., xₙ): z ≥ xᵢ for all i (exact when z is minimized)
+
+Other uses add one selection binary per argument and need finite bounds; see
+:doc:`engine`.
 
 Indicator Constraints
 ~~~~~~~~~~~~~~~~~~~~~
@@ -142,8 +156,9 @@ Conditional constraints linearized using Big-M method:
 
 - if b = 1 then expr ≤ rhs → expr ≤ rhs + M(1-b)
 - if b = 0 then expr ≤ rhs → expr ≤ rhs + M·b
+- ``>=`` and ``==`` work the same way; M comes from the bounds of expr
 
-See :doc:`engine` for details.
+See :doc:`/user-guide/nonlinear/indicator` for details.
 
 How Linearization Works
 ------------------------
@@ -170,10 +185,11 @@ How Linearization Works
 **Steps:**
 
 1. **Detection**: Scan objective and constraints for nonlinear terms
-2. **Analysis**: Check variable types and solver capabilities
-3. **Selection**: Choose appropriate linearization technique
+2. **Expansion**: Expand each term into one item per variable instance
+3. **Selection**: Choose a technique from the variable types and from how the
+   item is used (minimized, maximized, in a ``<=``, ``>=`` or ``==`` row)
 4. **Application**: Create auxiliary variables and constraints
-5. **Assembly**: Build new linearized model
+5. **Assembly**: Build a new linearized model; the original model is not changed
 
 Configuration
 -------------
@@ -183,12 +199,7 @@ Fine-tune linearization behavior:
 .. code-block:: python
 
    config = LXLinearizerConfig(
-       # General settings
-       default_method=LXLinearizationMethod.MCCORMICK,
-       tolerance=1e-6,
-       verbose_logging=True,
-
-       # Big-M settings
+       # Big-M settings (only for unbounded variables and expressions)
        big_m_value=1e5,  # Adjust based on problem scale
 
        # Piecewise-linear settings
@@ -196,12 +207,8 @@ Fine-tune linearization behavior:
        pwl_method="sos2",  # or "incremental", "logarithmic"
        adaptive_breakpoints=True,  # Concentrate points where function curves
 
-       # McCormick settings
-       auto_detect_bounds=True,
-       mccormick_tighten_bounds=True,
-
        # Binary expansion settings
-       binary_expansion_bits=10  # For integers up to 2^10 = 1024
+       binary_expansion_bits=10  # Integer factors with up to 2^10 = 1024 values
    )
 
 See :doc:`config` for all options.
@@ -214,24 +221,23 @@ Basic Usage
 
 .. code-block:: python
 
-   from lumix import LXModel, LXVariable
+   from lumix import LXModel, LXNonLinearExpression, LXVariable
    from lumix.linearization import LXLinearizer, LXLinearizerConfig
-   from lumix.solvers import LXOptimizer
+   from lumix.solvers import GLPK_CAPABILITIES, LXOptimizer
 
    # Build model with nonlinear terms
    model = LXModel("portfolio")
 
    # Bilinear term: return * allocation
-   profit = return_var * allocation_var
+   profit = LXNonLinearExpression().add_product(return_var, allocation_var)
 
    model.maximize(profit)
 
    # Linearize
    config = LXLinearizerConfig()
    optimizer = LXOptimizer().use_solver("glpk")
-   solver_capability = optimizer.get_capability()
 
-   linearizer = LXLinearizer(model, solver_capability, config)
+   linearizer = LXLinearizer(model, GLPK_CAPABILITIES, config)
    linearized_model = linearizer.linearize_model()
 
    # Solve
@@ -291,8 +297,9 @@ Accuracy vs. Complexity Trade-offs
 
 **McCormick Envelopes:**
 
+- A relaxation: the optimum is a bound (``solution.relaxation`` is ``True``)
 - Tighter bounds → better relaxation → faster solving
-- Enable bound tightening for best performance
+- Make a factor integer or binary for an exact product
 
 Memory and Variables
 ~~~~~~~~~~~~~~~~~~~~~
@@ -315,26 +322,32 @@ Each linearized term adds auxiliary variables and constraints:
      - 1
      - 4
      - O(1)
+   * - Bilinear (Integer, K bits)
+     - K binary + K + 1
+     - 4K + 2
+     - O(K)
    * - Bilinear (Cont. × Cont.)
      - 1
      - 4
      - O(1)
-   * - Absolute value
-     - 1
-     - 2
+   * - Absolute value (plain / exact)
+     - 1 / 2
+     - 2 / 4
      - O(1)
-   * - Min/Max (n terms)
-     - 1
-     - n
+   * - Min/Max, n terms (plain / exact)
+     - 1 / 1 + n binary
+     - n / 2n + 1
      - O(n)
    * - PWL (SOS2, k segments)
-     - k+1 λ + 1 output
-     - 3
+     - k+1 λ + 1 output + k binary
+     - k + 5
      - O(k)
    * - PWL (Incremental, k seg.)
      - k binary + k delta + 1 out
-     - 3k + 1
+     - k + 3
      - O(k)
+
+The counts are per instance: a term on a family with n instances adds them n times.
 
 **Optimization Tips:**
 

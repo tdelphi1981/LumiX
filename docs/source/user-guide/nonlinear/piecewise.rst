@@ -31,6 +31,16 @@ Pass ``breakpoints=[...]`` to use your own breakpoints (for a function given by
 data points), and note that the domain constrains the variable; see
 :doc:`/user-guide/linearization/piecewise`.
 
+``num_segments``, ``adaptive`` and ``method`` default to ``None``: the values of
+:class:`~lumix.linearization.config.LXLinearizerConfig` apply (``pwl_num_segments``
+20, ``adaptive_breakpoints`` ``True``, ``pwl_method`` ``"sos2"``), and a value given
+on the term wins. Adaptive breakpoints are deterministic. On a variable family the
+term applies to every instance: ``add_piecewise(x, f)`` is :math:`\sum_i f(x_i)`.
+
+.. versionchanged:: 0.3.0
+   The term defaults are ``None`` (taken from the configuration), adaptive
+   breakpoints are deterministic, and a term on a family applies per instance.
+
 Basic Usage
 -----------
 

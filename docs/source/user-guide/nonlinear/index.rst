@@ -104,7 +104,10 @@ LumiX provides five nonlinear term types:
 
 4. **Indicator Constraints** (:class:`~lumix.nonlinear.terms.LXIndicatorTerm`)
 
-   Conditional constraints: "if binary_var then constraint holds".
+   Conditional constraints: ``binary_var == condition`` ⇒ ``expr sense rhs``, with
+   ``sense`` one of ``<=``, ``>=``, ``==``. M is computed from the bounds of
+   ``expr``; ``big_m_value`` (with a ``UserWarning``) is used only when ``expr`` is
+   unbounded. ``binary_var`` must be a single variable. See :doc:`indicator`.
 
 5. **Piecewise-Linear** (:class:`~lumix.nonlinear.terms.LXPiecewiseLinearTerm`)
 
@@ -176,6 +179,33 @@ Here's a complete example using multiple nonlinear terms:
    model = LXModel("facility_planning")
    # ... add constraints and objective ...
 
+Terms on Variable Families
+--------------------------
+
+.. versionchanged:: 0.3.0
+   Terms apply per instance; before 0.3.0 a term on a family acted on the sum of
+   the family.
+
+Terms in an :class:`~lumix.core.expressions.LXNonLinearExpression` apply to every
+instance of a variable family and the results are summed:
+
+.. code-block:: python
+
+   from lumix import LXNonLinearExpression
+
+   expr = (
+       LXNonLinearExpression()
+       .add_abs(deviation)              # sum over i of |deviation[i]|
+       .add_product(is_open, flow)      # sum over k of is_open[k] * flow[k]
+       .add_max(load_a, load_b)         # sum over k of max(load_a[k], load_b[k])
+   )
+
+Families combined in one term must have the same index keys; a single variable
+(scalar or one-instance family) is broadcast to every instance. The terms can be
+used in the objective and, since 0.3.0, in constraints. See
+:doc:`/user-guide/linearization/engine` for the details, including which uses need
+binary variables and finite bounds.
+
 Integration with Linearization Module
 --------------------------------------
 
@@ -184,18 +214,17 @@ The nonlinear terms work seamlessly with the linearization module:
 .. code-block:: python
 
    from lumix.linearization import LXLinearizer, LXLinearizerConfig
-   from lumix.linearization import LXLinearizationMethod
+   from lumix.solvers import GLPK_CAPABILITIES, LXOptimizer
 
    # Configure linearization (optional - defaults are smart)
-   config = LXLinearizerConfig(
-       bilinear_method=LXLinearizationMethod.MCCORMICK,
-       piecewise_segments=30,
-       auto_detect_bounds=True
-   )
+   config = LXLinearizerConfig(pwl_num_segments=30)
 
    # Linearization happens automatically during model solve
-   linearizer = LXLinearizer(config=config)
-   linear_model = linearizer.linearize(model)
+   optimizer = LXOptimizer().use_solver("glpk").enable_linearization(pwl_segments=30)
+   solution = optimizer.solve(model)
+
+   # Or linearize explicitly; the original model is not changed
+   linear_model = LXLinearizer(model, GLPK_CAPABILITIES, config).linearize_model()
 
 See :doc:`/user-guide/linearization/index` for details on linearization configuration.
 
@@ -247,23 +276,28 @@ Different nonlinear terms use different linearization techniques:
      - Linearization Method
      - Key Parameters
    * - Absolute Value
-     - Auxiliary variable + constraints
-     - None
+     - Auxiliary variable + constraints; one binary per instance where the plain
+       form is not exact (e.g. maximized)
+     - Variable bounds (required for the exact form)
    * - Min/Max
-     - Auxiliary variable + bounding constraints
-     - None
+     - Auxiliary variable + bounding constraints; selection binaries where the
+       plain form is not exact (e.g. a minimized min)
+     - Variable bounds (required for the exact form)
    * - Bilinear (Binary × Binary)
-     - AND logic
+     - AND logic (exact)
      - None
    * - Bilinear (Binary × Continuous)
-     - Big-M
-     - M value (auto-computed)
+     - Bound constraints (exact)
+     - Variable bounds (else ``big_m_value``)
+   * - Bilinear (Integer × Integer or Continuous)
+     - Binary expansion (exact)
+     - Integer bounds, ``binary_expansion_bits``
    * - Bilinear (Continuous × Continuous)
-     - McCormick envelopes
+     - McCormick envelopes (a relaxation; ``solution.relaxation``)
      - Variable bounds (required)
    * - Indicator
      - Big-M
-     - M value (auto-computed)
+     - M from the expression bounds (else ``big_m_value``)
    * - Piecewise-Linear
      - SOS2, Incremental, or Logarithmic
      - Segments, method, adaptive

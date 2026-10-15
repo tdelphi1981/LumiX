@@ -2,11 +2,11 @@
 Bilinear product linearization techniques.
 
 Exact unless both factors are continuous:
+
 1. Binary × Binary: AND logic (b * b = b)
 2. Binary × bounded variable: four bound rows (z = y when b = 1, else 0)
 3. Integer × (integer | continuous): binary expansion of the integer factor
-4. Continuous × Continuous: McCormick envelopes, a relaxation (UserWarning,
-   solution.relaxation)
+4. Continuous × Continuous: McCormick envelopes, a relaxation (UserWarning, solution.relaxation)
 """
 
 import math

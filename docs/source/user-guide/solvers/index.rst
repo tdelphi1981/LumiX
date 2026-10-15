@@ -212,8 +212,7 @@ LumiX can automatically linearize nonlinear terms for solvers that don't support
        .use_solver("ortools")  # Doesn't support quadratic
        .enable_linearization(
            big_m=1e6,
-           pwl_segments=20,
-           mccormick_tighten_bounds=True
+           pwl_segments=20
        )
    )
 

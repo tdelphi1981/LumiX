@@ -173,12 +173,17 @@ Automatically linearize nonlinear terms:
 
 **Parameters:**
 
-- ``big_m``: Big-M constant for conditional constraints (default: 1e6)
+- ``big_m``: Bound for indicators and binary products whose variables or expression
+  have no finite bound (default: 1e6)
 - ``pwl_segments``: Number of segments for piecewise-linear approximations (default: 20)
 - ``pwl_method``: Method for PWL ("sos2", "incremental", "logarithmic")
-- ``prefer_sos2``: Use SOS2 when solver supports it (default: True)
+- ``prefer_sos2``: No effect (deprecated in 0.3.0, removed in 0.4.0)
 - ``adaptive_breakpoints``: Use adaptive breakpoint generation (default: True)
-- ``mccormick_tighten_bounds``: Apply bound tightening for McCormick envelopes (default: True)
+- ``mccormick_tighten_bounds``: No effect (deprecated in 0.3.0, removed in 0.4.0)
+- ``**kwargs``: Other :class:`~lumix.linearization.config.LXLinearizerConfig` fields,
+  such as ``binary_expansion_bits``
+
+See :doc:`/user-guide/linearization/config`.
 
 **Example:**
 
@@ -193,7 +198,9 @@ Automatically linearize nonlinear terms:
        .enable_linearization(big_m=1e5, pwl_segments=30)
    )
 
-   # Automatically linearizes x*y using McCormick envelopes
+   # Automatically linearizes x*y: exact when a factor is binary or integer,
+   # McCormick envelopes (a relaxation, solution.relaxation is True) when both
+   # are continuous
    solution = optimizer.solve(model)
 
 enable_sensitivity()
@@ -374,8 +381,7 @@ Example 3: Nonlinear Model with Linearization
        .use_solver("ortools")
        .enable_linearization(
            big_m=1e6,
-           pwl_segments=30,
-           mccormick_tighten_bounds=True
+           pwl_segments=30
        )
    )
 

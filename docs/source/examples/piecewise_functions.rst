@@ -82,7 +82,7 @@ Special Ordered Set type 2 for efficient PWL representation:
    config = LXLinearizerConfig(
        pwl_num_segments=30,
        adaptive_breakpoints=True,
-       prefer_sos2=True  # Use SOS2 when solver supports it
+       pwl_method="sos2"
    )
 
 **SOS2 Advantages**:
@@ -210,8 +210,7 @@ Step 1: Create Linearizer Configuration
 
    config = LXLinearizerConfig(
        pwl_num_segments=30,
-       adaptive_breakpoints=True,
-       prefer_sos2=True
+       adaptive_breakpoints=True
    )
    linearizer = LXPiecewiseLinearizer(config)
 
