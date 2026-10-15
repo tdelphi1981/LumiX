@@ -447,6 +447,14 @@ class LXModel(Generic[TModel]):
         4. Adds deviation variables to the model
         5. Replaces goal constraints with relaxed versions
 
+        Priority 0 goals are not relaxed rows but objective terms: a ``.ge()``
+        goal's expression is maximized and a ``.le()`` goal's expression is
+        minimized, times its weight. The model's own objective
+        (``minimize``/``maximize``) is kept as the lowest priority, together with
+        the priority 0 goals: in weighted mode it is added in minimization form
+        with weight ``priority_to_weight(0) = 1``; in sequential mode it is solved
+        in the last stage.
+
         Solving a model with goals relaxes them on a copy automatically; call
         this method to relax them in the model itself (to inspect it, or for
         tools that read the model).
@@ -454,72 +462,62 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
 
+        Raises:
+            ValueError: If a goal priority is not an integer >= 0, a priority 0
+                goal is indexed, uses ``.eq()`` or has nonlinear terms, or the
+                model's objective is nonlinear
+
         Example:
             >>> model.set_goal_mode("weighted")
             >>> model.prepare_goal_programming()
             >>> # Model now has deviation variables and goal objective
+
+        .. versionchanged:: 0.3.0
+           Priority 0 goals and the model's own objective are optimized after the
+           goals instead of being dropped.
         """
         if self._goal_programming_prepared:
-            # Already prepared, skip
             return self
-
-        # Import here to avoid circular dependencies
-        from ..goal_programming.goal import LXGoalMode
-        from ..goal_programming.objective_builder import build_weighted_objective
+        from ..goal_programming.objective_builder import build_weighted_objective, final_objective
         from ..goal_programming.relaxation import relax_constraint
+        from ..goal_programming.view import goal_mode_value
 
-        # Collect goal constraints
-        goal_constraints = [c for c in self.constraints if c.is_goal()]
-
-        if not goal_constraints:
-            # No goals, nothing to do
+        goals = [c for c in self.constraints if c.is_goal()]
+        if not goals:
             return self
-
-        # Determine mode (default to weighted if not set)
+        for c in goals:
+            p = c.goal_metadata.priority
+            if not isinstance(p, int) or p < 0:
+                raise ValueError(f"Goal '{c.name}' has priority {p!r}; priorities are integers >= 0")
         if self.goal_mode is None:
             self.goal_mode = "weighted"
+        final = final_objective(self, [c for c in goals if c.goal_metadata.priority == 0])
 
-        # Relax each goal constraint
         self._relaxed_constraints = []
-        regular_constraints = []
-
+        constraints = []
         for constraint in self.constraints:
-            if constraint.is_goal():
-                # Relax this constraint
+            if not constraint.is_goal():
+                constraints.append(constraint)
+            elif constraint.goal_metadata.priority > 0:
                 relaxed = relax_constraint(constraint, constraint.goal_metadata)
                 self._relaxed_constraints.append(relaxed)
-
-                # Add deviation variables to model
                 self.add_variable(relaxed.pos_deviation)
                 self.add_variable(relaxed.neg_deviation)
+                constraints.append(relaxed.constraint)
+            # priority 0 goals are objective terms (final_objective), not rows
+        self.constraints = constraints
 
-                # Add relaxed constraint (equality with deviations)
-                regular_constraints.append(relaxed.constraint)
-            else:
-                # Keep regular constraint as-is
-                regular_constraints.append(constraint)
-
-        # Replace constraints with relaxed versions
-        self.constraints = regular_constraints
-
-        # Build objective based on mode
-        if self.goal_mode == "weighted":
-            # Build weighted objective
-            goal_objective = build_weighted_objective(self._relaxed_constraints)
-
-            # Set as objective (or combine with existing if present)
-            if self.objective_expr is None:
-                # No existing objective, use goal objective
-                self.minimize(goal_objective)
-            else:
-                # Combine with existing objective
-                # For now, we'll just replace it (user can handle this manually)
-                # Future enhancement: provide combine_objectives helper
-                self.minimize(goal_objective)
-
-        # For sequential mode, objective will be set during solving
-        # (handled by LXGoalProgrammingSolver)
-
+        if goal_mode_value(self.goal_mode) == "weighted":
+            objective = build_weighted_objective(self._relaxed_constraints)
+            if final is not None:
+                expr, sense = final
+                objective = objective + (expr if sense == LXObjectiveSense.MINIMIZE else -expr)
+            self.minimize(objective)
+        elif final is not None:
+            expr, sense = final
+            self.minimize(expr) if sense == LXObjectiveSense.MINIMIZE else self.maximize(expr)
+        else:
+            self.objective_expr = None
         self._goal_programming_prepared = True
         return self
 

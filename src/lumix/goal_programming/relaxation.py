@@ -287,6 +287,8 @@ def relax_constraints(
     for constraint in constraints:
         if constraint.name in goal_metadata_map:
             goal_metadata = goal_metadata_map[constraint.name]
+            if goal_metadata.priority == 0:
+                continue  # priority 0 goals are objective terms, not rows
             relaxed = relax_constraint(constraint, goal_metadata)
             relaxed_list.append(relaxed)
     return relaxed_list

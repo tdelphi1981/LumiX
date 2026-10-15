@@ -171,3 +171,77 @@ def test_a26_explicit_prepare_still_works():
               opt.solve(copy.deepcopy(m)).objective_value]
     assert values == pytest.approx([3e6, 3e6, 3e6])
     assert opt.solve(m).get_goal_deviations("g")["neg"] == pytest.approx({"g": 3.0})
+
+
+# --- Görev 3: priority 0 goals and the user's objective (A25) ----------------------
+@pytest.mark.parametrize("solver", AVAILABLE)
+def test_a25_priority_zero_goal_is_optimized(solver):
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(goal("profit", lin((x, 3.0)), ">=", 0, priority=0))
+    m.add_constraint(goal("g", lin((x, 1.0)), "<=", 4, priority=1))
+    s = solve_with(solver, m)
+    assert s.variables["x"]["k"] == pytest.approx(4)
+    assert s.get_goal_deviations("profit") is None
+
+
+@pytest.mark.parametrize("sense,expected", [("max", 4.0), ("min", 2.0)])
+def test_a25_user_objective_is_the_lowest_priority(sense, expected):
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(goal("hi", lin((x, 1.0)), "<=", 4, priority=1))
+    m.add_constraint(goal("lo", lin((x, 1.0)), ">=", 2, priority=1))
+    m.maximize(lin((x, 1.0))) if sense == "max" else m.minimize(lin((x, 1.0)))
+    s = solve_with("ortools", m)
+    assert s.variables["x"]["k"] == pytest.approx(expected)
+
+
+def test_a25_cost_objective_with_goals():
+    g = fam("g", ["k"], "integer", 0, 10).cost(lambda k: -1.0)
+    m = LXModel("m").add_variable(g).minimize()
+    m.add_constraint(goal("cap", lin((g, 1.0)), "<=", 3, priority=1))
+    s = solve_with("ortools", m)
+    assert s.variables["g"]["k"] == pytest.approx(3)
+
+
+def test_a25_user_objective_and_priority_zero_goal_combine():
+    x, y = fam("x", ["k"], lower=0, upper=10), fam("y", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variables(x, y).maximize(lin((x, 1.0)))
+    m.add_constraint(hard("cap", lin((x, 1.0), (y, 1.0)), "<=", 10))
+    m.add_constraint(goal("prefer_y", lin((y, 2.0)), ">=", 0, priority=0))
+    s = solve_with("ortools", m)
+    assert (s.variables["x"]["k"], s.variables["y"]["k"]) == pytest.approx((0, 10))
+
+
+@pytest.mark.parametrize("build,match", [
+    (lambda x: goal("p0", lin((x, 1.0)), "==", 3, priority=0), "Priority 0"),
+    (lambda x: (LXConstraint[str]("p0").expression(lin((x, 1.0))).ge().rhs(0)
+                .indexed_by(lambda k: k).from_data(["k"]).as_goal(priority=0)), "indexed"),
+    (lambda x: goal("neg", lin((x, 1.0)), ">=", 3, priority=-1), "priority")])
+def test_a25_invalid_custom_goals_raise(build, match):
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(goal("g", lin((x, 1.0)), "<=", 4, priority=1))
+    m.add_constraint(build(x))
+    with pytest.raises(ValueError, match=match):
+        solve_with("ortools", m)
+
+
+def test_a25_nonlinear_objective_with_goals_raises():
+    x = fam("x", ["k"], lower=-5, upper=5)
+    m = LXModel("m").add_variable(x).minimize(LXNonLinearExpression().add_abs(x))
+    m.add_constraint(goal("g", lin((x, 1.0)), ">=", 2, priority=1))
+    with pytest.raises(ValueError, match="nonlinear objective"):
+        m.to_canonical()
+
+
+def test_a25_quadratic_objective_with_goals():
+    from lumix import LXQuadraticExpression
+    solvers = [s for s in ("gurobi", "cplex") if s in AVAILABLE]
+    if not solvers:
+        pytest.skip("needs gurobi or cplex")
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x).minimize(LXQuadraticExpression().add_squared(x, 1.0))
+    m.add_constraint(goal("g", lin((x, 1.0)), ">=", 3, priority=1))
+    for solver in solvers:
+        assert solve_with(solver, m).variables["x"]["k"] == pytest.approx(3, abs=1e-5)
