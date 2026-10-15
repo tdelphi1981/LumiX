@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import warnings
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
 from typing_extensions import Self
 
@@ -156,6 +156,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         """
         if self._baseline_solution is None or recompute:
             self._baseline_solution = self.optimizer.solve(self.model)
+            self._record("baseline", self._baseline_solution, self.model)
         return self._baseline_solution
 
     def increase_constraint_rhs(
@@ -361,11 +362,24 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             desc_parts.append(f"upper bound: {original_upper} → {upper}")
         description = f"Modify {variable_name} bounds ({', '.join(desc_parts)})"
 
+        changes = [
+            (bound, LXWhatIfChange(change_type="variable_bound", target_name=variable_name,
+                                   description=f"{bound} bound {old} → {new}",
+                                   original_value=old, new_value=new))
+            for bound, old, new in (("lower", original_lower, lower),
+                                    ("upper", original_upper, upper))
+            if new is not None]
+        self._record(description, new_solution, modified_model,
+                     [{"change_type": c.change_type, "target_name": c.target_name,
+                       "bound": bound, "original_value": c.original_value,
+                       "new_value": c.new_value}
+                      for bound, c in changes])
+
         return self._build_result(
             description=description,
             baseline=baseline,
             new_solution=new_solution,
-            changes_applied=[],
+            changes_applied=[c for _bound, c in changes],
         )
 
     def compare_changes(
@@ -572,6 +586,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             delta=(None if original_rhs is None or new_rhs is None
                    else new_rhs - original_rhs),
         )
+        self._record(description, new_solution, modified_model, [asdict(change)])
 
         return self._build_result(
             description=description,
@@ -579,6 +594,11 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             new_solution=new_solution,
             changes_applied=[change],
         )
+
+    def _record(self, name: str, solution: LXSolution[TModel], model: Any,
+                changes: Sequence[Dict[str, Any]] = ()) -> None:
+        if self.result_store is not None:
+            self.result_store.record(name, solution, model, changes)
 
     def _new_model(self) -> LXModel[TModel]:
         """A fresh, independent model to modify for one what-if run."""

@@ -44,6 +44,7 @@ dev = [
     "black>=23.7.0",
     "ruff>=0.0.285",
     "build>=1.0.0",
+    "sqlalchemy>=2.0.0",
 ]
 docs = [
     "sphinx>=7.0.0",

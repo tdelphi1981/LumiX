@@ -56,6 +56,7 @@ from .sensitivity import (
     LXSensitivityAnalyzer,
     LXVariableSensitivity,
 )
+from .store import LXResultStore, LXStoredRun
 from .whatif import LXWhatIfAnalyzer, LXWhatIfChange, LXWhatIfResult
 
 __all__ = [
@@ -71,4 +72,7 @@ __all__ = [
     "LXWhatIfAnalyzer",
     "LXWhatIfResult",
     "LXWhatIfChange",
+    # Result store
+    "LXResultStore",
+    "LXStoredRun",
 ]

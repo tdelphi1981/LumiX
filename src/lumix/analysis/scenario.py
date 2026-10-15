@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
 from typing_extensions import Self
 
@@ -353,6 +353,7 @@ class LXScenarioAnalyzer(Generic[TModel]):
         modified_model = self._apply_scenario(scenario)
         solution = self.optimizer.solve(modified_model)
         self.results[scenario_name] = solution
+        self._record(scenario_name, solution, modified_model, scenario.modifications)
 
         return solution
 
@@ -371,6 +372,7 @@ class LXScenarioAnalyzer(Generic[TModel]):
         # Run baseline if requested
         if include_baseline:
             baseline_solution = self.optimizer.solve(self.base_model)
+            self._record("baseline", baseline_solution, self.base_model)
             self.results["baseline"] = baseline_solution
 
         # Run all scenarios
@@ -546,9 +548,21 @@ class LXScenarioAnalyzer(Generic[TModel]):
             # Apply and solve
             modified_model = self._apply_scenario(scenario)
             solution = self.optimizer.solve(modified_model)
+            self._record(scenario.name, solution, modified_model, scenario.modifications)
             sensitivity_results[value] = solution
 
         return sensitivity_results
+
+    def _record(self, name: str, solution: LXSolution[TModel], model: Any,
+                modifications: Sequence[LXScenarioModification] = ()) -> None:
+        if self.result_store is not None:
+            self.result_store.record(name, solution, model,
+                                     [self._mods(m) for m in modifications])
+
+    @staticmethod
+    def _mods(m: LXScenarioModification) -> Dict[str, Any]:
+        return {"target_type": m.target_type, "target_name": m.target_name,
+                "modification_type": m.modification_type, "value": m.value}
 
     def _apply_scenario(self, scenario: LXScenario[TModel]) -> LXModel[TModel]:
         """
