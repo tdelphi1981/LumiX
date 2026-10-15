@@ -269,7 +269,7 @@ Pattern 2: Exactly-One Constraint
        expr = LXLinearExpression().add_multi_term(
            assignment,
            coeff=lambda a, b_var: 1.0,
-           where=lambda a, b_var: b_var.id == b.id
+           where=lambda a, b_var, bid=b.id: b_var.id == bid  # bid binds this b
        )
        model.add_constraint(
            LXConstraint(f"coverage_{b.id}")
@@ -288,7 +288,7 @@ Pattern 3: Capacity Constraint
        expr = LXLinearExpression().add_multi_term(
            assignment,
            coeff=lambda a_var, b: 1.0,
-           where=lambda a_var, b: a_var.id == a.id
+           where=lambda a_var, b, aid=a.id: a_var.id == aid  # aid binds this a
        )
        model.add_constraint(
            LXConstraint(f"capacity_{a.id}")

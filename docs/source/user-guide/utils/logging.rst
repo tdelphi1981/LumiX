@@ -151,8 +151,8 @@ To write the counts into your own log, linearize explicitly and pass them to
    linearized = linearizer.linearize_model()      # the user's model is unchanged
    stats = linearizer.get_statistics()
 
-   logger = LXModelLogger(name="linearize")
-   logger.log_linearization(
+   logger = LXModelLogger(name="lumix.linearize", level=logging.DEBUG)
+   logger.log_linearization(                      # a DEBUG record
        term_type="bilinear",
        method="auto",
        aux_vars=stats["auxiliary_variables"],
@@ -165,7 +165,7 @@ Track scenario analysis runs:
 
 .. code-block:: python
 
-   logger = LXModelLogger(name="scenarios")
+   logger = LXModelLogger(name="lumix.scenarios")
 
    scenarios = [
        ("base_case", 0),
@@ -189,7 +189,7 @@ Track sensitivity analysis results:
 
 .. code-block:: python
 
-   logger = LXModelLogger(name="sensitivity", level=logging.DEBUG)
+   logger = LXModelLogger(name="lumix.sensitivity", level=logging.DEBUG)
 
    for var_name, reduced_cost in sensitivity_results.items():
        logger.log_sensitivity(var_name, reduced_cost)
@@ -203,7 +203,7 @@ Use standard logging methods for custom messages:
 
 .. code-block:: python
 
-   logger = LXModelLogger(name="custom")
+   logger = LXModelLogger(name="lumix.custom")
 
    # Info level
    logger.info("Starting preprocessing phase")
@@ -241,9 +241,9 @@ Most verbose - logs everything including variable/constraint creation:
 
 .. code-block:: text
 
-   2025-10-22 14:30:01 - production - DEBUG - Created 50 continuous variable(s): production
-   2025-10-22 14:30:01 - production - DEBUG - Created 10 constraint(s): capacity (<=)
-   2025-10-22 14:30:01 - production - INFO - Created model 'ProductionPlan' with 50 variables and 10 constraints
+   2025-10-22 14:30:01 - lumix.production - DEBUG - Created 50 continuous variable(s): production
+   2025-10-22 14:30:01 - lumix.production - DEBUG - Created 10 constraint(s): capacity (<=)
+   2025-10-22 14:30:01 - lumix.production - INFO - Created model 'ProductionPlan' with 50 variables and 10 constraints
 
 INFO Level
 ~~~~~~~~~~
@@ -264,9 +264,9 @@ Standard level - logs major events:
 
 .. code-block:: text
 
-   2025-10-22 14:30:01 - production - INFO - Created model 'ProductionPlan' with 50 variables and 10 constraints
-   2025-10-22 14:30:02 - production - INFO - Starting solve with Gurobi...
-   2025-10-22 14:30:05 - production - INFO - Solve completed: Optimal | Objective: 42500.7500 | Time: 2.85s
+   2025-10-22 14:30:01 - lumix.production - INFO - Created model 'ProductionPlan' with 50 variables and 10 constraints
+   2025-10-22 14:30:02 - lumix.production - INFO - Starting solve with Gurobi...
+   2025-10-22 14:30:05 - lumix.production - INFO - Solve completed: Optimal | Objective: 42500.7500 | Time: 2.85s
 
 WARNING Level
 ~~~~~~~~~~~~~
@@ -306,11 +306,30 @@ Complete Model Workflow
 .. code-block:: python
 
    import logging
+   from dataclasses import dataclass
+
+   import lumix
    from lumix import LXModel, LXVariable, LXConstraint, LXLinearExpression, LXOptimizer
    from lumix.utils import LXModelLogger
 
-   # Create logger
-   logger = LXModelLogger(name="production", level=logging.INFO)
+   @dataclass
+   class Product:
+       id: str
+       profit: float
+       usage: dict  # resource id -> units per product
+
+   @dataclass
+   class Resource:
+       id: str
+       capacity: float
+
+   products = [Product("A", 30, {"labor": 2, "steel": 1}),
+               Product("B", 40, {"labor": 3, "steel": 2})]
+   resources = [Resource("labor", 100), Resource("steel", 60)]
+
+   # Show the messages; a name under "lumix." reaches the handler
+   lumix.enable_logging()
+   logger = LXModelLogger(name="lumix.production", level=logging.INFO)
 
    logger.info("=== Building Production Planning Model ===")
 
@@ -321,6 +340,7 @@ Complete Model Workflow
        LXVariable[Product, float]("production")
        .continuous()
        .bounds(lower=0)
+       .indexed_by(lambda p: p.id)
        .from_data(products)
    )
    model.add_variable(production)
@@ -334,6 +354,7 @@ Complete Model Workflow
        .le()
        .rhs(lambda r: r.capacity)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
    model.add_constraint(capacity_constraint)
    logger.log_constraint_creation("capacity", "<=", count=len(resources))
@@ -349,13 +370,14 @@ Complete Model Workflow
    )
 
    # Solve
-   logger.log_solve_start("Gurobi")
-   optimizer = LXOptimizer().use_solver("gurobi")
+   logger.log_solve_start("OR-Tools")
+   optimizer = LXOptimizer().use_solver("ortools")
    solution = optimizer.solve(model)
    logger.log_solve_end(solution.status, solution.objective_value)
 
    # Solution summary
-   nonzero_vars = sum(1 for v in solution.values.values() if abs(v) > 1e-6)
+   values = solution.variables["production"]  # {index key: value}
+   nonzero_vars = sum(1 for v in values.values() if abs(v) > 1e-6)
    logger.log_solution_summary(nonzero_vars, len(products))
 
    logger.info("=== Optimization Complete ===")
@@ -368,8 +390,8 @@ Use different loggers for different models:
 .. code-block:: python
 
    # Separate loggers
-   logger_prod = LXModelLogger(name="production")
-   logger_routing = LXModelLogger(name="routing")
+   logger_prod = LXModelLogger(name="lumix.production")
+   logger_routing = LXModelLogger(name="lumix.routing")
 
    # Production model
    logger_prod.info("Building production model")
@@ -412,9 +434,9 @@ Best Practices
 
    .. code-block:: python
 
-      # Good
-      logger = LXModelLogger(name="supply_chain.production")
-      logger = LXModelLogger(name="supply_chain.routing")
+      # Good (under "lumix.", so lumix.enable_logging() shows them)
+      logger = LXModelLogger(name="lumix.supply_chain.production")
+      logger = LXModelLogger(name="lumix.supply_chain.routing")
 
       # Avoid
       logger = LXModelLogger(name="logger1")
@@ -475,7 +497,7 @@ Progress Tracking
 
 .. code-block:: python
 
-   logger = LXModelLogger(name="progress")
+   logger = LXModelLogger(name="lumix.progress")
 
    total = len(scenarios)
    for i, scenario in enumerate(scenarios, 1):
@@ -489,7 +511,7 @@ Performance Monitoring
 
    import time
 
-   logger = LXModelLogger(name="performance")
+   logger = LXModelLogger(name="lumix.performance")
 
    start = time.time()
    # ... build model ...

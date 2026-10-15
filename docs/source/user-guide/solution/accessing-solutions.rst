@@ -231,7 +231,8 @@ Check the optimization status:
 
    # Raw status string
    print(f"Status: {solution.status}")
-   # Common values: "optimal", "feasible", "infeasible", "unbounded"
+   # Common values: "optimal", "feasible", "infeasible", "unbounded",
+   # "time_limit" (the time limit stopped the search before any solution)
 
 .. versionchanged:: 0.3.0
    A solve without a solution (infeasible, unbounded) returns
@@ -331,7 +332,9 @@ constraint) of :class:`~lumix.solution.activity.LXRowActivity` records with ``lh
 
 Slack is ``rhs - lhs`` for ``<=`` rows and ``lhs - rhs`` for ``>=`` rows, so it is
 never negative at a feasible solution. Rows on variables the solution does not
-report are left out, and a solution without values gives an empty dict.
+report are left out, and a solution without values gives an empty dict. A goal row
+is reported as the goal itself: its expression without the deviation variables,
+with the goal's sense (so ``x >= 5`` solved at ``x = 10`` has slack 5).
 ``LXSolutionVisualizer(solution, model).plot_constraint_utilization()`` draws the
 same data.
 

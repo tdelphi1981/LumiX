@@ -230,7 +230,7 @@ class LXLinearExpression(Generic[TModel]):
         expr = LXLinearExpression()
         expr.add_term(production, 1.0)
         expr.add_term(inventory, -1.0)
-        expr.constant(100)
+        expr.add_constant(100)
 
         # Multi-model
         expr = LXLinearExpression()
@@ -547,14 +547,14 @@ class LXQuadraticExpression:
     """
     Quadratic expression: linear_terms + quadratic_terms + constant
 
-    Represents: 0.5 * x^T Q x + c^T x + constant
+    Represents: sum(coeff * x[i] * x[j]) + c^T x + constant
 
-    Example:
-        # Portfolio variance: sum(w[i] * w[j] * cov[i,j])
-        # Plus linear returns: sum(return[i] * w[i])
+    Example::
+
+        # Portfolio variance sum(cov[i][j] * w[i] * w[j]) minus expected return
         quad_expr = LXQuadraticExpression()
-        quad_expr.add_quadratic(w[0], w[1], cov[0,1])
-        quad_expr.linear_terms.add_term(w[0], returns[0])
+        quad_expr.add_quadratic(weight, weight, lambda a, b: cov[a.id][b.id])
+        quad_expr.linear_terms.add_term(weight, lambda a: -a.expected_return)
     """
 
     linear_terms: LXLinearExpression = field(default_factory=LXLinearExpression)

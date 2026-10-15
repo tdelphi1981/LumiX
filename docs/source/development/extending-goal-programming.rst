@@ -174,9 +174,9 @@ Goals that become hard constraints at threshold:
        hard_constraint = (
            LXConstraint[TModel](f"{constraint.name}_hard_limit")
            .expression(constraint.lhs)
-           .sense(hard_sense)
            .rhs(hard_limit)
        )
+       hard_constraint.sense = hard_sense
 
        if constraint._data:
            hard_constraint._data = constraint._data
@@ -196,6 +196,7 @@ Goals that become hard constraints at threshold:
        .ge()
        .rhs(lambda p: p.demand_target)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    metadata = LXGoalMetadata(
@@ -211,6 +212,8 @@ Goals that become hard constraints at threshold:
        hard_sense=LXConstraintSense.GE
    )
 
+   model.add_variable(relaxed.pos_deviation)
+   model.add_variable(relaxed.neg_deviation)
    model.add_constraint(relaxed.constraint)
    model.add_constraint(hard)  # Hard minimum
 

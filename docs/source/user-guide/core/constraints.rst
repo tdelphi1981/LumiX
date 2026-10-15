@@ -23,6 +23,14 @@ Every constraint has three parts:
 
 **Mathematical Form**: ``LHS {<=, >=, ==} RHS``
 
+Constraint names must be unique within a model; duals, row activity and the
+analysis tools look rows up by name.
+
+.. versionchanged:: 0.3.0
+   ``LXModel.add_constraint`` raises ``ValueError`` for a second constraint with
+   an existing name (before, the second one hid the first from duals, activity
+   and analysis).
+
 Constraint Senses
 -----------------
 

@@ -332,11 +332,12 @@ Pattern 2: Big-M Constraint
                .add_multi_term(
                    ship,
                    coeff=lambda w, c: 1.0,
-                   where=lambda w, c: w.id == warehouse.id and c.id == customer.id
+                   # wh=..., cu=... bind this loop's warehouse and customer
+                   where=lambda w, c, wh=warehouse, cu=customer: w.id == wh.id and c.id == cu.id
                )
                .add_term(
                    open_var,
-                   coeff=lambda w: -BIG_M if w.id == warehouse.id else 0
+                   coeff=lambda w, wh=warehouse: -BIG_M if w.id == wh.id else 0
                )
            )
            model.add_constraint(
@@ -373,7 +374,7 @@ Pattern 4: Demand Satisfaction
        demand_expr = LXLinearExpression().add_multi_term(
            flow,
            coeff=lambda src, dst: 1.0,
-           where=lambda src, dst: dst.id == customer.id
+           where=lambda src, dst, cust=customer: dst.id == cust.id
        )
        model.add_constraint(
            LXConstraint(f"demand_{customer.id}")

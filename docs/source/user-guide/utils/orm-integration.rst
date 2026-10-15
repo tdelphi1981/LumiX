@@ -79,7 +79,7 @@ SQLAlchemy Example
    from sqlalchemy.ext.declarative import declarative_base
    from sqlalchemy.orm import Session
 
-   from lumix import LXModel, LXVariable, LXLinearExpression
+   from lumix import LXConstraint, LXModel, LXVariable, LXLinearExpression
    from lumix.utils import LXORMContext
 
    # Define ORM models
@@ -105,7 +105,7 @@ SQLAlchemy Example
    production = (
        LXVariable[Product, float]("production")
        .continuous()
-       .bounds(lower=0, upper=lambda p: p.available)
+       .bounds(lower=0)
        .from_data(products)
        .indexed_by(lambda p: p.id)
    )
@@ -116,6 +116,16 @@ SQLAlchemy Example
        .maximize(
            LXLinearExpression().add_term(production, lambda p: p.profit)
        )
+   )
+
+   # Per-product limit: one row per product (bounds() takes numbers only)
+   model.add_constraint(
+       LXConstraint[Product]("availability")
+       .expression(LXLinearExpression().add_term(production, 1.0))
+       .le()
+       .rhs(lambda p: p.available)
+       .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
 Django ORM Example

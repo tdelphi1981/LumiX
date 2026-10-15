@@ -132,6 +132,19 @@ Relaxing Constraints
    print(f"Relaxing minimum production by 10%:")
    print(f"  Impact: ${result.delta_objective:,.2f}")
 
+``relax_constraint`` raises the right-hand side of a ``<=`` row and lowers that of
+a ``>=`` row; ``tighten_constraint`` does the opposite. On an equality, relaxing
+raises the right-hand side and tightening lowers it.
+
+``by_percent`` moves the right-hand side by a share of its absolute value:
+``increase_constraint_rhs(..., by_percent=p)`` gives ``rhs + p * |rhs|``, and
+relaxing a ``>=`` row with right-hand side ``-10`` by 20 % gives ``-12``.
+
+.. versionchanged:: 0.3.0
+   ``by_percent`` uses ``|rhs|``, so a negative right-hand side moves in the
+   requested direction, and ``tighten_constraint`` on an equality lowers the
+   right-hand side (it raised it, like ``relax_constraint``).
+
 Per-Row Right-Hand Sides
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

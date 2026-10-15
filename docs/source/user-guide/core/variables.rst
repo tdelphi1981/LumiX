@@ -97,7 +97,7 @@ Index by multiple models using Cartesian product:
 
 .. code-block:: python
 
-   from lumix import LXIndexDimension, LXCartesianProduct
+   from lumix import LXIndexDimension
 
    assignment = (
        LXVariable[tuple[Driver, Date, Shift], int]("assignment")
@@ -210,15 +210,20 @@ Query from database:
 Cartesian Product
 ~~~~~~~~~~~~~~~~~
 
-For multi-dimensional variables:
+For multi-dimensional variables, give each dimension its own data and use
+``indexed_by_product`` (see `Multi-Model Indexing`_):
 
 .. code-block:: python
 
-   from lumix import LXCartesianProduct
+   from lumix import LXIndexDimension
 
    assignment = (
        LXVariable[tuple[Driver, Date], int]("assignment")
-       .from_data(LXCartesianProduct(drivers, dates))
+       .binary()
+       .indexed_by_product(
+           LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
+           LXIndexDimension(Date, lambda dt: dt.id).from_data(dates),
+       )
    )
 
 Cost Coefficients
@@ -281,26 +286,32 @@ Simple Bounds
 Data-Driven Bounds
 ~~~~~~~~~~~~~~~~~~
 
-Bounds can vary per instance:
+``bounds()`` sets one pair of bounds for the whole family. Limits that vary
+per instance are written as an indexed constraint:
 
 .. code-block:: python
 
-   # Use where clause for conditional bounds
    production = (
        LXVariable[Product, float]("production")
        .continuous()
        .bounds(lower=0)
+       .indexed_by(lambda p: p.id)
        .from_data(products)
    )
 
-   # Add constraints for upper bounds from data
+   # Per-instance upper bounds: one constraint row per product
    model.add_constraint(
        LXConstraint[Product]("max_production")
        .expression(LXLinearExpression().add_term(production, 1.0))
        .le()
        .rhs(lambda p: p.max_capacity)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
+
+Each row ``max_production[id]`` contains only the matching
+``production[id]``, because the row has the variable's own data type.
+Passing a function to ``bounds()`` raises ``TypeError``.
 
 Best Practices
 --------------

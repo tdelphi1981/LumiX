@@ -1,18 +1,20 @@
 Advanced Solver Features
 ========================
 
-This guide covers advanced solver features like warm start, callbacks, and sensitivity analysis.
+This guide covers sensitivity analysis and the solver features that LumiX does
+not wrap (warm start, callbacks, solution pools, IIS), which you can reach
+through the underlying solver model.
 
 Overview
 --------
 
 Advanced features available in LumiX solvers:
 
-1. **Warm Start**: Use previous solution to speed up solving
+1. **Warm Start**: not passed to the solvers by LumiX
 2. **Sensitivity Analysis**: Shadow prices and reduced costs
-3. **Callbacks**: Custom heuristics and lazy constraints (Gurobi/CPLEX only)
-4. **Solution Pools**: Multiple solutions for MIP (Gurobi/CPLEX only)
-5. **IIS/Conflict Refinement**: Debug infeasible models (Gurobi/CPLEX only)
+3. **Callbacks**: Custom heuristics and lazy constraints (Gurobi/CPLEX, through the solver model)
+4. **Solution Pools**: Multiple solutions for MIP (Gurobi/CPLEX, through the solver model)
+5. **IIS/Conflict Refinement**: Debug infeasible models (Gurobi/CPLEX, through the solver model)
 
 .. note::
    Not all solvers support all features. Check :doc:`solver-capabilities` for details.
@@ -20,70 +22,30 @@ Advanced features available in LumiX solvers:
 Warm Start
 ----------
 
-Warm start uses a previous solution as a starting point for solving, which can significantly speed up solving for similar models.
-
-When to Use
-~~~~~~~~~~~
-
-**Good for:**
-
-- Solving a sequence of similar models
-- Re-optimizing after small parameter changes
-- Interactive optimization (user tweaks and re-solves)
-- Rolling horizon planning
-
-**Not useful for:**
-
-- First solve (no previous solution)
-- Completely different models
-- Major structural changes
-
-Basic Usage
-~~~~~~~~~~~
-
-Currently, warm start is primarily used internally by solvers when you solve similar models sequentially. LumiX automatically leverages this when applicable.
+LumiX does not pass warm starts or solution hints to the solvers yet: every
+``solve()`` builds the solver model afresh, also when the same
+``LXOptimizer`` solves a sequence of similar models. To solve a variant of a
+model, copy it with :func:`copy.deepcopy` and change the copy (or use
+:doc:`/user-guide/analysis/whatif`, which does this for you):
 
 .. code-block:: python
+
+   import copy
 
    from lumix import LXOptimizer
 
    optimizer = LXOptimizer().use_solver("gurobi")
-
-   # First solve
    solution1 = optimizer.solve(model1)
 
-   # Modify model slightly
-   model2 = model1.copy()
-   model2.update_parameter("demand", new_demand)
+   # A variant with more wood: copy the model and change the copy
+   model2 = copy.deepcopy(model1)
+   model2.get_constraint("capacity").rhs(
+       lambda r: r.capacity + 10 if r.id == "wood" else r.capacity
+   )
+   solution2 = optimizer.solve(model2)   # model1 is unchanged
 
-   # Second solve may benefit from internal warm start
-   solution2 = optimizer.solve(model2)
-
-Supported Solvers
-~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 20 60
-
-   * - Solver
-     - Supported
-     - Notes
-   * - OR-Tools
-     - ✓
-     - Automatic when solving sequentially
-   * - Gurobi
-     - ✓
-     - Automatic MIP start
-   * - CPLEX
-     - ✓
-     - Automatic warm start
-   * - GLPK
-     - ✗
-     - Not supported
-   * - CP-SAT
-     - ✓
-     - Via solution hints
+To use a solver's own MIP start, build the solver model yourself (see
+`Accessing the Solver Model`_) and set it there.
 
 Sensitivity Analysis
 --------------------
@@ -124,13 +86,13 @@ Enabling Sensitivity
 Accessing Shadow Prices
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
+Shadow prices are keyed by row name: ``"<constraint>[<index key>]"`` for an
+indexed constraint, the constraint name for a single one.
+
 .. code-block:: python
 
-   # Get shadow price for a constraint
-   capacity_constraint = model.get_constraint("capacity")
-
    for resource in resources:
-       shadow_price = solution.get_shadow_price(capacity_constraint, resource)
+       shadow_price = solution.get_shadow_price(f"capacity[{resource.id}]")
        print(f"{resource.name}: ${shadow_price:.2f} per unit")
 
 **Interpretation:**
@@ -144,18 +106,18 @@ Accessing Reduced Costs
 
 .. code-block:: python
 
-   # Get reduced cost for a variable
-   production = model.get_variable("production")
-
+   # Reduced costs are keyed by "<variable>[<index key>]"
    for product in products:
-       reduced_cost = solution.get_reduced_cost(production, product)
-       if reduced_cost > 0:
-           print(f"{product.name}: would need ${reduced_cost:.2f} better profit to produce")
+       reduced_cost = solution.get_reduced_cost(f"production[{product.id}]")
+       if reduced_cost < 0:  # maximization: producing one unit lowers the profit
+           print(f"{product.name}: would need ${-reduced_cost:.2f} more profit per unit to produce")
 
 **Interpretation:**
 
-- Reduced cost of $10 means: profit would need to increase by $10 before producing this product
-- Reduced cost of $0 means: variable is in the optimal basis (positive in solution)
+- In a maximization, a reduced cost of -10 means: the profit would need to increase by
+  10 per unit before producing this product pays off (minimization: +10, the cost would
+  need to fall by 10)
+- A reduced cost of 0 means: the variable is basic (usually positive in the solution)
 
 Example: Resource Valuation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -173,9 +135,8 @@ Example: Resource Valuation
 
    # Evaluate resources
    print("Resource Shadow Prices:")
-   capacity_constraint = model.get_constraint("capacity")
    for resource in resources:
-       shadow_price = solution.get_shadow_price(capacity_constraint, resource)
+       shadow_price = solution.get_shadow_price(f"capacity[{resource.id}]")
        current_capacity = resource.capacity
 
        print(f"\n{resource.name}:")
@@ -201,14 +162,14 @@ Supported Solvers
      - Supported
      - Notes
    * - OR-Tools
-     - ✗
-     - Not available
+     - ✓
+     - LP only (GLOP); none for MIPs
    * - Gurobi
      - ✓
-     - Full support (LP and MIP)
+     - LP only
    * - CPLEX
      - ✓
-     - Full support (LP and MIP)
+     - LP only
    * - GLPK
      - ✓
      - LP only
@@ -253,37 +214,47 @@ When to Use
 - Want to guide search with problem-specific logic
 - Example: Construction heuristics
 
+Accessing the Solver Model
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LumiX has no callback API. Build the solver's own model with the adapter class
+and use the solver's API on it. ``build_model()`` returns a ``gurobipy.Model``
+for :class:`~lumix.solvers.gurobi_solver.LXGurobiSolver` and a
+``cplex.Cplex`` for :class:`~lumix.solvers.cplex_solver.LXCPLEXSolver`; its
+variables and rows carry the LumiX names (``x``, ``production[A]``). The
+adapter does not relax goals; use it on models without goals.
+
 Example: Lazy Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. note::
-   Direct callback support is planned for future LumiX versions. Currently, you can access the underlying solver model for callback implementation.
+A Gurobi lazy constraint ``x + y <= 7``, added only when an incumbent violates
+it (in a TSP the same pattern adds subtour elimination constraints):
 
 .. code-block:: python
 
-   from lumix import LXOptimizer
+   import gurobipy as gp
+   from gurobipy import GRB
+   from lumix import LXLinearExpression, LXModel, LXVariable
+   from lumix.solvers.gurobi_solver import LXGurobiSolver
 
-   # Build model
-   model = build_tsp_model(cities)
+   x = LXVariable("x").integer().bounds(lower=0, upper=10)
+   y = LXVariable("y").integer().bounds(lower=0, upper=10)
+   model = LXModel("lazy").add_variable(x).add_variable(y)
+   model.maximize(LXLinearExpression().add_term(x, 2.0).add_term(y, 1.0))
 
-   # Create optimizer
-   optimizer = LXOptimizer().use_solver("gurobi")
+   gurobi_model = LXGurobiSolver().build_model(model)
+   gx = gurobi_model.getVarByName("x")
+   gy = gurobi_model.getVarByName("y")
+   gurobi_model.Params.LazyConstraints = 1
 
-   # Access underlying Gurobi model
-   gurobi_model = optimizer._solver.build_model(model)
-
-   # Define lazy constraint callback (Gurobi-specific)
-   def subtour_callback(model, where):
+   def lazy_callback(m, where):
        if where == GRB.Callback.MIPSOL:
-           # Get current solution
-           vals = model.cbGetSolution(model._vars)
-           # Check for subtours
-           subtours = find_subtours(vals)
-           # Add lazy constraint if subtour found
-           for subtour in subtours:
-               model.cbLazy(sum(vars[i,j] for i,j in subtour) <= len(subtour) - 1)
+           vx, vy = m.cbGetSolution([gx, gy])
+           if vx + vy > 7 + 1e-6:
+               m.cbLazy(gx + gy <= 7)
 
-   gurobi_model.optimize(subtour_callback)
+   gurobi_model.optimize(lazy_callback)
+   print(gurobi_model.ObjVal, gx.X, gy.X)   # objective 14, x = 7, y = 0
 
 Supported Solvers
 ~~~~~~~~~~~~~~~~~
@@ -300,10 +271,10 @@ Supported Solvers
      - Not available
    * - Gurobi
      - ✓
-     - Full callback support
+     - Through the gurobipy model
    * - CPLEX
      - ✓
-     - Full callback support
+     - Through the cplex model
    * - GLPK
      - ✗
      - Not available
@@ -330,11 +301,10 @@ Example: Finding Multiple Solutions
 
 .. code-block:: python
 
-   from lumix import LXOptimizer
+   from lumix.solvers.gurobi_solver import LXGurobiSolver
 
-   # Access underlying Gurobi model
-   optimizer = LXOptimizer().use_solver("gurobi")
-   gurobi_model = optimizer._solver.build_model(model)
+   # Build the underlying Gurobi model
+   gurobi_model = LXGurobiSolver().build_model(model)
 
    # Request multiple solutions
    gurobi_model.setParam('PoolSolutions', 10)  # Keep up to 10 solutions
@@ -395,15 +365,14 @@ Example: Computing IIS
 
 .. code-block:: python
 
-   from lumix import LXOptimizer
+   from lumix.solvers.gurobi_solver import LXGurobiSolver
 
-   # Solve model
-   optimizer = LXOptimizer().use_solver("gurobi")
-   solution = optimizer.solve(model)
+   # Solve with the adapter, which keeps the Gurobi model it built
+   solver = LXGurobiSolver()
+   solution = solver.solve(model)
 
    if solution.status == "infeasible":
-       # Access underlying Gurobi model
-       gurobi_model = optimizer._solver.get_solver_model()
+       gurobi_model = solver.get_solver_model()
 
        # Compute IIS
        gurobi_model.computeIIS()
@@ -449,15 +418,17 @@ Workflow:
 Example: Relaxing Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+Turn a conflicting constraint into a goal: LumiX adds deviation variables and
+penalizes them, so the model is solved with the least violation
+(see :doc:`/user-guide/goal_programming/index`):
+
 .. code-block:: python
 
-   # Add slack variables to constraints
-   for constraint in conflicting_constraints:
-       slack = LXVariable(f"slack_{constraint.name}").continuous().bounds(lower=0)
-       model.add_variable(slack)
+   # Before the solve: make the conflicting constraint soft
+   model.get_constraint("min_output").as_goal(priority=1, weight=1.0)
 
-       # Add slack to constraint
-       constraint.expression.add_term(slack, 1.0)
+   solution = optimizer.solve(model)
+   print(solution.get_goal_deviations("min_output"))
 
    # Add penalty for slack in objective
    for slack_var in slack_variables:

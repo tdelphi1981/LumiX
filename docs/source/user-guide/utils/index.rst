@@ -58,9 +58,11 @@ The :doc:`logging` guide covers the LXModelLogger class:
 
 .. code-block:: python
 
+   import lumix
    from lumix.utils import LXModelLogger
 
-   logger = LXModelLogger(name="my_model")
+   lumix.enable_logging()  # LumiX prints nothing unless asked
+   logger = LXModelLogger(name="lumix.my_model")  # under "lumix." to be shown
    logger.log_model_creation("Production", num_vars=100, num_constraints=50)
    logger.log_solve_start("Gurobi")
    # ... solving ...
@@ -160,18 +162,25 @@ Track model building and solving in production environments:
 .. code-block:: python
 
    import logging
+
+   import lumix
    from lumix import LXModel, LXVariable, LXOptimizer
    from lumix.utils import LXModelLogger
 
-   # Set up logging
-   logger = LXModelLogger(name="production", level=logging.INFO)
+   # Set up logging (enable_logging() shows loggers named under "lumix.")
+   lumix.enable_logging()
+   logger = LXModelLogger(name="lumix.production", level=logging.INFO)
 
    # Build model (with logging)
    logger.info("Building production planning model")
    model = LXModel("production_plan")
 
    logger.log_variable_creation("production", "continuous", count=50)
-   production = LXVariable[Product, float]("production").from_data(products)
+   production = (
+       LXVariable[Product, float]("production")
+       .indexed_by(lambda p: p.id)
+       .from_data(products)
+   )
    model.add_variable(production)
 
    # Solve (with timing)

@@ -597,28 +597,38 @@ LumiX can automatically linearize non-linear terms for solvers that don't suppor
 
 .. code-block:: python
 
-   from lumix import LXLinearizer, LXLinearizerConfig
+   from lumix import LXOptimizer
 
-   # Configure linearization
-   config = LXLinearizerConfig(
-       method="mccormick",  # For bilinear terms
-       num_segments=10,     # For piecewise-linear approximations
+   # Linearize nonlinear terms the solver cannot handle, then solve
+   optimizer = (
+       LXOptimizer()
+       .use_solver("ortools")
+       .enable_linearization(
+           big_m=1e6,         # For products with an unbounded factor
+           pwl_segments=10,   # For piecewise-linear approximations
+       )
    )
+   solution = optimizer.solve(model)   # the model itself is not changed
 
-   linearizer = LXLinearizer(config)
-   linear_model = linearizer.linearize(model)
+To inspect the linearized model, build it yourself with the solver's
+capabilities:
 
-   # Now solve with any solver
-   optimizer = LXOptimizer().use_solver("ortools")
-   solution = optimizer.solve(linear_model)
+.. code-block:: python
+
+   from lumix import LXLinearizer, LXLinearizerConfig, ORTOOLS_CAPABILITIES
+
+   config = LXLinearizerConfig(pwl_num_segments=10)
+   linear_model = LXLinearizer(model, ORTOOLS_CAPABILITIES, config).linearize_model()
+
+   solution = LXOptimizer().use_solver("ortools").solve(linear_model)
 
 This allows you to use free solvers even for problems with non-linear terms.
 
 Detailed Usage Guides
 ---------------------
 
-.. note::
-   Detailed solver-specific usage guides, configuration options, and advanced features will be added in future documentation updates.
+Solver-specific usage, configuration options and advanced features are covered
+in :doc:`/user-guide/solvers/index`.
 
 Next Steps
 ----------

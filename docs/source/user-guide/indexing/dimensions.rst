@@ -160,40 +160,36 @@ Combining Dimensions
 Cartesian Products
 ~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-
-   from lumix import LXCartesianProduct
-
-   # Two dimensions
-   product = LXCartesianProduct(
-       LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
-       LXIndexDimension(Date, lambda dt: dt.date).from_data(dates)
-   )
-
-   # Three dimensions
-   product = (
-       LXCartesianProduct(
-           LXIndexDimension(Warehouse, lambda w: w.id).from_data(warehouses),
-           LXIndexDimension(Product, lambda p: p.sku).from_data(products)
-       )
-       .add_dimension(LXIndexDimension(Month, lambda m: m.id).from_data(months))
-   )
-
-In Variables
-~~~~~~~~~~~~
+A variable indexed by several dimensions gets them through
+``indexed_by_product``, which takes two or more dimensions:
 
 .. code-block:: python
 
    from typing import Tuple
 
-   assignment = (
-       LXVariable[Tuple[Driver, Date], int]("assignment")
+   # Two dimensions
+   duty = (
+       LXVariable[Tuple[Driver, Date], int]("duty")
        .binary()
        .indexed_by_product(
            LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
            LXIndexDimension(Date, lambda dt: dt.date).from_data(dates)
        )
    )
+
+   # Three dimensions
+   stock = (
+       LXVariable[Tuple[Warehouse, Product, Month], float]("stock")
+       .continuous()
+       .indexed_by_product(
+           LXIndexDimension(Warehouse, lambda w: w.id).from_data(warehouses),
+           LXIndexDimension(Product, lambda p: p.sku).from_data(products),
+           LXIndexDimension(Month, lambda m: m.id).from_data(months)
+       )
+   )
+
+The index key of an instance is the tuple of its dimension keys, for example
+``(warehouse.id, product.sku, month.id)``.
 
 Best Practices
 --------------
@@ -211,8 +207,17 @@ Best Practices
           .from_data(drivers)
       )
 
-      # Less efficient: Filter after product
-      product.where(lambda d, dt: d.is_active and ...)
+      # Less efficient: Filter the combinations after the product
+      duty = (
+          LXVariable[Tuple[Driver, Date], int]("duty")
+          .indexed_by_product(
+              LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
+              LXIndexDimension(Date, lambda dt: dt.date).from_data(dates)
+          )
+          .where_multi(lambda d, dt: d.is_active)
+      )
+
+   Use ``where_multi`` for conditions that involve more than one dimension.
 
 2. **Use Meaningful Keys**
 

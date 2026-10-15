@@ -447,7 +447,11 @@ How LXModel is translated to solver-specific format:
    .. code-block:: python
 
       # LumiX model
-      production = LXVariable[Product, float]("production").from_data(products)
+      production = (
+          LXVariable[Product, float]("production")
+          .indexed_by(lambda p: p.id)
+          .from_data(products)
+      )
 
       # Translated to solver
       for product in products:
@@ -466,6 +470,7 @@ How LXModel is translated to solver-specific format:
           .le()
           .rhs(lambda r: r.capacity)
           .from_data(resources)
+          .indexed_by(lambda r: r.id)
       )
 
       # Translated to solver

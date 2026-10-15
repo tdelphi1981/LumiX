@@ -17,11 +17,13 @@ Key Features:
 Examples:
     Basic usage for model logging::
 
+        import logging
         import lumix
         from lumix.utils import LXModelLogger
 
         lumix.enable_logging()  # LumiX prints nothing unless asked
-        logger = LXModelLogger(name="production_model", level=logging.INFO)
+        # enable_logging() handles the "lumix" logger, so use a name under "lumix."
+        logger = LXModelLogger(name="lumix.production_model", level=logging.INFO)
 
         # Log model creation
         logger.log_model_creation("ProductionPlan", num_vars=100, num_constraints=50)
@@ -33,7 +35,7 @@ Examples:
 
     Debug-level logging for detailed tracking::
 
-        logger = LXModelLogger(name="debug_model", level=logging.DEBUG)
+        logger = LXModelLogger(name="lumix.debug_model", level=logging.DEBUG)
 
         # Track each variable and constraint
         logger.log_variable_creation("production", "continuous", count=50)
@@ -63,10 +65,13 @@ class LXModelLogger:
     Examples:
         Create and use a model logger::
 
-            from lumix.utils import LXModelLogger
             import logging
+            import lumix
+            from lumix.utils import LXModelLogger
 
-            logger = LXModelLogger(name="my_model", level=logging.INFO)
+            lumix.enable_logging()
+            # a name under "lumix." reaches the handler of enable_logging()
+            logger = LXModelLogger(name="lumix.my_model", level=logging.INFO)
             logger.log_model_creation("ProductionModel", 100, 50)
             logger.log_solve_start("Gurobi")
             # ... solving happens ...
@@ -74,7 +79,9 @@ class LXModelLogger:
 
     Note:
         LumiX adds no handlers; call :func:`lumix.enable_logging` (or configure
-        :mod:`logging`) to see the messages. Multiple instances with the same name share
+        :mod:`logging`) to see the messages. :func:`lumix.enable_logging` handles
+        only the ``lumix`` logger and its children, so give names such as
+        ``"lumix.my_model"``. Multiple instances with the same name share
         the same underlying Python logger.
     """
 
@@ -93,7 +100,9 @@ class LXModelLogger:
                 import lumix
 
                 lumix.enable_logging()
-                logger = LXModelLogger(name="my_model")
+                # enable_logging() handles the "lumix" logger; names outside
+                # "lumix." need a handler of their own
+                logger = LXModelLogger(name="lumix.my_model")
 
         .. versionchanged:: 0.3.0
            ``level`` sets the logger's level only when given, and no console handler is

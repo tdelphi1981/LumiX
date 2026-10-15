@@ -101,7 +101,12 @@ LumiX preserves type information throughout your model:
 
 .. code-block:: python
 
-   production = LXVariable[Product, float]("production").from_data(products)
+   production = (
+       LXVariable[Product, float]("production")
+       .continuous()
+       .indexed_by(lambda p: p.id)
+       .from_data(products)
+   )
 
    # IDE knows 'p' is a Product - full autocomplete
    expr = LXLinearExpression().add_term(production, lambda p: p.profit)
@@ -116,7 +121,12 @@ Models automatically adapt to your data:
    # Add more products? No code changes needed!
    products = load_products()  # Could be 10 or 10,000 products
 
-   production = LXVariable[Product, float]("production").from_data(products)
+   production = (
+       LXVariable[Product, float]("production")
+       .continuous()
+       .indexed_by(lambda p: p.id)
+       .from_data(products)
+   )
    # Automatically creates the right number of variables
 
 No Manual Loops
@@ -127,23 +137,28 @@ LumiX handles variable expansion internally:
 .. code-block:: python
 
    # No loops needed - automatic expansion
-   production = LXVariable[Product, float]("production").from_data(products)
+   production = (
+       LXVariable[Product, float]("production")
+       .indexed_by(lambda p: p.id)
+       .from_data(products)
+   )
 
    # Automatic expansion in expressions
    total_profit = LXLinearExpression().add_term(production, lambda p: p.profit)
 
-   # Automatic expansion in constraints
-   for resource in resources:
-       model.add_constraint(
-           LXConstraint[Product](f"resource_{resource.id}")
-           .expression(
-               LXLinearExpression()
-               .add_term(production, lambda p: p.usage.get(resource.id, 0))
-           )
-           .le()
-           .rhs(resource.capacity)
-           .from_data(products)
+   # Automatic expansion in constraints: one row per resource
+   model.add_constraint(
+       LXConstraint[Resource]("resource")
+       .expression(
+           LXLinearExpression()
+           # The second argument is the row: the resource of this constraint
+           .add_term(production, lambda p, r: p.usage.get(r.id, 0))
        )
+       .le()
+       .rhs(lambda r: r.capacity)
+       .from_data(resources)
+       .indexed_by(lambda r: r.id)
+   )
 
 Multi-Dimensional Support
 ~~~~~~~~~~~~~~~~~~~~~~~~~

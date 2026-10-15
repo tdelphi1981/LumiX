@@ -20,7 +20,9 @@ All solvers support common parameters through the ``solve()`` method:
 Common Parameters
 -----------------
 
-These parameters work across all solvers:
+These parameters work across all solvers. Any other keyword argument is passed
+to the selected solver; unknown names are ignored with a warning (enable LumiX's
+log with ``lumix.enable_logging()`` to see it).
 
 time_limit
 ~~~~~~~~~~
@@ -67,21 +69,21 @@ MIP gap tolerance (relative):
 enable_sensitivity
 ~~~~~~~~~~~~~~~~~~
 
-Enable sensitivity analysis:
+Enable sensitivity analysis on the optimizer (not as a ``solve()`` argument):
 
 .. code-block:: python
 
-   solution = optimizer.solve(model, enable_sensitivity=True)
+   optimizer = LXOptimizer().use_solver("ortools").enable_sensitivity()
+   solution = optimizer.solve(model)
 
    # Access results
    shadow_prices = solution.shadow_prices
    reduced_costs = solution.reduced_costs
 
-**Type:** ``bool``
+**Default:** off
 
-**Default:** ``False``
-
-**Note:** Only supported by Gurobi, CPLEX, GLPK
+**Note:** Shadow prices and reduced costs are reported for LPs by OR-Tools,
+Gurobi, CPLEX and GLPK; CP-SAT and MIPs have none.
 
 Solver-Specific Parameters
 ---------------------------
@@ -89,44 +91,18 @@ Solver-Specific Parameters
 OR-Tools
 ~~~~~~~~
 
-**Threading:**
+The ``"ortools"`` adapter (GLOP for LPs, SCIP for MIPs) takes one extra
+parameter besides ``time_limit`` and ``gap_tolerance``:
 
 .. code-block:: python
 
    solution = optimizer.solve(
        model,
-       num_search_workers=4  # Use 4 parallel threads
+       threads=4  # Number of threads
    )
 
-**Logging:**
-
-.. code-block:: python
-
-   solution = optimizer.solve(
-       model,
-       log_search_progress=True  # Show solver progress
-   )
-
-**Presolve:**
-
-.. code-block:: python
-
-   solution = optimizer.solve(
-       model,
-       use_lp_strong_branching=True  # Better branching (slower)
-   )
-
-**Common Parameters:**
-
-.. code-block:: python
-
-   solution = optimizer.solve(
-       model,
-       num_search_workers=8,           # Parallel threads
-       log_search_progress=True,       # Logging
-       solution_limit=10,              # Stop after 10 solutions
-       use_lp_strong_branching=False,  # Fast vs strong branching
-   )
+Other names are ignored with a warning. CP-SAT parameters such as
+``num_search_workers`` belong to the ``"cpsat"`` solver (see the CP-SAT section below).
 
 Gurobi
 ~~~~~~
@@ -134,8 +110,8 @@ Gurobi
 Gurobi has the most extensive parameter set. Use Gurobi parameter names directly.
 
 .. versionchanged:: 0.3.0
-   Gurobi's log is off by default; pass ``verbose=True`` (to ``solve()`` or
-   ``use_solver("gurobi", ...)``) to print it.
+   Gurobi's log is off by default; pass ``verbose=True`` or ``LogToConsole=1``
+   (to ``solve()`` or ``use_solver("gurobi", ...)``) to print it.
 
 Parameter names:
 
@@ -261,7 +237,11 @@ Parameter names:
 CPLEX
 ~~~~~
 
-CPLEX parameters use different naming:
+CPLEX parameters are named by their path in ``cplex.Cplex().parameters``
+with ``_`` for ``.``: ``mip_limits_cutsfactor`` sets
+``parameters.mip.limits.cutsfactor`` and ``emphasis_mip`` sets
+``parameters.emphasis.mip``. Pass ``verbose=True`` to print the CPLEX log
+(``output_clonelog`` controls clone log files and does not show the log).
 
 **Threading:**
 
@@ -278,7 +258,7 @@ CPLEX parameters use different naming:
 
    solution = optimizer.solve(
        model,
-       mip_emphasis=1  # 0=balanced, 1=feasibility, 2=optimality, 3=bound, 4=hidden
+       emphasis_mip=1  # 0=balanced, 1=feasibility, 2=optimality, 3=bound, 4=hidden
    )
 
 **Presolve:**
@@ -307,9 +287,9 @@ CPLEX parameters use different naming:
 
    solution = optimizer.solve(
        model,
-       mip_emphasis=1,              # Feasibility
+       emphasis_mip=1,              # Feasibility
        preprocessing_presolve=1,    # Presolve on
-       mip_limits_cutsfactor=0,     # Disable cuts
+       mip_limits_cutsfactor=0,     # No cuts
        gap_tolerance=0.05,
    )
 
@@ -319,26 +299,31 @@ CPLEX parameters use different naming:
 
    solution = optimizer.solve(
        model,
-       mip_emphasis=2,              # Optimality
+       emphasis_mip=2,              # Optimality
        preprocessing_presolve=1,
-       mip_limits_cutsfactor=2,     # Aggressive cuts
+       mip_cuts_mircut=2,           # Aggressive MIR cuts
        gap_tolerance=0.0001,
    )
 
 GLPK
 ~~~~
 
-GLPK has limited configurability:
+GLPK has limited configurability. Use the common ``time_limit`` and
+``gap_tolerance`` parameters; the GLPK-specific ones are ``msg_lev``,
+``presolve`` and ``method``:
 
 **Basic Parameters:**
 
 .. code-block:: python
 
+   import swiglpk as glpk
+
    solution = optimizer.solve(
        model,
-       msg_lev="on",    # "on" or "off" for logging
-       tm_lim=300000,   # Time limit in milliseconds
-       mip_gap=0.01,    # MIP gap tolerance
+       time_limit=300,              # seconds
+       gap_tolerance=0.01,          # MIP gap tolerance
+       msg_lev=glpk.GLP_MSG_ON,     # GLPK log (default: glpk.GLP_MSG_OFF)
+       presolve=True,               # default
    )
 
 CP-SAT
@@ -359,9 +344,11 @@ CP-SAT (Constraint Programming):
 
 .. code-block:: python
 
+   from ortools.sat.python import cp_model
+
    solution = optimizer.solve(
        model,
-       search_branching="automatic",  # or "fixed_search", "portfolio"
+       search_branching=cp_model.AUTOMATIC_SEARCH,  # or FIXED_SEARCH, PORTFOLIO_SEARCH
        log_search_progress=True,
    )
 
@@ -525,10 +512,10 @@ Enable Logging
 
    solution = optimizer.solve(
        model,
-       # CPLEX logging configuration
+       verbose=True  # Print the CPLEX log
    )
 
-**OR-Tools:**
+**CP-SAT:**
 
 .. code-block:: python
 
@@ -536,6 +523,8 @@ Enable Logging
        model,
        log_search_progress=True
    )
+
+The ``"ortools"`` (GLOP/SCIP) adapter has no log option.
 
 Check Solver Statistics
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -547,7 +536,7 @@ Check Solver Statistics
    print(f"Status: {solution.status}")
    print(f"Objective: {solution.objective_value}")
    print(f"Solve time: {solution.solve_time:.2f}s")
-   print(f"Gap: {solution.mip_gap:.4f}")
+   print(f"Gap: {solution.gap}")  # MIP gap; None for LPs
 
 Configuration Best Practices
 -----------------------------
@@ -617,7 +606,7 @@ Example: Complete Tuning Workflow
    print("Baseline (defaults):")
    solution = optimizer.solve(model, time_limit=300, LogToConsole=1)
    print(f"  Time: {solution.solve_time:.2f}s")
-   print(f"  Gap: {solution.mip_gap:.4f}")
+   print(f"  Gap: {solution.gap:.4f}")
    print(f"  Objective: {solution.objective_value:.2f}")
 
    # Test threading
@@ -630,7 +619,7 @@ Example: Complete Tuning Workflow
    print("\nTesting MIP focus:")
    for focus in [0, 1, 2, 3]:
        solution = optimizer.solve(model, time_limit=300, Threads=8, MIPFocus=focus)
-       print(f"  MIPFocus={focus}: gap={solution.mip_gap:.4f}")
+       print(f"  MIPFocus={focus}: gap={solution.gap:.4f}")
 
    # Test gap tolerance
    print("\nTesting gap tolerance:")

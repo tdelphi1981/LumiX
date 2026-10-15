@@ -306,11 +306,18 @@ CP-SAT
   model may be unbounded) and a warning is logged.
 - Continuous variables live on the 1/scaling_factor grid, so an equality on them
   can have no exact grid solution although the continuous model is feasible
-  (``3 * x == 1``). CP-SAT then solves again with each such equality widened to a
-  band of half a grid step per variable (a whole step if that is still
-  infeasible), as CP-SAT's own MIP import does, and logs how far the equalities
-  are from exact. A model that is infeasible with the bands is infeasible.
-  Equalities that hold exactly on the grid are never widened.
+  (``3 * x == 1``). When the model is infeasible on the grid, CP-SAT solves
+  again in up to three steps, as CP-SAT's own MIP import does, and stops at the
+  first step that is not infeasible:
+
+  1. only the equalities that have no integer solution on the grid (the gcd of
+     their scaled coefficients does not divide the right-hand side) become a
+     band of half a grid step per variable; the other equalities stay exact;
+  2. every equality on scaled continuous variables becomes such a band;
+  3. every such equality becomes a band of a whole grid step per variable.
+
+  It logs how far the equalities are from exact. A model that is still
+  infeasible with the widest bands is reported infeasible.
 
 Querying Capabilities
 ---------------------
@@ -380,12 +387,10 @@ Automatic Feature Detection
 
    def solve_with_best_available(model):
        """Solve using best available solver for the model."""
-       # Try Gurobi first (if available)
+       # Try Gurobi first: it solves quadratic objectives natively.
+       # The solver is imported at solve time, so ImportError comes from solve().
        try:
-           optimizer = LXOptimizer().use_solver("gurobi")
-           if model.has_quadratic_terms():
-               # Gurobi supports quadratic natively
-               return optimizer.solve(model)
+           return LXOptimizer().use_solver("gurobi").solve(model)
        except ImportError:
            pass
 

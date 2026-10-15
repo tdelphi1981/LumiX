@@ -121,6 +121,14 @@ Priority 0 goals are objective terms, not goals with deviations:
 ``get_goal_deviations()`` returns ``None`` for them (and ``is_goal_satisfied()`` and
 ``get_total_deviation()`` return ``None`` too).
 
+A solve without a solution (infeasible, unbounded, or stopped before a solution
+was found) has no goal deviations: ``get_goal_deviations()``,
+``is_goal_satisfied()`` and ``get_total_deviation()`` return ``None``, and
+``summary()`` has no goal lines. Check ``solution.is_feasible()`` first.
+
+.. versionchanged:: 0.3.0
+   Such a solve used to report every goal as satisfied with zero deviation.
+
 Checking Goal Satisfaction
 ---------------------------
 
@@ -144,7 +152,8 @@ Return Values
 
 - ``True``: Goal is satisfied (its undesired deviations are within tolerance)
 - ``False``: Goal is not satisfied
-- ``None``: Goal not found in solution (also for priority 0 goals)
+- ``None``: Goal not found in solution (also for priority 0 goals, and when the
+  solve found no solution)
 
 Only the **undesired** deviations count: the shortfall (``neg``) of a ``>=`` goal,
 the excess (``pos``) of a ``<=`` goal, and both for an ``==`` goal. Exceeding a
@@ -170,7 +179,7 @@ row must be within tolerance.
    elif satisfied is False:
        print("Goal not achieved")
    else:
-       print("Goal not found in solution")
+       print("No deviations (unknown or priority 0 goal, or no solution)")
 
 Total Deviation
 ~~~~~~~~~~~~~~~
@@ -185,7 +194,7 @@ row of an indexed goal:
    if total_dev is not None:
        print(f"Total deviation: {total_dev:.2f}")
    else:
-       print("Goal not found")
+       print("No deviations (unknown or priority 0 goal, or no solution)")
 
 **Calculation** (undesired side only):
 
@@ -530,7 +539,7 @@ Best Practices
 
       deviations = solution.get_goal_deviations("my_goal")
       if deviations is None:
-          print("Goal not found")
+          print("No deviations (unknown or priority 0 goal, or no solution)")
           return
 
 2. **Use Appropriate Tolerance**

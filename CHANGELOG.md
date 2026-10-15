@@ -187,6 +187,8 @@ Models that were solved wrongly before now give different (correct) results; eve
 - The dashboard's "Variable Values" panel looked only at the first five instances of each family and could stay empty for a solution with nonzero values.
 - The "Constraint Status" panel of `LXSolutionVisualizer.plot()` counted binding rows by nonzero dual; with the model it now uses the slack, as `is_binding` does.
 - `LXRationalConverter(method="stern_brocot")` never considered the upper starting bound and could be far less accurate than Farey (2.99999999 gave 29999/10000).
+- CPLEX's documented `mip_emphasis` parameter pointed at a parameter path that does not exist and was skipped.
+- Documentation: loop examples whose lambdas read the loop variable after the loop (every row used the last item), `from_data(LXCartesianProduct(...))`, per-instance bounds, constraints with data but no `indexed_by`, `add_piecewise(slopes=)`, nonlinear-function examples that did not run or left out the auxiliary rows, solver pages that used API that does not exist (`solution.mip_gap`, `solution.variable_values`, `model.copy()`, ...), and logger names that `lumix.enable_logging()` does not reach.
 
 ## [0.2.1] - 2026-10-14
 

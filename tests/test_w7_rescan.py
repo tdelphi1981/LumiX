@@ -470,3 +470,24 @@ def test_rescan_goals_constraint_name_check_follows_direct_list_changes():
     m.constraints.append(_row("b", LXLinearExpression().add_term(x, 1), "le", 3))
     m.add_constraint(_row("a", LXLinearExpression().add_term(x, 1), "le", 4))   # no false duplicate
     assert [c.name for c in m.constraints] == ["b", "a"]
+
+
+@pytest.mark.skipif("cplex" not in AVAILABLE, reason="cplex")
+def test_rescan_commercial_cplex_mip_emphasis_is_applied():
+    import lumix.solvers.cplex_solver as cs
+    seen = {}
+    real = cs.LXCPLEXSolver._parse_solution
+
+    def spy(self, model, cplex_model, *a, **k):
+        seen["emphasis"] = cplex_model.parameters.emphasis.mip.get()
+        return real(self, model, cplex_model, *a, **k)
+
+    x = _var("x", "integer", 0, 3)
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, 1))
+    cs.LXCPLEXSolver._parse_solution = spy
+    try:
+        _solve("cplex", m, mip_emphasis=1)
+    finally:
+        cs.LXCPLEXSolver._parse_solution = real
+    assert seen["emphasis"] == 1

@@ -104,7 +104,7 @@ Basic Usage
    # Access results
    if solution.is_optimal():
        print(f"Objective: {solution.objective_value}")
-       for var_name, value in solution.variable_values.items():
+       for var_name, value in solution.variables.items():
            print(f"{var_name} = {value}")
 
 Solver Selection
@@ -141,7 +141,7 @@ Pass solver-specific parameters:
        gap_tolerance=0.01,    # 1% gap
        Threads=4,             # Use 4 threads
        MIPFocus=1,            # Focus on feasibility
-       LogToConsole=1,        # Show solver log
+       verbose=True,          # Show solver log
    )
 
 Components Details

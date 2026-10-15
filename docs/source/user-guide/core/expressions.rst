@@ -71,8 +71,8 @@ For quadratic objectives (risk, portfolio optimization):
        weights, weights, coeff=lambda a, b: 0.5 * cov[a.id][b.id]
    )
 
-   # Add linear terms (expected returns)
-   risk_expr.linear_terms.add_term(weights, lambda a: a.expected_return)
+   # Add linear terms (minus the expected return)
+   risk_expr.linear_terms.add_term(weights, lambda a: -a.expected_return)
 
    model.minimize(risk_expr)
 
@@ -91,8 +91,17 @@ For quadratic objectives (risk, portfolio optimization):
    Quadratic expressions are allowed **only in the objective**; a quadratic
    constraint raises ``ValueError``. Gurobi and CPLEX solve quadratic objectives
    natively, including nonconvex ones. OR-Tools, CP-SAT and GLPK raise a clear
-   error; with ``LXOptimizer().enable_linearization()`` a product of two single
-   variables (one instance each) is linearized exactly when one of them is binary.
+   error unless ``LXOptimizer().enable_linearization()`` is set; then every
+   product (families included) is linearized with the rules of
+   :doc:`/user-guide/linearization/bilinear`:
+
+   - binary × bounded variable and integer × (integer or continuous) are exact
+     (the integer factor is expanded in binary digits, up to
+     ``LXLinearizerConfig.binary_expansion_bits``);
+   - binary × unbounded variable uses ``big_m_value`` and issues a ``UserWarning``;
+   - continuous × continuous uses McCormick envelopes, issues a ``UserWarning``
+     and sets ``solution.relaxation = True``: the objective value is then a
+     bound, not the optimum.
 
 Non-Linear Expressions
 ----------------------
@@ -123,12 +132,26 @@ Piecewise Linear
 
 .. code-block:: python
 
+   time = LXVariable("time").continuous().bounds(lower=0, upper=80)
+
+   def labor_cost(hours):
+       # 1.0 per hour up to 40, 1.5 up to 60, 2.0 above (overtime rates)
+       if hours <= 40:
+           return hours
+       if hours <= 60:
+           return 40 + 1.5 * (hours - 40)
+       return 70 + 2.0 * (hours - 60)
+
    expr = LXNonLinearExpression()
    expr.add_piecewise(
-       var=time,
-       breakpoints=[0, 40, 60],
-       slopes=[1.0, 1.5, 2.0]  # Overtime rates
+       time,
+       labor_cost,                   # the function to approximate
+       breakpoints=[0, 40, 60, 80],  # exact: labor_cost is linear between them
    )
+
+``add_piecewise(var, func, ...)`` approximates ``func`` by straight lines between
+breakpoints; without ``breakpoints`` it places ``num_segments + 1`` of them on
+``[x_min, x_max]`` (by default the variable's bounds).
 
 Expression Operations
 ---------------------

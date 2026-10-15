@@ -134,8 +134,7 @@ class LXCPLEXSolver(LXSolverInterface):
                 - preprocessing_presolve: Presolve level (0=off, 1=on)
                 - lpmethod: Algorithm for LP (0=auto, 1=primal, 2=dual, 3=network, 4=barrier)
                 - verbose: print the CPLEX log (True/False)
-                - any other CPLEX parameter by its path with ``_`` for ``.``,
-                  e.g. ``mip_limits_cutsfactor`` for ``parameters.mip.limits.cutsfactor``
+                - any other parameter by its CPLEX path, e.g. ``mip_limits_cutsfactor``
 
         Returns:
             Solution object with results
@@ -171,7 +170,7 @@ class LXCPLEXSolver(LXSolverInterface):
                 if param_name == "threads":
                     cplex_model.parameters.threads.set(param_value)
                 elif param_name == "mip_emphasis":
-                    cplex_model.parameters.mip.strategy.emphasis.set(param_value)
+                    cplex_model.parameters.emphasis.mip.set(param_value)
                 elif param_name == "preprocessing_presolve":
                     cplex_model.parameters.preprocessing.presolve.set(param_value)
                 elif param_name == "lpmethod":
