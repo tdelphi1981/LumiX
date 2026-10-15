@@ -448,6 +448,12 @@ class LXCanonicalBuilder:
                 acc[key] = acc.get(key, 0.0) + float(value)
         return {k: v for k, v in acc.items() if v}
 
+    def quadratic_items(self, expr: LXQuadraticExpression) -> List[LXCanonicalNonlinear]:
+        """The objective products of ``expr`` as product items (one per pair of
+        positions, coefficients summed) for the linearizer."""
+        return [LXCanonicalNonlinear("product", (i, j), c, {}, 0, (i, j))
+                for (i, j), c in self._quadratic(expr).items()]
+
     @staticmethod
     def _linear_part(expr: Any, where: str) -> LXLinearExpression:
         if isinstance(expr, LXQuadraticExpression):

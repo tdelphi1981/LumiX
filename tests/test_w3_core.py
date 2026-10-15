@@ -292,12 +292,12 @@ def test_b6_binary_quadratic_through_linearization():
     assert s.objective_value == pytest.approx(4.0)
 
 
-def test_b6_family_quadratic_without_native_support_raises():
+def test_b6_family_quadratic_through_linearization():
     a = fam("a", ["k", "l"], "binary")
     q = LXQuadraticExpression().add_squared(a, 1.0)
     m = LXModel("m").add_variables(a).maximize(q)
-    with pytest.raises(ValueError, match="gurobi"):
-        LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.objective_value == pytest.approx(2.0)
 
 
 # --- Görev 7: independent checks (spec §6) ---------------------------------------
@@ -431,13 +431,21 @@ def test_final_deepcopy_keeps_cost_objective():
     assert copy.deepcopy(m).to_canonical().objective == {0: 3.0, 1: 5.0}
 
 
-@pytest.mark.parametrize("kind", ["continuous", "integer"])
-def test_final_nonbinary_square_is_not_relaxed(kind):
-    x = fam("x", ["k"], kind, 0, 4)
+def test_final_integer_square_is_exact():
+    x = fam("x", ["k"], "integer", 0, 4)
     q = LXQuadraticExpression().add_squared(x, 1.0) + LXLinearExpression().add_term(x, -4.0)
     m = LXModel("m").add_variable(x).minimize(q)
-    with pytest.raises(ValueError, match="binary"):
-        LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.objective_value == pytest.approx(-4.0) and not s.relaxation   # x = 2
+
+
+def test_final_continuous_square_is_a_flagged_relaxation():
+    x = fam("x", ["k"], "continuous", 0, 4)
+    q = LXQuadraticExpression().add_squared(x, 1.0) + LXLinearExpression().add_term(x, -4.0)
+    m = LXModel("m").add_variable(x).minimize(q)
+    with pytest.warns(UserWarning, match="McCormick"):
+        s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.relaxation is True
 
 
 def test_final_where_multi_on_single_index_raises_clearly():

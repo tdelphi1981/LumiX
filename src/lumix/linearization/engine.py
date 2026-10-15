@@ -109,6 +109,12 @@ class LXLinearizer:
             for item, z in self._linearize_items(builder.nonlinear(expr, "the objective"), sign):
                 z.add_to(out, item.coeff)
             expr = out
+        elif (isinstance(expr, LXQuadraticExpression) and expr.quadratic_terms
+              and not self.capability.can_solve_quadratic()):
+            out = expr.linear_terms.copy() + expr.constant
+            for item, z in self._linearize_items(builder.quadratic_items(expr), 0.0):
+                z.add_to(out, item.coeff)
+            expr = out
         linearized.maximize(expr) if maximize else linearized.minimize(expr)
 
     def _constraint(self, builder: LXCanonicalBuilder, constraint: LXConstraint) -> LXConstraint:

@@ -18,42 +18,6 @@ from .capabilities import LXSolverCapability
 TModel = TypeVar("TModel")
 
 
-def _quadratic_to_products(model: LXModel) -> LXModel:
-    """A shallow copy of ``model`` whose quadratic objective is written as products
-    (``LXNonLinearExpression.add_product``) for the linearizer. Products are taken
-    between single variables (one instance each)."""
-    import copy
-
-    from ..core.enums import LXVarType
-    from ..core.expressions import LXNonLinearExpression
-
-    quad = model.objective_expr
-    objective = LXNonLinearExpression()
-    objective.add_linear(quad.linear_terms + quad.constant)
-    for term in quad.quadratic_terms:
-        sides = []
-        for var in (term.var1, term.var2):
-            instances = [None] if var.is_scalar else var.get_instances()
-            if len(instances) != 1:
-                raise ValueError(
-                    f"Quadratic term on family '{var.name}' with {len(instances)} instances: "
-                    "only products of single variables can be linearized; use 'gurobi' or "
-                    "'cplex' for quadratic objectives over families")
-            sides.append(instances[0])
-        if LXVarType.BINARY not in (term.var1.var_type, term.var2.var_type):
-            raise ValueError(
-                f"Quadratic term {term.var1.name} * {term.var2.name}: products are "
-                "linearized exactly only when one side is binary; use 'gurobi' or "
-                "'cplex' for this quadratic objective")
-        c = term.coefficient
-        if callable(c):
-            c = c(sides[0]) if term.diagonal else c(sides[0], sides[1])
-        objective.add_product(term.var1, term.var2, float(c))
-    result = copy.copy(model)
-    result.objective_expr = objective
-    return result
-
-
 class LXSolverInterface(ABC, Generic[TModel]):
     """
     Abstract base class for all solver interfaces.
@@ -353,9 +317,6 @@ class LXOptimizer(Generic[TModel]):
 
         # Linearize nonlinear terms the solver cannot handle natively
         solve_model = model
-        if (self.use_linearization and isinstance(model.objective_expr, LXQuadraticExpression)
-                and not self._solver.capability.can_solve_quadratic()):
-            solve_model = _quadratic_to_products(model)
         if self.use_linearization:
             from ..linearization.engine import LXLinearizer
 
@@ -369,6 +330,7 @@ class LXOptimizer(Generic[TModel]):
         solution = self._solver.solve(
             solve_model, enable_sensitivity=self.enable_sens, **params
         )
+        solution.relaxation = bool(getattr(solve_model, "relaxation_terms", None))
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
 
         # Populate goal deviations if model has prepared goal programming

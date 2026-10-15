@@ -297,3 +297,99 @@ def test_a17_convex_use_needs_no_bounds():
     _, s = solve_lin(model([x], [cons("c", lin((x, 1)), ">=", -3)], "min",
                            LXNonLinearExpression().add_abs(x)))
     assert s.objective_value == pytest.approx(0)
+
+
+# --- Görev 5: products (A14, A18), quadratic objectives, relaxation flag -------------
+@pytest.mark.parametrize("lo,hi,sense,coeff", [(0, 10, "max", 1.0), (0, 10, "min", 1.0),
+                                               (2, 10, "max", 1.0), (2, 10, "min", -1.0),
+                                               (-5, 10, "max", 1.0), (-5, 10, "min", 1.0)])
+def test_a14_binary_times_continuous(lo, hi, sense, coeff):
+    b, x = fam("b", ["k"], "binary"), fam("x", ["k"], lower=lo, upper=hi)
+    e = LXNonLinearExpression().add_product(b, x, coeff=coeff).add_linear(lin((x, -0.1)))
+    _, s = solve_lin(model([b, x], [], sense, e))
+    cands = [coeff * bb * xx - 0.1 * xx for bb in (0, 1) for xx in (lo, hi)]
+    assert s.objective_value == pytest.approx(max(cands) if sense == "max" else min(cands))
+
+
+def test_a14_fixed_zero_binary_keeps_x_free():
+    b, x = fam("b", ["k"], "binary"), fam("x", ["k"], lower=0, upper=10)
+    e = LXNonLinearExpression().add_product(b, x, coeff=0.0).add_linear(lin((x, 1.0)))
+    _, s = solve_lin(model([b, x], [cons("b0", lin((b, 1)), "==", 0)], "max", e))
+    assert s.status == "optimal" and s.objective_value == pytest.approx(10)
+
+
+@pytest.mark.parametrize("sense", ["max", "min"])
+@pytest.mark.parametrize("c", [3.0, -3.0])
+def test_a18_binary_times_binary(sense, c):
+    a, b = fam("a", ["k"], "binary"), fam("b", ["k"], "binary")
+    e = LXNonLinearExpression().add_product(a, b, coeff=c).add_linear(lin((a, -1), (b, -1)))
+    _, s = solve_lin(model([a, b], [], sense, e))
+    vals = [c * x * y - x - y for x, y in itertools.product((0, 1), (0, 1))]
+    assert s.objective_value == pytest.approx(max(vals) if sense == "max" else min(vals))
+
+
+def test_a18_integer_product_is_exact():
+    x, y = fam("x", ["k"], "integer", 0, 3), fam("y", ["k"], "integer", 0, 3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _, s = solve_lin(model([x, y], [cons("c", lin((x, 1), (y, 1)), "<=", 3)], "max",
+                               LXNonLinearExpression().add_product(x, y)))
+    assert s.objective_value == pytest.approx(2) and not s.relaxation
+
+
+def test_a18_integer_with_fractional_bounds():
+    x, y = fam("x", ["k"], "integer", 0.5, 3.7), fam("y", ["k"], lower=-2, upper=1.5)
+    _, s = solve_lin(model([x, y], [], "min", LXNonLinearExpression().add_product(x, y)))
+    assert s.objective_value == pytest.approx(-6)          # x = 3, y = -2
+
+
+def test_a18_continuous_product_is_a_flagged_relaxation():
+    x, y = fam("x", ["k"], lower=0, upper=10), fam("y", ["k"], lower=0, upper=10)
+    m = model([x, y], [cons("c", lin((x, 1), (y, 1)), "<=", 10)], "max",
+              LXNonLinearExpression().add_product(x, y))
+    with pytest.warns(UserWarning, match="McCormick"):
+        s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.relaxation is True
+
+
+def test_a18_expansion_bit_limit():
+    x, y = fam("x", ["k"], "integer", 0, 5000), fam("y", ["k"], lower=0, upper=1)
+    m = model([x, y], [], "max", LXNonLinearExpression().add_product(x, y))
+    with pytest.raises(ValueError, match="binary_expansion_bits"):
+        solve_lin(m, config=LXLinearizerConfig(binary_expansion_bits=10))
+
+
+def test_a16_product_on_families_is_per_instance():
+    K = ["p", "q"]
+    y = fam("y", K, lower=0, upper=4)
+    b = fam("b", K, "binary")
+    cs = [cons("bp", LXLinearExpression().add_term(b, 1.0, keys=["p"]), "==", 1),
+          cons("bq", LXLinearExpression().add_term(b, 1.0, keys=["q"]), "==", 0),
+          cons("yq", LXLinearExpression().add_term(y, 1.0, keys=["q"]), "==", 4)]
+    _, s = solve_lin(model([y, b], cs, "max", LXNonLinearExpression().add_product(b, y)))
+    assert s.objective_value == pytest.approx(4)
+
+
+def test_quadratic_family_squares_through_linearization():
+    a = fam("a", ["k", "l"], "binary")
+    m = LXModel("m").add_variable(a).maximize(LXQuadraticExpression().add_squared(a, 1.0))
+    s = LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+    assert s.objective_value == pytest.approx(2.0) and not s.relaxation
+
+
+def test_quadratic_stays_native_on_qp_solvers():
+    solvers = [s for s in ("gurobi", "cplex") if s in AVAILABLE]
+    if not solvers:
+        pytest.skip("needs gurobi or cplex")
+    x = fam("x", ["k"], lower=0, upper=4)
+    q = LXQuadraticExpression().add_squared(x, 1.0) + lin((x, -4.0), const=4.0)
+    m = model([x], [], "min", q)
+    for solver in solvers:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")         # no McCormick warning: stays native
+            s = LXOptimizer().use_solver(solver).enable_linearization().solve(m)
+        assert s.objective_value == pytest.approx(0, abs=1e-6) and not s.relaxation
+        y = fam("y", ["k"], lower=-3, upper=2)
+        e = LXNonLinearExpression().add_abs(y).add_linear(lin((y, 1.0)))
+        s = LXOptimizer().use_solver(solver).enable_linearization().solve(model([y], [], "max", e))
+        assert s.objective_value == pytest.approx(4)

@@ -74,6 +74,11 @@ class LXSolution(Generic[TModel]):
         default_factory=dict
     )
 
+    #: True when the model was linearized with a relaxation (McCormick envelopes for a
+    #: product of two continuous variables): the objective value is a bound, and the
+    #: values may not attain it. .. versionadded:: 0.3.0
+    relaxation: bool = False
+
     def get_variable(self, var: LXVariable[TModel, TValue]) -> Union[TValue, Dict[Any, TValue]]:
         """
         Get variable value with full type inference.
