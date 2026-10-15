@@ -277,9 +277,9 @@ class LXOptimizer(Generic[TModel]):
             big_m: Big-M constant for conditional constraints (default: 1e6)
             pwl_segments: Number of segments for piecewise-linear approximations (default: 20)
             pwl_method: Method for PWL ("sos2", "incremental", "logarithmic")
-            prefer_sos2: Use SOS2 formulation when solver supports it (default: True)
+            prefer_sos2: No effect (deprecated in 0.3.0, removed in 0.4.0)
             adaptive_breakpoints: Use adaptive breakpoint generation for PWL (default: True)
-            mccormick_tighten_bounds: Apply bound tightening for McCormick envelopes (default: True)
+            mccormick_tighten_bounds: No effect (deprecated in 0.3.0, removed in 0.4.0)
             **kwargs: Additional linearization configuration options
 
         Returns:
