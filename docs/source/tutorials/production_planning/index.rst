@@ -243,7 +243,7 @@ Interactive exploration of parameter changes for tactical decision support.
 - Investment ROI comparison
 - Sensitivity range analysis
 - Risk assessment (downside scenarios)
-- Model copying with ORM detachment
+- Model copying with ORM data (copies share instances; ``model_factory`` for fresh sessions)
 
 **Files:** ``production_whatif.py``, ``report_generator.py``
 
@@ -517,7 +517,8 @@ Common Issues
 
 **Problem**: ORM session errors in what-if analysis
 
-- **Solution**: Use model copying with ORM detachment (Step 7)
+- **Solution**: Keep the session open while the analysis runs, or pass a
+  ``model_factory`` that opens a fresh session (Step 7)
 - **Reference**: :doc:`/user-guide/utils/model-copying`
 
 **Problem**: Database connection errors

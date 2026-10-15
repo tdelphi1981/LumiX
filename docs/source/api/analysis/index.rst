@@ -14,6 +14,8 @@ The analysis module implements three complementary analysis approaches:
        A[LXSolution] --> B[Sensitivity Analysis]
        A --> C[Scenario Analysis]
        A --> D[What-If Analysis]
+       C --> G[LXResultStore]
+       D --> G
        E[LXModel] --> C
        E --> D
        F[LXOptimizer] --> C
@@ -72,6 +74,21 @@ What-If Analysis
 The :class:`~lumix.analysis.whatif.LXWhatIfAnalyzer` class provides interactive exploration of
 parameter changes with immediate feedback on objective value impact.
 
+Result Store
+~~~~~~~~~~~~
+
+.. autosummary::
+   :toctree: generated/
+   :nosignatures:
+
+   lumix.analysis.store.LXResultStore
+   lumix.analysis.store.LXStoredRun
+
+The :class:`~lumix.analysis.store.LXResultStore` class (new in 0.3.0) records every solve
+made by the scenario and what-if analyzers in SQLAlchemy tables and reads the results back
+as :class:`~lumix.analysis.store.LXStoredRun` objects and value dictionaries. Requires
+``lumix-opt[orm]``. See :doc:`/user-guide/analysis/result-store`.
+
 Detailed API Reference
 ----------------------
 
@@ -99,6 +116,16 @@ What-If Analysis
 ~~~~~~~~~~~~~~~~
 
 .. automodule:: lumix.analysis.whatif
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :member-order: bysource
+   :noindex:
+
+Result Store
+~~~~~~~~~~~~
+
+.. automodule:: lumix.analysis.store
    :members:
    :undoc-members:
    :show-inheritance:

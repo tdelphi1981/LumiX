@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use LumiX in your research, please cite it as below."
 title: "LumiX: A type-safe, IDE-friendly wrapper for optimization solvers"
-version: 0.2.0
-date-released: 2024-10-30
+version: 0.3.0
+date-released: 2026-10-15
 authors:
   - family-names: BERBER
     given-names: Tolga

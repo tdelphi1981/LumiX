@@ -1,7 +1,14 @@
-Model Copying and ORM Detachment
-=================================
+Model Copying
+=============
 
-This guide explains LumiX's strategy for safely copying optimization models that use ORM (Object-Relational Mapping) data sources, enabling what-if analysis and scenario comparison.
+This guide explains what happens when a LumiX model is copied, which is what what-if and
+scenario analysis do for every run, and how to work with models built from ORM
+(Object-Relational Mapping) data sources.
+
+.. versionchanged:: 0.3.0
+   Model copies share data instances and callables with the original. Nothing is
+   deep-copied or detached any more, for plain objects and ORM objects alike. ORM
+   detaching is used only when a model is pickled.
 
 Overview
 --------
@@ -9,675 +16,297 @@ Overview
 Why Model Copying is Needed
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Many analysis workflows require creating modified copies of a model:
+Many analysis workflows need modified versions of a model while the original stays
+unchanged:
 
 - **What-If Analysis**: Test parameter changes without affecting the original model
 - **Scenario Analysis**: Compare multiple variations of the same base model
-- **Sensitivity Analysis**: Explore ranges of parameter values
 - **A/B Testing**: Compare different modeling approaches
 
-The Challenge with ORM
-~~~~~~~~~~~~~~~~~~~~~~~
+:class:`~lumix.analysis.whatif.LXWhatIfAnalyzer` and
+:class:`~lumix.analysis.scenario.LXScenarioAnalyzer` get those versions by copying the
+model with ``copy.deepcopy``, unless you give them a ``model_factory`` (see
+`Alternative: a Model Factory`_).
 
-When using database ORM frameworks (SQLAlchemy, Django), model copying faces two challenges:
+The Rule: Copies Share Data
+---------------------------
 
-1. **Session Binding**: ORM objects are bound to database sessions and cannot be pickled
-2. **Lazy Loading**: Related data may not be loaded yet, causing errors after copying
-
-**Example Problem**:
-
-.. code-block:: python
-
-   from copy import deepcopy
-
-   # Build model with SQLAlchemy data
-   product = session.query(Product).first()
-   production = LXVariable[Product, float]("production")
-       .indexed_by(lambda p: p.id)
-       .from_model(session)
-
-   model.add_variable(production)
-
-   # This will FAIL with ORM session errors!
-   modified_model = deepcopy(model)  # ❌ Error: Cannot pickle session
-
-LumiX's Solution
-----------------
-
-ORM Detachment Strategy
-~~~~~~~~~~~~~~~~~~~~~~~
-
-LumiX implements automatic ORM detachment in ``__deepcopy__`` methods:
-
-.. mermaid::
-
-   graph TD
-       A[deepcopy model] --> B{Contains ORM objects?}
-       B -->|Yes| C[Materialize lazy data]
-       C --> D[Detach from session]
-       D --> E[Copy as plain objects]
-       B -->|No| E
-       E --> F[Safe to copy!]
-
-       style A fill:#e8f4f8
-       style F fill:#e1ffe1
-
-**Three-Step Process**:
-
-1. **Detect ORM Objects**: Identify SQLAlchemy or Django ORM instances
-2. **Materialize Data**: Force-load lazy relationships before copying
-3. **Detach from Session**: Create plain Python objects with same attributes
-
-How It Works
-~~~~~~~~~~~~
-
-The strategy is transparent - just use ``deepcopy`` normally:
-
-.. code-block:: python
-
-   from copy import deepcopy
-   from lumix import LXModel, LXVariable
-
-   # Build model with ORM data (session-bound objects)
-   model = LXModel("production")
-   production = LXVariable[Product, float]("production")
-       .from_model(session)  # Uses SQLAlchemy session
-
-   model.add_variable(production)
-
-   # This now works! ORM objects automatically detached
-   modified_model = deepcopy(model)  # ✓ Success
-
-   # Modified model is independent (no session)
-   modified_model.constraints[0].rhs_value = 1500  # Safe to modify
-
-Supported ORM Frameworks
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-LumiX automatically detects and handles:
+``copy.deepcopy(model)`` copies the model's **structure** and shares its **data**:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
-
-   * - Framework
-     - Detection
-     - Detachment Strategy
-   * - **SQLAlchemy**
-     - ``hasattr(obj, '_sa_instance_state')``
-     - Create new instance, copy column attributes
-   * - **Django ORM**
-     - ``hasattr(obj, '_state') and hasattr(obj, '_meta')``
-     - Copy field values to new instance
-   * - **Plain Python**
-     - N/A
-     - Return as-is (no detachment needed)
-
-Implementation Details
-----------------------
-
-Core Utility Functions
-~~~~~~~~~~~~~~~~~~~~~~
-
-The ``lumix.utils.copy_utils`` module provides:
-
-detach_orm_object
-^^^^^^^^^^^^^^^^^
-
-Detach a single ORM object from its database session.
-
-.. code-block:: python
-
-   from lumix.utils.copy_utils import detach_orm_object
-
-   # With SQLAlchemy
-   product = session.query(Product).first()
-   detached = detach_orm_object(product)
-   # detached is now a plain Python object, safe to pickle
-
-   # With plain objects (no-op)
-   plain_obj = PlainProduct(id=1, name="Chair")
-   result = detach_orm_object(plain_obj)
-   # result is plain_obj (same object, unchanged)
-
-**How it works for SQLAlchemy**:
-
-1. Create new instance of same class (``cls.__new__(cls)``)
-2. Initialize ``__dict__`` to make it a plain Python object
-3. Copy all column attribute values as plain attributes
-4. Copy loaded relationship attributes (if already loaded)
-5. Return plain object with no session binding
-
-**Signature**:
-
-.. code-block:: python
-
-   def detach_orm_object(obj: Any) -> Any:
-       """
-       Detach ORM object from session, making it safe to copy.
-
-       Args:
-           obj: Object to detach (ORM or plain object)
-
-       Returns:
-           Detached copy (ORM) or original object (plain Python)
-       """
-
-materialize_and_detach_list
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Materialize and detach a list of items that may contain ORM objects.
-
-.. code-block:: python
-
-   from lumix.utils.copy_utils import materialize_and_detach_list
-
-   # List of SQLAlchemy objects
-   products = session.query(Product).all()
-   detached_list = materialize_and_detach_list(products, {})
-   # Each item is now detached and deep copied
-
-**Signature**:
-
-.. code-block:: python
-
-   def materialize_and_detach_list(
-       items: Optional[List[Any]],
-       memo: dict
-   ) -> Optional[List[Any]]:
-       """
-       Materialize and detach list of items.
-
-       Args:
-           items: List of items (may contain ORM objects), or None
-           memo: deepcopy memo dict for circular reference tracking
-
-       Returns:
-           New list with detached and deep-copied objects, or None
-       """
-
-copy_function_detaching_closure
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Copy a function while detaching any ORM objects in its closure.
-
-This is critical for lambda functions that capture ORM objects:
-
-.. code-block:: python
-
-   from lumix.utils.copy_utils import copy_function_detaching_closure
-
-   # Lambda capturing ORM object
-   product = session.query(Product).first()  # ORM object
-   profit_func = lambda p: product.profit_per_unit * p.quantity
-
-   # Create safe copy
-   safe_func = copy_function_detaching_closure(profit_func, {})
-   # safe_func uses detached copy of 'product'
-
-**How it works**:
-
-1. Check if function has a closure
-2. Inspect each cell in the closure
-3. Detect ORM objects in closure variables
-4. Detach ORM objects
-5. Create new function with detached closure
-
-**Signature**:
-
-.. code-block:: python
-
-   def copy_function_detaching_closure(
-       func: Callable,
-       memo: dict
-   ) -> Callable:
-       """
-       Copy function while detaching ORM objects in closure.
-
-       Args:
-           func: Function to copy (may have ORM objects in closure)
-           memo: deepcopy memo dict for circular reference tracking
-
-       Returns:
-           New function with ORM objects detached from sessions
-       """
-
-Integration in Core Classes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-LumiX integrates ORM detachment into ``__deepcopy__`` methods of core classes:
-
-LXModel.__deepcopy__
-^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-   from lumix.core.model import LXModel
-
-   class LXModel:
-       def __deepcopy__(self, memo):
-           """Custom deepcopy that detaches ORM sessions."""
-           # ... create new instance ...
-
-           # Deep copy all variables (calls LXVariable.__deepcopy__)
-           result.variables = [deepcopy(var, memo) for var in self.variables]
-
-           # Deep copy all constraints (calls LXConstraint.__deepcopy__)
-           result.constraints = [deepcopy(c, memo) for c in self.constraints]
-
-           # Deep copy objective expression
-           result.objective_expr = deepcopy(self.objective_expr, memo)
-
-           return result
-
-LXVariable.__deepcopy__
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: python
-
-   from lumix.core.variables import LXVariable
-
-   class LXVariable:
-       def __deepcopy__(self, memo):
-           """Custom deepcopy that detaches ORM and handles closures."""
-           from ..utils.copy_utils import (
-               materialize_and_detach_list,
-               copy_function_detaching_closure
-           )
-
-           # ... create new instance ...
-
-           # Copy callable attributes (may have closures with ORM objects)
-           result.index_func = copy_function_detaching_closure(
-               self.index_func, memo
-           ) if self.index_func is not None else None
-
-           result.cost_func = copy_function_detaching_closure(
-               self.cost_func, memo
-           ) if self.cost_func is not None else None
-
-           # Handle data sources
-           if self._session is not None:
-               # Materialize ORM data before copying
-               instances = self.get_instances()
-               result._data = materialize_and_detach_list(instances, memo)
-               result._session = None  # Clear session reference
-           elif self._data is not None:
-               # Already have data - just detach and copy
-               result._data = materialize_and_detach_list(self._data, memo)
-               result._session = None
-
-           return result
-
-LXConstraint.__deepcopy__
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Similar strategy for constraints:
-
-.. code-block:: python
-
-   from lumix.core.constraints import LXConstraint
-
-   class LXConstraint:
-       def __deepcopy__(self, memo):
-           """Custom deepcopy that detaches ORM in expressions."""
-           # ... create new instance ...
-
-           # Deep copy expression (handles ORM in coefficients)
-           result.expr = deepcopy(self.expr, memo) if self.expr else None
-
-           return result
-
-Usage Examples
---------------
-
-Basic Usage
-~~~~~~~~~~~
-
-Simple model copying:
+   :widths: 45 20 35
+
+   * - Part of the model
+     - In the copy
+     - Consequence
+   * - Variable families, constraint families, expressions, objective
+     - New objects
+     - Changing a bound or right-hand side in the copy does not affect the original
+   * - Data lists (``from_data(products)``)
+     - New ``list`` objects
+     - Adding or removing items in the copy's list does not affect the original
+   * - Data instances (the items in those lists), plain or ORM
+     - Shared
+     - The copy sees exactly the same objects as the original
+   * - Callables (lambdas for coefficients, right-hand sides, indexing, filters)
+     - Shared
+     - Closures keep referring to your own objects
+
+.. mermaid::
+
+   graph LR
+       subgraph Original
+           A[LXModel] --> B[LXVariable production]
+           B --> C[list]
+       end
+       subgraph Copy
+           A2[LXModel] --> B2[LXVariable production]
+           B2 --> C2[list]
+       end
+       C --> D[Product instances]
+       C2 --> D
+       B --> E[lambdas]
+       B2 --> E
+
+       style D fill:#e1ffe1
+       style E fill:#e1ffe1
+
+Why Sharing Matters
+~~~~~~~~~~~~~~~~~~~
+
+Lambdas often depend on the identity of data objects. Because instances and lambdas are
+shared, these patterns behave in a copy exactly as in the original model:
 
 .. code-block:: python
 
    from copy import deepcopy
-   from lumix import LXModel, LXVariable, LXOptimizer
 
-   # Build model with ORM data
-   session = get_session()
-   model = LXModel("production")
+   products = load_products()
+   flagship = products[0]
+   weights = {p: p.priority * 2.0 for p in products}   # keyed by instance
 
-   production = LXVariable[Product, float]("production")
+   production = (
+       LXVariable[Product, float]("production")
        .continuous()
        .bounds(lower=0)
        .indexed_by(lambda p: p.id)
-       .from_model(session)
-
-   model.add_variable(production)
-
-   # Copy model (ORM automatically detached)
-   modified_model = deepcopy(model)
-
-   # Safe to modify
-   modified_model.constraints[0].rhs_value *= 1.5
-
-   # Solve both
-   optimizer = LXOptimizer()
-   original_solution = optimizer.solve(model)
-   modified_solution = optimizer.solve(modified_model)
-
-What-If Analysis
-~~~~~~~~~~~~~~~~
-
-Using model copying for what-if analysis:
-
-.. code-block:: python
-
-   from copy import deepcopy
-   from lumix import LXWhatIfAnalyzer
-
-   # LXWhatIfAnalyzer uses deepcopy internally
-   analyzer = LXWhatIfAnalyzer(model, optimizer)
-
-   # Each what-if creates a modified copy
-   result = analyzer.increase_constraint_rhs("capacity", by=100)
-
-   # Behind the scenes:
-   # 1. deepcopy(model) - uses ORM detachment
-   # 2. Modify copied model
-   # 3. Solve modified model
-   # 4. Compare results
-
-Scenario Analysis
-~~~~~~~~~~~~~~~~~
-
-Multiple model copies for scenarios:
-
-.. code-block:: python
-
-   from copy import deepcopy
-
-   scenarios = {}
-
-   # Optimistic scenario
-   optimistic = deepcopy(model)
-   optimistic.get_constraint("demand").rhs_value *= 1.2
-   scenarios["optimistic"] = optimizer.solve(optimistic)
-
-   # Baseline scenario
-   scenarios["baseline"] = optimizer.solve(model)
-
-   # Pessimistic scenario
-   pessimistic = deepcopy(model)
-   pessimistic.get_constraint("demand").rhs_value *= 0.8
-   scenarios["pessimistic"] = optimizer.solve(pessimistic)
-
-   # Compare
-   for name, solution in scenarios.items():
-       print(f"{name}: ${solution.objective_value:,.2f}")
-
-Manual ORM Detachment
-~~~~~~~~~~~~~~~~~~~~~
-
-If you need to manually detach objects:
-
-.. code-block:: python
-
-   from lumix.utils.copy_utils import detach_orm_object
-
-   # Detach single object
-   product = session.query(Product).first()
-   detached_product = detach_orm_object(product)
-
-   # Now safe to use outside session
-   session.close()
-   print(detached_product.name)  # ✓ Works
-
-Lambda with ORM in Closure
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Handling lambdas that capture ORM objects:
-
-.. code-block:: python
-
-   from copy import deepcopy
-
-   # Lambda captures ORM object
-   product = session.query(Product).first()  # Session-bound
-
-   production = LXVariable[Product, float]("production")
-       .continuous()
-       .indexed_by(lambda p: p.id)
-       .from_data([product])
-
-   # Add coefficient function that captures 'product'
-   expr = LXLinearExpression()
-   expr.add_term(production, lambda p: product.profit_per_unit)  # Captures 'product'
-
-   # Deep copy handles this automatically!
-   expr_copy = deepcopy(expr)  # ✓ Works - 'product' detached in closure
-
-Advanced Topics
----------------
-
-Performance Considerations
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Materialization Cost**: Lazy-loaded relationships are materialized during detachment, which can be expensive for large datasets.
-
-**Optimization Strategies**:
-
-1. **Eager Loading**: Use ``.options(joinedload(...))`` in queries
-2. **Limit Data**: Only query needed columns
-3. **Cache Results**: Reuse detached objects when possible
-
-.. code-block:: python
-
-   from sqlalchemy.orm import joinedload
-
-   # Eager load relationships
-   products = session.query(Product).options(
-       joinedload(Product.materials),
-       joinedload(Product.machine_requirements)
-   ).all()
-
-   # Now all data is loaded, detachment is faster
-   production = LXVariable[Product, float]("production")
        .from_data(products)
+   )
 
-   model_copy = deepcopy(model)  # Faster with eager loading
+   model = LXModel("plan").add_variable(production)
+   model.add_constraint(
+       LXConstraint("flagship_cap")
+       .expression(LXLinearExpression().add_term(
+           production, coeff=lambda p: 1.0 if p is flagship else 0.0))   # identity check
+       .le()
+       .rhs(100)
+   )
+   model.maximize(LXLinearExpression().add_term(production, lambda p: weights[p]))
 
-Circular References
-~~~~~~~~~~~~~~~~~~~
+   model_copy = deepcopy(model)
+   # model_copy solves to the same optimum: "p is flagship" and weights[p] still
+   # match, because model_copy holds the very same Product instances.
 
-The ``memo`` dict in ``deepcopy`` handles circular references:
+The copy is still independent where it matters for analysis:
 
 .. code-block:: python
 
-   # Circular reference example
-   class Node:
-       def __init__(self, value):
-           self.value = value
-           self.next = None
+   model_copy.get_constraint("flagship_cap").rhs_value = 50
+   assert model.get_constraint("flagship_cap").rhs_value == 100   # original untouched
 
-   # Create cycle
-   node1 = Node(1)
-   node2 = Node(2)
-   node1.next = node2
-   node2.next = node1  # Circular!
+.. note::
 
-   # deepcopy handles this with memo dict
-   node1_copy = deepcopy(node1)  # ✓ Works
+   Because data instances are shared, **mutating an instance** (``product.capacity = 0``)
+   affects the original model and every copy. Express changes through scenario or
+   what-if modifications (right-hand sides, bounds), not by editing data objects.
 
-LumiX uses the same ``memo`` dict throughout the copy process.
+ORM Data Sources
+----------------
 
-Pickle Support
-~~~~~~~~~~~~~~
+Copies treat ORM objects like any other data instance: they are shared, not detached.
 
-In addition to ``__deepcopy__``, LumiX implements ``__getstate__`` and ``__setstate__`` for pickle protocol:
+- A family bound with ``from_data(session.query(Product).all())`` holds a list of ORM
+  instances; the copy gets a new list with the same instances.
+- A family bound with ``from_model(Product, session=session)`` runs its query lazily.
+  When the model is copied, the query runs **once, at copy time**, and the copy holds the
+  resulting list of instances (no session reference of its own).
+- Lambdas that read relationships (``p.category.factor``) load them through each
+  instance's own session, exactly as in the original model.
+
+So a copied ORM model works as long as the session that loaded the instances can still
+serve whatever the lambdas read. If you eager-load what the lambdas need, or keep the
+session open for the duration of the analysis, copying is all you need:
+
+.. code-block:: python
+
+   from sqlalchemy.orm import Session, joinedload
+
+   with Session(engine) as session:
+       products = session.query(Product).options(joinedload(Product.category)).all()
+       model = build_model(products)
+
+       analyzer = LXWhatIfAnalyzer(model, optimizer)
+       result = analyzer.increase_constraint_rhs("capacity", by=100)
+
+Alternative: a Model Factory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+If the session may be closed before or during the analysis, give the analyzer a
+``model_factory`` instead of a model. The factory is called for the base model and for
+every run, so nothing is copied, and it can open a fresh session each time:
+
+.. code-block:: python
+
+   from sqlalchemy.orm import Session, selectinload
+
+   def build_model():
+       with Session(engine) as session:     # closed after loading
+           products = (session.query(Product)
+                       .options(selectinload(Product.category))   # what lambdas read
+                       .all())
+       return build_production_model(products)   # a new LXModel
+
+   analyzer = LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model)
+   # ... add and run scenarios ...
+
+.. important::
+
+   Close the session inside the factory, after eager-loading every relationship your
+   lambdas read (``selectinload`` / ``joinedload``). Loaded attributes stay readable on
+   the instances after the session closes, and the connection goes back to the pool.
+   A session left open per model holds one pooled connection each, so with SQLAlchemy's
+   default pool (5 + 10 overflow) the 16th run would wait for a connection and fail.
+
+The factory must return a new model on every call. See
+:doc:`/user-guide/analysis/scenario` and :doc:`/user-guide/analysis/whatif`.
+
+Pickling and ORM Detachment
+---------------------------
+
+Detaching ORM objects from their session is used only when a model is **pickled**
+(``__getstate__``). When an ORM-backed family (``from_model(..., session=...)``) is
+pickled, its query is materialized and each instance is replaced by a detached copy made
+with ``detach_orm_object``; the session reference is dropped.
 
 .. code-block:: python
 
    import pickle
 
-   # Build model with ORM data
-   model = build_production_model(session)
+   pickled = pickle.dumps(model)        # __getstate__ detaches ORM instances
+   restored = pickle.loads(pickled)
 
-   # Pickle (uses __getstate__ for ORM detachment)
-   pickled = pickle.dumps(model)
+.. note::
 
-   # Unpickle (uses __setstate__ for restoration)
-   restored_model = pickle.loads(pickled)
+   The standard :mod:`pickle` module cannot serialize lambdas. Models that use lambdas
+   (most LumiX models do) need a serializer that supports them, such as ``cloudpickle``
+   or ``dill``.
 
-   # Model works without session
-   solution = optimizer.solve(restored_model)
+detach_orm_object
+~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from lumix.utils.copy_utils import detach_orm_object
+
+   product = session.query(Product).first()
+   detached = detach_orm_object(product)
+   # detached is a plain object of the same class, with no session
+
+   session.close()
+   print(detached.name)            # ✓ column values were copied
+   print(detached.category.name)   # ✓ relationship loaded while the session was open
+
+   # Plain objects are returned unchanged
+   assert detach_orm_object(plain_product) is plain_product
+
+How it works for SQLAlchemy:
+
+1. Create a new instance of the same class (``cls.__new__(cls)``) with a plain
+   ``__dict__``.
+2. Copy every column attribute value.
+3. Copy relationship attributes that are already loaded.
+4. Load relationship attributes that are **not** loaded yet, while the instance still has a
+   session.
+5. If the instance has no session, or loading fails, emit a ``UserWarning``: accessing
+   that relationship on the detached copy will fail.
+
+.. versionchanged:: 0.3.0
+   Unloaded (lazy) relationships are loaded while the object still has a session; they
+   used to be left out silently.
+
+For Django models, field values are copied to a new instance (relations are not copied).
+
+Other Helpers
+~~~~~~~~~~~~~
+
+``lumix.utils.copy_utils`` also provides ``materialize_and_detach_list`` (detach and copy
+each item of a list) and ``copy_function_detaching_closure`` (rebuild a function whose
+closure holds ORM objects with detached copies). LumiX no longer uses them when copying a
+model; they remain available for your own serialization code.
 
 Troubleshooting
 ---------------
 
-Session Errors After Copying
+Lazy-Loading Errors in a Copy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Symptom**: ``DetachedInstanceError`` or ``Session is closed`` errors after copying
+**Symptom**: ``DetachedInstanceError`` or "session is closed" errors while what-if or
+scenario analysis solves a copied model.
 
-**Cause**: Object not properly detached from session
+**Cause**: The copy shares the ORM instances, and a lambda reads a relationship that was
+never loaded after the session was closed.
 
-**Solution**: Ensure you're using ``deepcopy``, not ``copy``
+**Solution**: Use a ``model_factory`` with a fresh session, keep the session open during
+the analysis, or eager-load the relationships before building the model.
 
-.. code-block:: python
+Copy Gives a Different Result Than the Original
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   from copy import copy, deepcopy
+Since 0.3.0 this should not happen because of identity checks or instance-keyed
+dictionaries, since copies share instances and lambdas. If it does, check whether code
+mutates data instances between solves; such changes are visible to every copy.
 
-   # Bad - shallow copy doesn't detach
-   bad_model = copy(model)  # ❌
+Pickling Errors
+~~~~~~~~~~~~~~~
 
-   # Good - deep copy detaches
-   good_model = deepcopy(model)  # ✓
+**Symptom**: ``PicklingError`` mentioning a lambda or a session.
 
-Missing Data After Copying
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Symptom**: Copied model has ``None`` or empty lists for ORM data
-
-**Cause**: Lazy-loaded relationships not materialized before copying
-
-**Solution**: Eager load relationships or access them before copying
-
-.. code-block:: python
-
-   from sqlalchemy.orm import joinedload
-
-   # Option 1: Eager loading
-   products = session.query(Product).options(
-       joinedload(Product.materials)
-   ).all()
-
-   # Option 2: Touch lazy attributes before copying
-   for product in products:
-       _ = product.materials  # Force load
-       _ = product.machine_requirements  # Force load
-
-   # Now copy will include all data
-   model_copy = deepcopy(model)
-
-Lambda Closure Issues
-~~~~~~~~~~~~~~~~~~~~~
-
-**Symptom**: ``PicklingError`` mentioning lambda or closure
-
-**Cause**: Lambda closure contains un-picklable objects
-
-**Solution**: Use ``copy_function_detaching_closure`` or avoid capturing complex objects
+**Solution**: Use a serializer that supports lambdas (``cloudpickle``, ``dill``) and avoid
+capturing sessions in lambdas:
 
 .. code-block:: python
 
-   from lumix.utils.copy_utils import copy_function_detaching_closure
+   # Problem: lambda captures the session
+   bad_func = lambda p: session.query(Cost).filter_by(product_id=p.id).one().value  # ❌
 
-   # Problem: Lambda captures unpicklable object
-   session_obj = session  # Session cannot be pickled
-   bad_func = lambda p: session_obj.query(...)  # ❌
-
-   # Solution: Don't capture session in lambda
-   good_func = lambda p: p.profit_per_unit  # ✓
+   # Better: read attributes of the instance
+   good_func = lambda p: p.cost  # ✓
 
 Best Practices
 --------------
 
-1. **Use Eager Loading**
-
-   Load all needed data before copying to avoid lazy-loading errors.
-
-2. **Close Sessions Before Copying**
-
-   Detachment makes session unnecessary - close it for clarity.
-
-   .. code-block:: python
-
-      # Build model
-      model = build_model(session)
-
-      # Close session (model now uses detached data)
-      session.close()
-
-      # Safe to copy
-      model_copy = deepcopy(model)
-
-3. **Avoid Complex Closures**
-
-   Keep lambda functions simple to avoid pickling issues.
-
-   .. code-block:: python
-
-      # Bad: Complex closure
-      def make_cost_func(session, product_id):
-          product = session.query(Product).get(product_id)
-          return lambda p: product.cost * p.quantity  # ❌
-
-      # Good: Simple lambda
-      def make_cost_func(product):
-          cost = product.cost  # Capture value, not object
-          return lambda p: cost * p.quantity  # ✓
-
-4. **Test Copying Early**
-
-   Verify copying works before building complex models.
-
-   .. code-block:: python
-
-      # Build minimal model
-      model = LXModel("test")
-      # ... add variables ...
-
-      # Test copying
-      try:
-          model_copy = deepcopy(model)
-          print("✓ Copying works!")
-      except Exception as e:
-          print(f"❌ Copy failed: {e}")
-
-5. **Use Type Hints**
-
-   Help IDE and type checkers understand ORM types.
-
-   .. code-block:: python
-
-      from typing import List
-      from sqlalchemy.orm import Session
-
-      def build_model(session: Session) -> LXModel:
-          products: List[Product] = session.query(Product).all()
-          # Type checker knows products is List[Product]
+1. **Let the analyzers copy for you.** ``LXWhatIfAnalyzer`` and ``LXScenarioAnalyzer``
+   never modify the model you pass in.
+2. **Do not mutate data instances** to express a scenario; use right-hand-side and bound
+   modifications.
+3. **For ORM data whose session may close, use** ``model_factory``.
+4. **Eager-load** relationships that lambdas read, to avoid one query per row.
 
 See Also
 --------
 
-- :doc:`/user-guide/analysis/whatif` - What-if analysis using model copying
+- :doc:`/user-guide/analysis/whatif` - What-if analysis
 - :doc:`/user-guide/analysis/scenario` - Scenario analysis
 - :doc:`orm-integration` - ORM integration overview
-- :doc:`/tutorials/production_planning/step7_whatif` - Tutorial using ORM copying
+- :doc:`/tutorials/production_planning/step7_whatif` - Tutorial with ORM data
 
 API Reference
 ~~~~~~~~~~~~~
 
-For detailed API documentation of the ``copy_utils`` module functions, see the source code docstrings:
+See the docstrings of:
 
 - ``lumix.utils.copy_utils.detach_orm_object``
 - ``lumix.utils.copy_utils.materialize_and_detach_list``
@@ -688,4 +317,4 @@ References
 
 - **SQLAlchemy Session**: https://docs.sqlalchemy.org/en/latest/orm/session.html
 - **Django ORM**: https://docs.djangoproject.com/en/stable/topics/db/queries/
-- **Python deepcopy**: https://docs.python.org/3/library/copy.html
+- **Python copy module**: https://docs.python.org/3/library/copy.html

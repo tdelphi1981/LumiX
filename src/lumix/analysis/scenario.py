@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
 from typing_extensions import Self
 
@@ -13,9 +12,14 @@ from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
+from ..core.enums import LXObjectiveSense
+from ._factory import ModelSource
+from ._rhs import set_rhs, shift_rhs
+from ._sense import solved_sense
 
 if TYPE_CHECKING:
     from ..visualization.scenario import LXScenarioCompare
+    from .store import LXResultStore
 
 TModel = TypeVar("TModel")
 
@@ -45,9 +49,9 @@ class LXScenarioModification:
             )
     """
 
-    target_type: str  # "constraint", "variable", "objective"
+    target_type: str  # "constraint" or "variable" (anything else raises ValueError)
     target_name: str  # Name of the constraint/variable
-    modification_type: str  # "rhs_set", "rhs_add", "rhs_multiply", "bound_set", "coeff_multiply"
+    modification_type: str  # "rhs_set", "rhs_add", "rhs_multiply" (constraint); "bound_lower", "bound_upper" (variable)
     value: Union[float, Callable[[Any], float]]
     description: str = ""
 
@@ -135,6 +139,11 @@ class LXScenario(Generic[TModel]):
 
             # Increase capacity by 50%
             scenario.modify_constraint_rhs("capacity", multiply=1.5)
+
+        .. versionchanged:: 0.3.0
+           ``add``/``multiply`` apply row by row to constraints whose RHS is a function
+           (``.rhs(lambda row: ...)``); they used to be ignored (catalog A24).
+           ``set_value`` sets every row to the same value.
         """
         if set_value is not None:
             mod = LXScenarioModification(
@@ -263,21 +272,39 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
     def __init__(
         self,
-        base_model: LXModel[TModel],
-        optimizer: LXOptimizer[TModel],
+        base_model: Optional[LXModel[TModel]] = None,
+        optimizer: Optional[LXOptimizer[TModel]] = None,
         include_baseline: bool = True,
+        *,
+        model_factory: Optional[Callable[[], LXModel[TModel]]] = None,
+        result_store: Optional["LXResultStore"] = None,
     ):
         """
         Initialize scenario analyzer.
 
         Args:
-            base_model: Base optimization model
+            base_model: Base optimization model (copied for every scenario)
             optimizer: Optimizer to use for solving scenarios
             include_baseline: Whether to include baseline (unmodified) scenario
+            model_factory: Instead of ``base_model``: a function that builds the model.
+                It is called once for the baseline and once per scenario, so nothing is
+                copied (recommended for ORM-backed models: open a session inside it,
+                eager-load what the lambdas read and close it before returning). It
+                must return a new model, with new constraints and variables, on every
+                call; a model built for one run is freed when the run is over.
+            result_store: Optional :class:`~lumix.analysis.store.LXResultStore` that
+                records every solve.
+
+        .. versionchanged:: 0.3.0
+           ``model_factory`` and ``result_store`` added; ``base_model`` and
+           ``optimizer`` may be passed by keyword.
         """
-        self.base_model = base_model
+        self._source = ModelSource(base_model, model_factory, optimizer,
+                                   "LXScenarioAnalyzer")
+        self.base_model = self._source.base
         self.optimizer = optimizer
         self.include_baseline = include_baseline
+        self.result_store = result_store
         self.scenarios: Dict[str, LXScenario[TModel]] = {}
         self.results: Dict[str, LXSolution[TModel]] = {}
 
@@ -328,6 +355,7 @@ class LXScenarioAnalyzer(Generic[TModel]):
         modified_model = self._apply_scenario(scenario)
         solution = self.optimizer.solve(modified_model)
         self.results[scenario_name] = solution
+        self._record(scenario_name, solution, modified_model, scenario.modifications)
 
         return solution
 
@@ -346,6 +374,7 @@ class LXScenarioAnalyzer(Generic[TModel]):
         # Run baseline if requested
         if include_baseline:
             baseline_solution = self.optimizer.solve(self.base_model)
+            self._record("baseline", baseline_solution, self.base_model)
             self.results["baseline"] = baseline_solution
 
         # Run all scenarios
@@ -400,15 +429,23 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         # Sort by objective if requested
         if sort_by_objective:
-            compare_names.sort(key=lambda name: self.results[name].objective_value, reverse=True)
+            # best first in the sense the model is solved; runs without a solution last
+            from ._sense import solved_sense
+
+            maximize = solved_sense(self.base_model) == LXObjectiveSense.MAXIMIZE
+            feasible = sorted((n for n in compare_names if self.results[n].is_feasible()),
+                              key=lambda n: self.results[n].objective_value, reverse=maximize)
+            compare_names = feasible + [n for n in compare_names
+                                        if not self.results[n].is_feasible()]
 
         # Build comparison report
         lines = ["Scenario Comparison", "=" * 80]
 
         # Add baseline reference if available
         if "baseline" in self.results:
-            baseline_obj = self.results["baseline"].objective_value
-            lines.append(f"Baseline Objective: {baseline_obj:,.2f}")
+            baseline = self.results["baseline"]
+            shown = f"{baseline.objective_value:,.2f}" if baseline.is_feasible() else "-"
+            lines.append(f"Baseline Objective: {shown} ({baseline.status})")
             lines.append("")
 
         # Add scenario results
@@ -417,11 +454,14 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         for name in compare_names:
             solution = self.results[name]
-            obj_str = f"{solution.objective_value:,.2f}"
+            obj_str = f"{solution.objective_value:,.2f}" if solution.is_feasible() else "-"
             status_str = solution.status
 
             # Calculate difference from baseline
-            if "baseline" in self.results and name != "baseline":
+            if not solution.is_feasible() or (
+                    "baseline" in self.results and not self.results["baseline"].is_feasible()):
+                diff_str = "-"
+            elif "baseline" in self.results and name != "baseline":
                 baseline_obj = self.results["baseline"].objective_value
                 if baseline_obj != 0:
                     diff_pct = ((solution.objective_value - baseline_obj) / baseline_obj) * 100
@@ -450,23 +490,30 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         return "\n".join(lines)
 
-    def get_best_scenario(self, maximize: bool = True) -> Optional[str]:
+    def get_best_scenario(self, maximize: Optional[bool] = None) -> Optional[str]:
         """
-        Get name of best scenario by objective value.
+        Get the name of the best feasible scenario by objective value.
 
         Args:
-            maximize: True if objective is maximization, False for minimization
+            maximize: True to pick the largest objective, False the smallest; None (the
+                default) follows the sense the base model is solved in (for a model with
+            goals: minimized deviations, or its final stage in sequential mode).
 
         Returns:
-            Name of best scenario, or None if no results
-        """
-        if not self.results:
-            return None
+            Name of the best scenario whose solution is feasible, or None if no result
+            is feasible.
 
-        if maximize:
-            return max(self.results.items(), key=lambda x: x[1].objective_value)[0]
-        else:
-            return min(self.results.items(), key=lambda x: x[1].objective_value)[0]
+        .. versionchanged:: 0.3.0
+           Infeasible results are skipped, and the default follows the model's sense
+           (it used to maximize unless told otherwise).
+        """
+        feasible = {n: s for n, s in self.results.items() if s.is_feasible()}
+        if not feasible:
+            return None
+        if maximize is None:
+            maximize = solved_sense(self.base_model) == LXObjectiveSense.MAXIMIZE
+        pick = max if maximize else min
+        return pick(feasible.items(), key=lambda item: item[1].objective_value)[0]
 
     def sensitivity_to_parameter(
         self,
@@ -515,9 +562,21 @@ class LXScenarioAnalyzer(Generic[TModel]):
             # Apply and solve
             modified_model = self._apply_scenario(scenario)
             solution = self.optimizer.solve(modified_model)
+            self._record(scenario.name, solution, modified_model, scenario.modifications)
             sensitivity_results[value] = solution
 
         return sensitivity_results
+
+    def _record(self, name: str, solution: LXSolution[TModel], model: Any,
+                modifications: Sequence[LXScenarioModification] = ()) -> None:
+        if self.result_store is not None:
+            self.result_store.record(name, solution, model,
+                                     [self._mods(m) for m in modifications])
+
+    @staticmethod
+    def _mods(m: LXScenarioModification) -> Dict[str, Any]:
+        return {"target_type": m.target_type, "target_name": m.target_name,
+                "modification_type": m.modification_type, "value": m.value}
 
     def _apply_scenario(self, scenario: LXScenario[TModel]) -> LXModel[TModel]:
         """
@@ -538,24 +597,27 @@ class LXScenarioAnalyzer(Generic[TModel]):
                 self._apply_constraint_modification(modified_model, mod)
             elif mod.target_type == "variable":
                 self._apply_variable_modification(modified_model, mod)
-            elif mod.target_type == "objective":
-                # Future: objective modifications
-                pass
+            else:
+                raise ValueError(
+                    f"Scenario '{scenario.name}': unsupported target type "
+                    f"'{mod.target_type}' (supported: constraint, variable; objective "
+                    "modifications are not implemented)")
 
         return modified_model
 
     def _clone_model(self, model: LXModel[TModel]) -> LXModel[TModel]:
         """
-        Clone a model (deep copy).
+        Return an independent model for one scenario run.
 
         Args:
-            model: Model to clone
+            model: Ignored (kept for subclass compatibility); the model comes from the
+                analyzer's source: a deep copy of ``base_model``, or a fresh
+                ``model_factory()`` build.
 
         Returns:
-            Cloned model
+            A model that can be modified without touching ``base_model``
         """
-        # Deep copy is safest approach
-        return deepcopy(model)
+        return self._source.new()
 
     def _apply_constraint_modification(
         self,
@@ -574,13 +636,15 @@ class LXScenarioAnalyzer(Generic[TModel]):
             raise ValueError(f"Constraint '{mod.target_name}' not found in model")
 
         if mod.modification_type == "rhs_set":
-            constraint.rhs_value = float(mod.value)  # type: ignore
+            set_rhs(constraint, mod.value)
         elif mod.modification_type == "rhs_add":
-            if constraint.rhs_value is not None:
-                constraint.rhs_value += float(mod.value)  # type: ignore
+            shift_rhs(constraint, add=float(mod.value))  # type: ignore[arg-type]
         elif mod.modification_type == "rhs_multiply":
-            if constraint.rhs_value is not None:
-                constraint.rhs_value *= float(mod.value)  # type: ignore
+            shift_rhs(constraint, multiply=float(mod.value))  # type: ignore[arg-type]
+        else:
+            raise ValueError(
+                f"Unsupported constraint modification type '{mod.modification_type}' "
+                "(supported: rhs_set, rhs_add, rhs_multiply)")
 
     def _apply_variable_modification(
         self,
@@ -599,9 +663,13 @@ class LXScenarioAnalyzer(Generic[TModel]):
             raise ValueError(f"Variable '{mod.target_name}' not found in model")
 
         if mod.modification_type == "bound_lower":
-            variable.lower_bound = float(mod.value)  # type: ignore
+            variable.lower_bound = float(mod.value)  # type: ignore[arg-type]
         elif mod.modification_type == "bound_upper":
-            variable.upper_bound = float(mod.value)  # type: ignore
+            variable.upper_bound = float(mod.value)  # type: ignore[arg-type]
+        else:
+            raise ValueError(
+                f"Unsupported variable modification type '{mod.modification_type}' "
+                "(supported: bound_lower, bound_upper)")
 
     def visualize(self) -> "LXScenarioCompare[TModel]":
         """

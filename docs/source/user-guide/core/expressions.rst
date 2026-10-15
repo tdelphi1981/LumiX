@@ -67,19 +67,41 @@ For quadratic objectives (risk, portfolio optimization):
    from lumix import LXQuadraticExpression
 
    # Portfolio variance: 0.5 * w^T * Cov * w
-   risk_expr = LXQuadraticExpression()
+   risk_expr = LXQuadraticExpression().add_quadratic(
+       weights, weights, coeff=lambda a, b: 0.5 * cov[a.id][b.id]
+   )
 
-   for i, asset_i in enumerate(assets):
-       for j, asset_j in enumerate(assets):
-           covariance = cov_matrix[i][j]
-           risk_expr.add_quadratic(
-               weights[i],
-               weights[j],
-               coeff=0.5 * covariance
-           )
+   # Add linear terms (minus the expected return)
+   risk_expr.linear_terms.add_term(weights, lambda a: -a.expected_return)
 
-   # Add linear terms (expected returns)
-   risk_expr.linear_terms.add_term(weights, lambda a: a.expected_return)
+   model.minimize(risk_expr)
+
+.. versionchanged:: 0.3.0
+
+   Quadratic terms work on whole variable families:
+
+   - ``add_quadratic(var1, var2, coeff)`` adds ``coeff * var1[a] * var2[b]`` for
+     **every pair** of instances ``(a, b)``. ``coeff`` is a number or a function
+     ``coeff(a, b)`` of the two instances.
+   - ``add_squared(var, coeff)`` adds ``coeff * var[a]**2`` for every instance
+     ``a`` (the diagonal only). ``coeff`` is a number or ``coeff(a)``.
+   - ``add_quadratic_term(var1, var2, coefficient)`` is an alias of
+     ``add_quadratic``.
+
+   Quadratic expressions are allowed **only in the objective**; a quadratic
+   constraint raises ``ValueError``. Gurobi and CPLEX solve quadratic objectives
+   natively, including nonconvex ones. OR-Tools, CP-SAT and GLPK raise a clear
+   error unless ``LXOptimizer().enable_linearization()`` is set; then every
+   product (families included) is linearized with the rules of
+   :doc:`/user-guide/linearization/bilinear`:
+
+   - binary × bounded variable and integer × (integer or continuous) are exact
+     (the integer factor is expanded in binary digits, up to
+     ``LXLinearizerConfig.binary_expansion_bits``);
+   - binary × unbounded variable uses ``big_m_value`` and issues a ``UserWarning``;
+   - continuous × continuous uses McCormick envelopes, issues a ``UserWarning``
+     and sets ``solution.relaxation = True``: the objective value is then a
+     bound, not the optimum.
 
 Non-Linear Expressions
 ----------------------
@@ -110,30 +132,65 @@ Piecewise Linear
 
 .. code-block:: python
 
+   time = LXVariable("time").continuous().bounds(lower=0, upper=80)
+
+   def labor_cost(hours):
+       # 1.0 per hour up to 40, 1.5 up to 60, 2.0 above (overtime rates)
+       if hours <= 40:
+           return hours
+       if hours <= 60:
+           return 40 + 1.5 * (hours - 40)
+       return 70 + 2.0 * (hours - 60)
+
    expr = LXNonLinearExpression()
    expr.add_piecewise(
-       var=time,
-       breakpoints=[0, 40, 60],
-       slopes=[1.0, 1.5, 2.0]  # Overtime rates
+       time,
+       labor_cost,                   # the function to approximate
+       breakpoints=[0, 40, 60, 80],  # exact: labor_cost is linear between them
    )
+
+``add_piecewise(var, func, ...)`` approximates ``func`` by straight lines between
+breakpoints; without ``breakpoints`` it places ``num_segments + 1`` of them on
+``[x_min, x_max]`` (by default the variable's bounds).
 
 Expression Operations
 ---------------------
 
-Addition
-~~~~~~~~
+.. versionchanged:: 0.3.0
+
+   ``+``, ``-`` and ``*`` return a **new** expression and leave their operands
+   unchanged (before 0.3.0, ``+`` and ``*`` modified the left operand). Use
+   ``+=`` and ``*=`` to change an expression in place. Constants may be any real
+   number, including NumPy scalars.
+
+Addition and Subtraction
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   total = revenue_expr + cost_expr
-   total = expr + 100  # Add constant
+   total = revenue_expr + cost_expr   # new expression
+   total = expr + 100                 # add a constant
+   margin = revenue_expr - cost_expr  # subtraction and negation (-expr)
+   total = sum([e1, e2, e3])          # sum() works too
+   expr += other_expr                 # in place
+
+Adding a quadratic expression to a linear one gives a quadratic expression.
+
+.. versionadded:: 0.3.0
+   Quadratic expressions support ``lin - quad``, ``quad - lin``, ``quad - 3``,
+   ``-quad``, ``quad * k`` and ``k * quad``.
+
+.. versionchanged:: 0.3.0
+   Coefficients and constants that cancel to floating-point noise
+   (``0.1 + 0.2 - 0.3``) are treated as 0 in constraint rows and right-hand sides.
 
 Multiplication
 ~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   scaled = expr * 2.0  # Scale by constant
+   scaled = expr * 2.0  # Scale by constant (also 2.0 * expr)
+   expr *= 2.0          # in place
 
 Copying
 ~~~~~~~

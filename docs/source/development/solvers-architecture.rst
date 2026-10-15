@@ -293,10 +293,9 @@ Each solver implementation follows a consistent structure:
 
    def _create_indexed_variables(self, lx_var: LXVariable, instances: List):
        var_map = {}
+       lower, upper = canonical_bounds(lx_var)  # lumix.core.canonical; ±inf when open
        for instance in instances:
-           index = lx_var.index_func(instance)
-           lower = lx_var.lower_bound_func(instance) if callable(...) else ...
-           upper = lx_var.upper_bound_func(instance) if callable(...) else ...
+           index = lx_var.index_key(instance)
 
            # Create solver variable
            solver_var = self._create_solver_var(
@@ -448,7 +447,11 @@ How LXModel is translated to solver-specific format:
    .. code-block:: python
 
       # LumiX model
-      production = LXVariable[Product, float]("production").from_data(products)
+      production = (
+          LXVariable[Product, float]("production")
+          .indexed_by(lambda p: p.id)
+          .from_data(products)
+      )
 
       # Translated to solver
       for product in products:
@@ -467,6 +470,7 @@ How LXModel is translated to solver-specific format:
           .le()
           .rhs(lambda r: r.capacity)
           .from_data(resources)
+          .indexed_by(lambda r: r.id)
       )
 
       # Translated to solver
@@ -553,20 +557,20 @@ Override ``_extract_solution()`` for custom solution handling:
 
    def _extract_solution(self, model: LXModel, status, solve_time) -> LXSolution:
        # Custom solution extraction logic
-       variable_values = {}
+       variables = {}
        for var_name, var_map in self._variable_map.items():
            if isinstance(var_map, dict):
-               variable_values[var_name] = {
+               variables[var_name] = {
                    idx: self._get_var_value(var)
                    for idx, var in var_map.items()
                }
            else:
-               variable_values[var_name] = self._get_var_value(var_map)
+               variables[var_name] = self._get_var_value(var_map)
 
        return LXSolution(
            status=self._translate_status(status),
            objective_value=self._model.get_objective_value(),
-           variable_values=variable_values,
+           variables=variables,
            solve_time=solve_time,
        )
 

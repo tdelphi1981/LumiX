@@ -22,4 +22,10 @@
 
    
    
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~LXGLPKSolver.FEASIBILITY_CHECK_MS
+   
    

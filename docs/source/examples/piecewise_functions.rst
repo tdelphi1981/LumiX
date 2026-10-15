@@ -82,7 +82,7 @@ Special Ordered Set type 2 for efficient PWL representation:
    config = LXLinearizerConfig(
        pwl_num_segments=30,
        adaptive_breakpoints=True,
-       prefer_sos2=True  # Use SOS2 when solver supports it
+       pwl_method="sos2"
    )
 
 **SOS2 Advantages**:
@@ -210,8 +210,7 @@ Step 1: Create Linearizer Configuration
 
    config = LXLinearizerConfig(
        pwl_num_segments=30,
-       adaptive_breakpoints=True,
-       prefer_sos2=True
+       adaptive_breakpoints=True
    )
    linearizer = LXPiecewiseLinearizer(config)
 
@@ -220,7 +219,9 @@ Step 2: Define Investment Variables
 
 .. literalinclude:: ../../../examples/07_piecewise_functions/exponential_growth.py
    :language: python
-   :lines: 89-96
+   :start-after: # [docs:investment-variable]
+   :end-before: # [docs:investment-variable-end]
+   :dedent: 8
 
 Step 3: Approximate Exponential Function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -239,7 +240,8 @@ Step 4: Build Objective with Approximation
 
 .. literalinclude:: ../../../examples/07_piecewise_functions/exponential_growth.py
    :language: python
-   :lines: 127-133
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 Step 5: Add Budget Constraint
@@ -247,7 +249,8 @@ Step 5: Add Budget Constraint
 
 .. literalinclude:: ../../../examples/07_piecewise_functions/exponential_growth.py
    :language: python
-   :lines: 116-124
+   :start-after: # [docs:budget-constraint]
+   :end-before: # [docs:budget-constraint-end]
    :dedent: 4
 
 Learning Objectives

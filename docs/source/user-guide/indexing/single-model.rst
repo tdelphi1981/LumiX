@@ -144,18 +144,19 @@ Constraints
 
    model.add_constraint(total_production)
 
-   # Constraint family - one per resource
-   for resource in resources:
-       model.add_constraint(
-           LXConstraint[Product](f"resource_{resource.id}")
-           .expression(
-               LXLinearExpression()
-               .add_term(production, lambda p: p.usage.get(resource.id, 0))
-           )
-           .le()
-           .rhs(resource.capacity)
-           .from_data(products)
+   # Constraint family - one row per resource
+   model.add_constraint(
+       LXConstraint[Resource]("resource")
+       .expression(
+           LXLinearExpression()
+           # The second argument is the row: the resource of this constraint
+           .add_term(production, lambda p, r: p.usage.get(r.id, 0))
        )
+       .le()
+       .rhs(lambda r: r.capacity)
+       .from_data(resources)
+       .indexed_by(lambda r: r.id)
+   )
 
 Complete Example
 ----------------
@@ -222,6 +223,7 @@ Complete Example
        .le()
        .rhs(lambda p: p.max_production)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Solve

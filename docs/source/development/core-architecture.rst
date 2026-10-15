@@ -139,6 +139,7 @@ Similar family pattern for constraints:
        .le()
        .rhs(lambda r: r.capacity)  # Data-driven RHS
        .from_data(resources)
+       .indexed_by(lambda r: r.id)  # One row per resource
    )
 
 LXExpression: Coefficient Functions

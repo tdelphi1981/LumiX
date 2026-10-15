@@ -120,10 +120,11 @@ Goal Programming
    else:
        # Get deviations
        deviations = solution.get_goal_deviations("demand_target")
-       print(f"Positive deviation: {deviations['pos']}")
-       print(f"Negative deviation: {deviations['neg']}")
+       # {"pos": {row: value}, "neg": {row: value}}, also for a single goal
+       print(f"Positive deviation: {sum(deviations['pos'].values()):.2f}")
+       print(f"Negative deviation: {sum(deviations['neg'].values()):.2f}")
 
-   # Get total deviation across all goals
+   # Total undesired deviation (the shortfall of a >= goal), over all rows
    total_dev = solution.get_total_deviation("demand_target")
    print(f"Total deviation: {total_dev:.2f}")
 

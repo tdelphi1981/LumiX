@@ -1,32 +1,62 @@
-"""
-Core linearization engine for automatic nonlinear term conversion.
+"""Linearization of nonlinear terms (spec W4).
 
-This module orchestrates the entire linearization process:
-1. Scan model for nonlinear terms
-2. Check solver capabilities
-3. Apply appropriate linearization techniques
-4. Add auxiliary variables and constraints
-5. Return linearized model
-"""
+Terms are expanded per instance by the canonical builder (the same items that
+``LXModel.to_canonical()`` reports) and each item is replaced by an auxiliary
+variable with linear constraints. The user's model is not changed; every call of
+:meth:`LXLinearizer.linearize_model` starts afresh."""
+from __future__ import annotations
 
-from typing import Any, List, Optional
+import copy
+import logging
+import math
+from typing import Any, Dict, List, Optional, Tuple
 
+from ..core.canonical import LXCanonicalBuilder, LXCanonicalNonlinear
 from ..core.constraints import LXConstraint
-from ..core.enums import LXObjectiveSense
-from ..core.expressions import LXLinearExpression, LXNonLinearExpression
+from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
+from ..core.expressions import LXLinearExpression, LXNonLinearExpression, LXQuadraticExpression
 from ..core.model import LXModel
-from ..core.variables import LXVariable
-from ..nonlinear.terms import (
-    LXAbsoluteTerm,
-    LXBilinearTerm,
-    LXIndicatorTerm,
-    LXMinMaxTerm,
-    LXPiecewiseLinearTerm,
-)
+from ..nonlinear.terms import LXIndicatorTerm
 from ..solvers.capabilities import LXSolverCapability
+from ..utils._warn import warn_user
 from .config import LXLinearizerConfig
-from .techniques.bilinear import LXBilinearLinearizer
-from .techniques.piecewise import LXPiecewiseLinearizer
+from .refs import LXAuxFactory, LXVarRef, scaled_bounds
+from .techniques.absminmax import absolute, minmax
+from .techniques.bilinear import product
+from .techniques.piecewise import piecewise
+
+_TAG = {"abs": "abs", "min": "min", "max": "max", "product": "prod", "piecewise": "pwl"}
+
+
+logger = logging.getLogger(__name__)
+
+_MISSING = object()
+
+
+def _term_variables(term: Any) -> List[Any]:
+    if hasattr(term, "vars"):
+        return list(term.vars)
+    return [getattr(term, n) for n in ("var", "var1", "var2") if hasattr(term, n)]
+
+
+class _InstanceKeys:
+    """Index key of a constraint row when the row is an instance of a variable family."""
+
+    def __init__(self, instances: List[Any], var: Any) -> None:
+        self._var = var
+        self._instances = instances
+        try:
+            self._table = {inst: var.index_key(inst) for inst in instances}
+        except TypeError:                         # unhashable data instances
+            self._table = None
+
+    def key_of(self, row: Any) -> Any:
+        if self._table is not None:
+            try:
+                return self._table.get(row, _MISSING)
+            except TypeError:
+                return _MISSING
+        return self._var.index_key(row) if row in self._instances else _MISSING
 
 
 class LXLinearizer:
@@ -39,6 +69,12 @@ class LXLinearizer:
     - Applying appropriate linearization techniques
     - Adding auxiliary variables and constraints
 
+    Nonlinear terms on variable families
+    apply to every instance (``|x|`` is ``sum(|x[i]|)``). Uses where the plain
+    epigraph form is exact (a minimized ``|x|`` or ``max``, a maximized ``min``,
+    and the same in ``<=`` / ``>=`` constraints) stay cheap; other uses get
+    binaries and are exact.
+
     Example:
         linearizer = LXLinearizer(model, solver_capability, config)
 
@@ -46,476 +82,233 @@ class LXLinearizer:
             linearized_model = linearizer.linearize_model()
     """
 
-    def __init__(
-        self,
-        model: LXModel,
-        solver_capability: LXSolverCapability,
-        config: Optional[LXLinearizerConfig] = None,
-    ):
-        """
-        Initialize linearization engine.
-
-        Args:
-            model: Model to linearize
-            solver_capability: Solver capability information
-            config: Linearization configuration (default: LXLinearizerConfig())
-        """
+    def __init__(self, model: LXModel, solver_capability: LXSolverCapability,
+                 config: Optional[LXLinearizerConfig] = None):
         self.model = model
         self.capability = solver_capability
         self.config = config or LXLinearizerConfig()
-
-        # Auxiliary elements created during linearization
-        self.auxiliary_vars: List[LXVariable] = []
+        self.auxiliary_vars: List[Any] = []
         self.auxiliary_constraints: List[LXConstraint] = []
+        self.relaxation_terms: List[str] = []
+        self._reset()
 
-        # Linearization technique instances
-        self._bilinear_linearizer = LXBilinearLinearizer(self.config)
-        self._piecewise_linearizer = LXPiecewiseLinearizer(self.config)
-
-        # Counters for statistics
-        self._num_bilinear_terms = 0
-        self._num_piecewise_terms = 0
-        self._num_abs_terms = 0
-        self._num_minmax_terms = 0
-        self._num_indicator_terms = 0
+    def _reset(self) -> None:
+        self._aux = LXAuxFactory()
+        self.relaxation_terms = []
+        self._counts = {k: 0 for k in ("bilinear", "piecewise", "absolute", "minmax", "indicator")}
 
     def needs_linearization(self) -> bool:
-        """
-        Check if model contains nonlinear terms requiring linearization.
-
-        Returns:
-            True if linearization is needed
-        """
-        # Scan objective
-        if self.model.objective_expr is not None:
-            if isinstance(self.model.objective_expr, LXNonLinearExpression):
-                if len(self.model.objective_expr.nonlinear_terms) > 0:
-                    return True
-
-        # Scan constraints
-        for constraint in self.model.constraints:
-            if constraint.lhs is not None:
-                # Check if constraint expression contains nonlinear terms
-                # For now, we check if it's a nonlinear expression type
-                # TODO: Add more sophisticated checking
-                pass
-
-        return False
+        objective = self.model.objective_expr
+        if isinstance(objective, LXNonLinearExpression) and objective.nonlinear_terms:
+            return True
+        if (isinstance(objective, LXQuadraticExpression) and objective.quadratic_terms
+                and not self.capability.can_solve_quadratic()):
+            return True
+        return any(isinstance(c.lhs, LXNonLinearExpression) and c.lhs.nonlinear_terms
+                   for c in self.model.constraints)
 
     def linearize_model(self) -> LXModel:
-        """
-        Linearize the entire model.
-
-        Creates a new model with:
-        - All original variables and constraints
-        - Auxiliary variables for linearized terms
-        - Auxiliary constraints for linearization
-
-        Returns:
-            Linearized model
-
-        Example:
-            linearized = linearizer.linearize_model()
-            solution = solver.solve(linearized)
-        """
-        # Create new model (copy original)
+        self._reset()
+        builder = LXCanonicalBuilder(self.model, config=self.config)
+        by_name = {v.name: v for v in self.model.variables}
+        self._refs = [LXVarRef(by_name[cv.family], cv.key, cv.lower, cv.upper, cv.var_type)
+                      for cv in builder.prepare()]
         linearized = LXModel(f"{self.model.name}_linearized")
-
-        # Add all original variables
         for var in self.model.variables:
             linearized.add_variable(var)
-
-        # Process objective if it contains nonlinear terms
-        if self.model.objective_expr is not None:
-            if isinstance(self.model.objective_expr, LXNonLinearExpression):
-                linear_objective = self._linearize_expression(self.model.objective_expr)
-                # Set objective with same sense
-                if self.model.objective_sense == LXObjectiveSense.MAXIMIZE:
-                    linearized.maximize(linear_objective)
-                else:
-                    linearized.minimize(linear_objective)
-            else:
-                # Keep original objective
-                if self.model.objective_sense == LXObjectiveSense.MAXIMIZE:
-                    linearized.maximize(self.model.objective_expr)
-                else:
-                    linearized.minimize(self.model.objective_expr)
-
-        # Add all original constraints
-        # TODO: Process constraints that contain nonlinear terms
+        self._objective(builder, linearized)
         for constraint in self.model.constraints:
+            linearized.add_constraint(self._constraint(builder, constraint))
+        for var in self._aux.variables:
+            linearized.add_variable(var)
+        for constraint in self._aux.constraints:
             linearized.add_constraint(constraint)
-
-        # Add auxiliary variables
-        for aux_var in self.auxiliary_vars:
-            linearized.add_variable(aux_var)
-
-        # Collect auxiliary variables from technique linearizers
-        for aux_var in self._bilinear_linearizer.auxiliary_vars:
-            if aux_var not in self.auxiliary_vars:
-                linearized.add_variable(aux_var)
-                self.auxiliary_vars.append(aux_var)
-
-        for aux_var in self._piecewise_linearizer.auxiliary_vars:
-            if aux_var not in self.auxiliary_vars:
-                linearized.add_variable(aux_var)
-                self.auxiliary_vars.append(aux_var)
-
-        # Add auxiliary constraints
-        for aux_constraint in self.auxiliary_constraints:
-            linearized.add_constraint(aux_constraint)
-
-        # Collect auxiliary constraints from technique linearizers
-        for aux_constraint in self._bilinear_linearizer.auxiliary_constraints:
-            if aux_constraint not in self.auxiliary_constraints:
-                linearized.add_constraint(aux_constraint)
-                self.auxiliary_constraints.append(aux_constraint)
-
-        for aux_constraint in self._piecewise_linearizer.auxiliary_constraints:
-            if aux_constraint not in self.auxiliary_constraints:
-                linearized.add_constraint(aux_constraint)
-                self.auxiliary_constraints.append(aux_constraint)
-
+        linearized.relaxation_terms = list(self.relaxation_terms)
+        # goal programming settings and the state of prepare_goal_programming()
+        linearized.goal_mode = self.model.goal_mode
+        if self.model._goal_programming_prepared:
+            linearized._goal_programming_prepared = True
+            linearized._relaxed_constraints = list(self.model._relaxed_constraints)
+            linearized._goal_prepared_mode = getattr(self.model, "_goal_prepared_mode", None)
+            linearized.objective_sense = self.model.objective_sense
+        self.auxiliary_vars = list(self._aux.variables)
+        self.auxiliary_constraints = list(self._aux.constraints)
         return linearized
 
-    def _linearize_expression(
-        self, expr: LXNonLinearExpression
-    ) -> LXLinearExpression:
-        """
-        Linearize a nonlinear expression.
+    def _objective(self, builder: LXCanonicalBuilder, linearized: LXModel) -> None:
+        model = self.model
+        maximize = model.objective_sense == LXObjectiveSense.MAXIMIZE
+        if getattr(model, "_objective_from_costs", False):
+            linearized.maximize() if maximize else linearized.minimize()
+            return
+        expr = model.objective_expr
+        if expr is None:
+            return
+        if isinstance(expr, LXNonLinearExpression):
+            sign = -1.0 if maximize else 1.0
+            out = expr.linear_terms.copy() + expr.constant
+            self._indicators(builder, expr)
+            for item, z in self._linearize_items(builder.nonlinear(expr, "the objective"), sign):
+                z.add_to(out, item.coeff)
+            expr = out
+        elif (isinstance(expr, LXQuadraticExpression) and expr.quadratic_terms
+              and not self.capability.can_solve_quadratic()):
+            out = expr.linear_terms.copy() + expr.constant
+            for item, z in self._linearize_items(builder.quadratic_items(expr), 0.0):
+                z.add_to(out, item.coeff)
+            expr = out
+        linearized.maximize(expr) if maximize else linearized.minimize(expr)
 
-        Args:
-            expr: Nonlinear expression to linearize
+    _SIGN = {LXConstraintSense.LE: 1.0, LXConstraintSense.GE: -1.0, LXConstraintSense.EQ: 0.0}
 
-        Returns:
-            Equivalent linear expression with auxiliary variables
+    def _constraint(self, builder: LXCanonicalBuilder, constraint: LXConstraint) -> LXConstraint:
+        lhs = constraint.lhs
+        if not (isinstance(lhs, LXNonLinearExpression) and lhs.nonlinear_terms):
+            return constraint
+        where = f"constraint '{constraint.name}'"
+        self._indicators(builder, lhs)
+        outputs = self._linearize_items(builder.nonlinear(lhs, where),
+                                        self._SIGN[constraint.sense])
+        new_lhs = lhs.linear_terms.copy() + lhs.constant
+        if constraint.index_func is None:
+            for item, z in outputs:
+                z.add_to(new_lhs, item.coeff)
+        else:
+            self._row_terms(builder, new_lhs, lhs, outputs, where)
+        result = copy.copy(constraint)
+        result.lhs = new_lhs
+        return result
 
-        Raises:
-            ValueError: If term type is not supported
-        """
-        # Start with linear terms
-        linear_expr = expr.linear_terms
+    def _row_terms(self, builder, new_lhs, lhs, outputs, where) -> None:
+        """Per-row contributions in an indexed constraint: a row that is an instance
+        of one of the term's variable families takes that instance's item only, and a
+        row of a family's own data type that is not one of its instances takes nothing
+        (spec §3 rule 3, as for one-argument linear terms). Every multi-instance family
+        of the term is checked, so the result does not depend on argument order."""
+        lookups: Dict[int, List[Tuple[Any, _InstanceKeys]]] = {}
+        for index, term in enumerate(lhs.nonlinear_terms):
+            owners = [v for v in _term_variables(term)
+                      if len(builder.families.get(v.name, {})) > 1]
+            lookups[index] = [(v, _InstanceKeys(builder.cache.instances(v), v)) for v in owners]
 
-        # Process each nonlinear term
+        warned: set = set()
+
+        def selected(term_index, item_key, row):
+            outside = None
+            for owner, keys in lookups[term_index]:
+                row_key = keys.key_of(row)
+                if row_key is not _MISSING:
+                    return row_key == item_key
+                if outside is None and builder._row_outside_family(owner, row):
+                    outside = owner
+            if outside is not None:
+                if outside.name not in warned:
+                    warned.add(outside.name)
+                    logger.warning(
+                        "Rows of %s are of the same type as variable '%s' but not among the "
+                        "instances of '%s'; its nonlinear terms contribute nothing there",
+                        where, outside.name, outside.name)
+                return False
+            return True
+
+        groups: Dict[int, Tuple[Any, Dict[Any, List[Tuple[Any, float, int]]]]] = {}
+        for item, z in outputs:
+            by_key = groups.setdefault(id(z.var), (z.var, {}))[1]
+            by_key.setdefault(z.key, []).append((item.key, item.coeff, item.term))
+        for var, by_key in groups.values():
+            def coeff(inst, row, var=var, by_key=by_key):
+                return sum(c for k, c, t in by_key.get(var.index_key(inst), ())
+                           if selected(t, k, row))
+
+            def keep(inst, row, var=var, by_key=by_key):
+                return any(selected(t, k, row) for k, _, t in by_key.get(var.index_key(inst), ()))
+            new_lhs.add_term(var, coeff, where=keep)
+
+    def _indicators(self, builder: LXCanonicalBuilder, expr: LXNonLinearExpression) -> None:
         for term in expr.nonlinear_terms:
-            if isinstance(term, LXBilinearTerm):
-                # Linearize bilinear product
-                if self.capability.needs_linearization_for_bilinear():
-                    aux_var = self._bilinear_linearizer.linearize_bilinear(term)
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, term.coefficient
-                    )
-                    self._num_bilinear_terms += 1
-                else:
-                    # Solver has native support, keep as-is
-                    # TODO: Convert to solver-specific quadratic form
-                    pass
+            if isinstance(term, LXIndicatorTerm):
+                self._indicator(builder, term)
 
-            elif isinstance(term, LXPiecewiseLinearTerm):
-                # Linearize piecewise function
-                if self.capability.needs_linearization_for_nonlinear():
-                    aux_var = self._piecewise_linearizer.approximate_function(
-                        term.func,
-                        term.var,
-                        term.num_segments,
-                        term.x_min,
-                        term.x_max,
-                        term.method,
-                        term.adaptive,
-                    )
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, 1.0
-                    )
-                    self._num_piecewise_terms += 1
-                else:
-                    # Solver has native support
-                    pass
+    def _indicator(self, builder: LXCanonicalBuilder, term: LXIndicatorTerm) -> None:
+        """``b == condition`` ⇒ ``expr sense rhs`` (A19). With ``a = 1 - b`` (condition
+        True) or ``a = b`` (False): ``expr <= rhs + M a`` / ``expr >= rhs - M a``,
+        M from the bounds of ``expr``."""
+        self._counts["indicator"] += 1
+        b = LXVarRef.single(term.binary_var, "An indicator's binary_var")
+        if b.var_type != LXVarType.BINARY:
+            raise ValueError(f"An indicator needs a binary variable; '{b.var.name}' is "
+                             f"{b.var_type.value}")
+        coeffs, constant = builder.linear_row(term.linear_expr, None, where="an indicator")
+        spans = [scaled_bounds(c, self._refs[p]) for p, c in coeffs.items()]
+        low = constant + sum(s[0] for s in spans)
+        high = constant + sum(s[1] for s in spans)
+        tag = self._aux.tag("ind", [b.var.name])
+        terms = [(self._refs[p], c) for p, c in coeffs.items()]
+        rhs = float(term.rhs) - constant
+        for sense in {"<=": ("<=",), ">=": (">=",), "==": ("<=", ">=")}[term.sense]:
+            m = (high if sense == "<=" else -low) - (term.rhs if sense == "<=" else -term.rhs)
+            if not math.isfinite(m):
+                warn_user(
+                    f"The indicator on '{b.label}' has an unbounded expression; it uses "
+                    f"big_m_value={self.config.big_m_value} (LXLinearizerConfig)",
+                    UserWarning)
+                m = self.config.big_m_value
+            if m <= 0:
+                continue                         # holds whatever b is
+            if sense == "<=":                    # expr - rhs <= M a
+                coef, bound = (m, rhs + m) if term.condition else (-m, rhs)
+            else:                                # rhs - expr <= M a
+                coef, bound = (-m, rhs - m) if term.condition else (m, rhs)
+            self._aux.row(tag, "le" if sense == "<=" else "ge", None,
+                          terms + [(b, coef)], sense, bound)
 
-            elif isinstance(term, LXAbsoluteTerm):
-                # Linearize absolute value
-                if self.capability.needs_linearization_for_abs():
-                    aux_var = self._linearize_absolute(term)
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, term.coefficient
-                    )
-                    self._num_abs_terms += 1
-                else:
-                    # Solver has native support
-                    pass
+    def _linearize_items(self, items: List[LXCanonicalNonlinear], sign: float
+                         ) -> List[Tuple[LXCanonicalNonlinear, LXVarRef]]:
+        """One output variable per item. ``sign``: +1 where the value is pushed down
+        (minimized objective, ``<=`` row), -1 where it is pushed up, 0 in equalities."""
+        tags: Dict[int, str] = {}
+        out = []
+        for item in items:
+            if item.coeff == 0 and item.kind in ("abs", "product"):
+                continue  # zero weight: contributes nothing and needs no bounds
+            refs = [self._refs[p] for p in item.variables]
+            tag = tags.get(item.term)
+            if tag is None:
+                names = list(dict.fromkeys(r.var.name for r in refs))
+                tag = tags[item.term] = self._aux.tag(_TAG[item.kind], names)
+            out.append((item, self._technique(item, refs, tag, sign)))
+        return out
 
-            elif isinstance(term, LXMinMaxTerm):
-                # Linearize min/max
-                if self.capability.needs_linearization_for_minmax():
-                    aux_var = self._linearize_minmax(term)
-                    linear_expr = linear_expr + LXLinearExpression().add_term(
-                        aux_var, 1.0
-                    )
-                    self._num_minmax_terms += 1
-                else:
-                    # Solver has native support
-                    pass
-
-            elif isinstance(term, LXIndicatorTerm):
-                # Linearize indicator constraint
-                if not self.capability.can_use_indicator():
-                    self._linearize_indicator(term)
-                    self._num_indicator_terms += 1
-                else:
-                    # Solver has native support
-                    pass
-
-            else:
-                raise ValueError(f"Unsupported nonlinear term type: {type(term)}")
-
-        # Add constant
-        linear_expr = linear_expr + expr.constant
-
-        return linear_expr
-
-    def _linearize_absolute(self, term: LXAbsoluteTerm) -> LXVariable:
-        """
-        Linearize absolute value: z = |x|
-
-        Creates:
-        - Auxiliary variable z
-        - Constraints: z >= x, z >= -x
-
-        Note: z is minimized in objective or bounded appropriately
-
-        Args:
-            term: Absolute value term
-
-        Returns:
-            Auxiliary variable z representing |x|
-        """
-        var = term.var
-        var_name = var.name
-
-        # Create auxiliary variable z
-        z_name = f"aux_abs_{var_name}"
-
-        # Determine bounds for z
-        z_lower = 0  # |x| is always non-negative
-        z_upper = None
-        if var.lower_bound is not None and var.upper_bound is not None:
-            z_upper = max(abs(var.lower_bound), abs(var.upper_bound))
-
-        z = (
-            LXVariable[str, float](z_name)
-            .continuous()
-            .bounds(lower=z_lower, upper=z_upper)
-            .indexed_by(lambda x: x)
-            .from_data([z_name])  # Use variable name as unique index
-        )
-        self.auxiliary_vars.append(z)
-
-        # Constraint: z >= x
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_ge_pos")
-            .expression(LXLinearExpression().add_term(z, 1.0).add_term(var, -1.0))
-            .ge()
-            .rhs(0)
-        )
-
-        # Constraint: z >= -x
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_ge_neg")
-            .expression(LXLinearExpression().add_term(z, 1.0).add_term(var, 1.0))
-            .ge()
-            .rhs(0)
-        )
-
-        return z
-
-    def _linearize_minmax(self, term: LXMinMaxTerm) -> LXVariable:
-        """
-        Linearize min/max functions.
-
-        For min: z <= x_i for all i (z minimized in objective)
-        For max: z >= x_i for all i (z maximized in objective)
-
-        Args:
-            term: Min/max term
-
-        Returns:
-            Auxiliary variable z representing min/max
-        """
-        vars_list = term.vars
-        coeffs = term.coefficients
-        operation = term.operation
-
-        # Create auxiliary variable z
-        z_name = f"aux_{operation}_{'_'.join(v.name for v in vars_list)}"
-        z = (
-            LXVariable[str, float](z_name)
-            .continuous()
-            .indexed_by(lambda x: x)
-            .from_data([z_name])  # Use variable name as unique index
-        )
-        self.auxiliary_vars.append(z)
-
-        # Add constraints based on operation
-        if operation == "min":
-            # z <= x_i for all i
-            for i, (var, coeff) in enumerate(zip(vars_list, coeffs)):
-                self.auxiliary_constraints.append(
-                    LXConstraint(f"{z_name}_le_{i}")
-                    .expression(
-                        LXLinearExpression().add_term(z, 1.0).add_term(var, -coeff)
-                    )
-                    .le()
-                    .rhs(0)
-                )
-        else:  # max
-            # z >= x_i for all i
-            for i, (var, coeff) in enumerate(zip(vars_list, coeffs)):
-                self.auxiliary_constraints.append(
-                    LXConstraint(f"{z_name}_ge_{i}")
-                    .expression(
-                        LXLinearExpression().add_term(z, 1.0).add_term(var, -coeff)
-                    )
-                    .ge()
-                    .rhs(0)
-                )
-
-        return z
-
-    def _linearize_indicator(self, term: LXIndicatorTerm) -> None:
-        """
-        Linearize indicator constraint: if b == condition then (expr sense rhs)
-
-        Uses Big-M method to convert conditional constraint to linear form:
-        - If condition=True and sense='<=':  expr - rhs <= M*(1-b)
-        - If condition=True and sense='>=':  rhs - expr <= M*(1-b)
-        - If condition=False and sense='<=': expr - rhs <= M*b
-        - If condition=False and sense='>=': rhs - expr <= M*b
-        - For '==': use both <= and >= constraints
-
-        Args:
-            term: Indicator term with binary variable, condition, expression, sense, and RHS
-
-        Example:
-            If is_open == 1 then flow >= 10:
-            - Linearizes to: 10 - flow <= M*(1 - is_open)
-            - When is_open=1: 10 - flow <= 0 → flow >= 10 (enforced)
-            - When is_open=0: 10 - flow <= M (relaxed)
-        """
-        binary_var = term.binary_var
-        condition = term.condition
-        expr = term.linear_expr
-        sense = term.sense
-        rhs = term.rhs
-        M = self.config.big_m_value
-
-        # Create constraint name
-        constraint_prefix = (
-            f"indicator_{binary_var.name}_{int(condition)}_{sense.replace('=', 'eq')}"
-        )
-
-        if sense == "<=":
-            # expr <= rhs when condition matches
-            # Linearize: expr - rhs <= M * (1-b) if condition=True
-            #            expr - rhs <= M * b     if condition=False
-            if condition:
-                # expr <= rhs + M*(1-b)
-                # Rewrite as: expr - M*b <= rhs - M
-                indicator_expr = expr.copy()
-                indicator_expr = indicator_expr.add_term(binary_var, -M)
-
-                self.auxiliary_constraints.append(
-                    LXConstraint(f"{constraint_prefix}_le")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(rhs - M)
-                )
-            else:
-                # expr <= rhs + M*b
-                # Rewrite as: expr - M*b <= rhs
-                indicator_expr = expr.copy()
-                indicator_expr = indicator_expr.add_term(binary_var, -M)
-
-                self.auxiliary_constraints.append(
-                    LXConstraint(f"{constraint_prefix}_le")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(rhs)
-                )
-
-        elif sense == ">=":
-            # expr >= rhs when condition matches
-            # Linearize: rhs - expr <= M * (1-b) if condition=True
-            #            rhs - expr <= M * b     if condition=False
-            if condition:
-                # expr >= rhs - M*(1-b)
-                # Rewrite as: rhs - expr <= M*(1-b)
-                # Rewrite as: -expr + M*b <= M - rhs
-                indicator_expr = LXLinearExpression()
-                # Negate all terms in expr
-                for var, coeff in expr.terms.items():
-                    indicator_expr = indicator_expr.add_term(var, -coeff)
-                indicator_expr = indicator_expr.add_term(binary_var, M)
-
-                self.auxiliary_constraints.append(
-                    LXConstraint(f"{constraint_prefix}_ge")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(M - rhs)
-                )
-            else:
-                # expr >= rhs - M*b
-                # Rewrite as: rhs - expr <= M*b
-                # Rewrite as: -expr - M*b <= -rhs
-                indicator_expr = LXLinearExpression()
-                # Negate all terms in expr
-                for var, coeff in expr.terms.items():
-                    indicator_expr = indicator_expr.add_term(var, -coeff)
-                indicator_expr = indicator_expr.add_term(binary_var, -M)
-
-                self.auxiliary_constraints.append(
-                    LXConstraint(f"{constraint_prefix}_ge")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(-rhs)
-                )
-
-        elif sense == "==":
-            # expr == rhs when condition matches
-            # Need both <= and >= constraints
-            # Create two indicator terms and recursively linearize
-            le_term = LXIndicatorTerm(
-                binary_var=binary_var,
-                condition=condition,
-                linear_expr=expr,
-                sense="<=",
-                rhs=rhs,
-            )
-            ge_term = LXIndicatorTerm(
-                binary_var=binary_var,
-                condition=condition,
-                linear_expr=expr,
-                sense=">=",
-                rhs=rhs,
-            )
-
-            self._linearize_indicator(le_term)
-            self._linearize_indicator(ge_term)
+    def _technique(self, item: LXCanonicalNonlinear, refs: List[LXVarRef], tag: str,
+                   sign: float) -> LXVarRef:
+        key = item.key
+        if item.kind == "abs":
+            self._counts["absolute"] += 1
+            return absolute(self._aux, tag, key, refs[0], convex=sign * item.coeff > 0)
+        if item.kind in ("min", "max"):
+            self._counts["minmax"] += 1
+            convex = sign < 0 if item.kind == "min" else sign > 0
+            return minmax(self._aux, tag, key, item.kind, refs, item.params["coefficients"],
+                          convex)
+        if item.kind == "product":
+            self._counts["bilinear"] += 1
+            return product(self._aux, tag, key, refs[0], refs[1], self.config,
+                           self.relaxation_terms)
+        if item.kind == "piecewise":
+            self._counts["piecewise"] += 1
+            return piecewise(self._aux, tag, key, refs[0], item.params["breakpoints"],
+                             item.params["values"], item.params["method"])
+        raise ValueError(f"Unsupported nonlinear item: {item.kind}")
 
     def get_statistics(self) -> dict:
-        """
-        Get linearization statistics.
-
-        Returns:
-            Dictionary with counts of linearized terms
-        """
         return {
-            "bilinear_terms": self._num_bilinear_terms,
-            "piecewise_terms": self._num_piecewise_terms,
-            "absolute_terms": self._num_abs_terms,
-            "minmax_terms": self._num_minmax_terms,
-            "indicator_terms": self._num_indicator_terms,
+            "bilinear_terms": self._counts["bilinear"],
+            "piecewise_terms": self._counts["piecewise"],
+            "absolute_terms": self._counts["absolute"],
+            "minmax_terms": self._counts["minmax"],
+            "indicator_terms": self._counts["indicator"],
             "auxiliary_variables": len(self.auxiliary_vars),
             "auxiliary_constraints": len(self.auxiliary_constraints),
         }
-
 
 __all__ = ["LXLinearizer"]

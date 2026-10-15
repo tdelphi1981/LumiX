@@ -145,6 +145,7 @@ def build_rectangle_model():
         bounds result in better approximations of the bilinear product.
     """
 
+    # [docs:define-variables]
     # Decision Variables (scalar variables need single-element data source)
     # Using "dimension" as a simple scalar identifier
     scalar_data = ["dim"]
@@ -164,10 +165,12 @@ def build_rectangle_model():
         .indexed_by(lambda x: x)
         .from_data(scalar_data)
     )
+    # [docs:define-variables-end]
 
     # Create model
     model = LXModel("rectangle_area").add_variables(length, width)
 
+    # [docs:perimeter-constraint]
     # Constraint: Minimum perimeter
     # 2 * (length + width) >= MIN_PERIMETER
     model.add_constraint(
@@ -178,12 +181,15 @@ def build_rectangle_model():
         .ge()
         .rhs(MIN_PERIMETER)
     )
+    # [docs:perimeter-constraint-end]
 
+    # [docs:bilinear-objective]
     # Objective: Maximize area = length × width (bilinear product!)
     # This will be automatically linearized using McCormick envelopes
     area_expr = LXNonLinearExpression().add_product(length, width)
 
     model.maximize(area_expr)
+    # [docs:bilinear-objective-end]
 
     return model, length, width
 
@@ -279,12 +285,10 @@ def main():
     print(f"  ✓ Variable bounds defined (required for McCormick)")
     print()
 
+    # [docs:linearize]
     # Create linearizer
     print("Creating linearizer...")
-    config = LXLinearizerConfig(
-        mccormick_tighten_bounds=True,
-        verbose_logging=True,
-    )
+    config = LXLinearizerConfig()
     linearizer = LXLinearizer(model, ORTOOLS_CAPABILITIES, config)
     print(f"  Solver: OR-Tools (needs linearization: {ORTOOLS_CAPABILITIES.needs_linearization_for_bilinear()})")
     print()
@@ -316,6 +320,7 @@ def main():
     else:
         print("No linearization needed (solver has native support)")
         model_to_solve = model
+    # [docs:linearize-end]
 
     # Solve
     print("Solving with OR-Tools...")
@@ -333,6 +338,10 @@ def main():
             print(f"Status: {solution.status}")
             print(f"Maximum Area: {solution.objective_value:.4f} m²")
             print(f"Solve Time: {solution.solve_time:.3f}s")
+            if solution.relaxation:
+                # McCormick envelopes relax length × width: the area above is an upper
+                # bound; check it against length × width below.
+                print("Note: solved as a relaxation (McCormick envelopes)")
             print()
 
             # Get values from indexed variables (returns dict with index as key)

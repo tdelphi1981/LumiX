@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -16,11 +17,11 @@ except ImportError:
 
 from ..core.constraints import LXConstraint
 from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
-from ..core.expressions import LXLinearExpression
 from ..core.model import LXModel
 from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
-from .base import LXSolverInterface
+from ..utils._warn import warn_user
+from .base import LXSolverInterface, native_name
 from .capabilities import CPLEX_CAPABILITIES
 
 
@@ -71,56 +72,45 @@ class LXCPLEXSolver(LXSolverInterface):
         self._constraint_counter: int = 0
 
     def build_model(self, model: LXModel) -> Cplex:
-        """
-        Build CPLEX native model from LXModel.
-
-        Args:
-            model: LumiX model to build
-
-        Returns:
-            CPLEX Cplex instance
-
-        Raises:
-            ValueError: If model contains unsupported features
-        """
-        # Create CPLEX model instance
+        """Build a CPLEX model from the canonical form of ``model``."""
+        canon = self._canonicalize(model)
         self._model = Cplex()
-        self._model.set_problem_name(model.name)
-
-        # Reset internal state
-        self._variable_map = {}
-        self._reset_instance_cache()
-        self._constraint_map = {}
-        self._constraint_list = []
-        self._variable_counter = 0
-        self._constraint_counter = 0
-
-        # Build variables
-        for lx_var in model.variables:
-            instances = lx_var.get_instances()
-
-            if not instances:
-                # Single variable (not indexed)
-                self._create_single_variable(lx_var)
-            else:
-                # Variable family (indexed by data)
-                self._create_indexed_variables(lx_var, instances)
-
-        # Build constraints
-        for lx_constraint in model.constraints:
-            instances = lx_constraint.get_instances()
-
-            if not instances:
-                # Single constraint
-                self._create_single_constraint(lx_constraint)
-            else:
-                # Constraint family (indexed by data)
-                self._create_indexed_constraints(lx_constraint, instances)
-
-        # Set objective
-        self._set_objective(model)
-
-        return self._model
+        cm = self._model
+        cm.set_problem_name(model.name)
+        n = len(canon.variables)
+        if n:
+            kinds = {LXVarType.CONTINUOUS: cm.variables.type.continuous,
+                     LXVarType.INTEGER: cm.variables.type.integer,
+                     LXVarType.BINARY: cm.variables.type.binary}
+            is_mip = any(v.var_type != LXVarType.CONTINUOUS for v in canon.variables)
+            args = dict(lb=[v.lower if math.isfinite(v.lower) else -cplex.infinity for v in canon.variables],
+                        ub=[v.upper if math.isfinite(v.upper) else cplex.infinity for v in canon.variables],
+                        names=[native_name(v.name) for v in canon.variables])
+            if is_mip:   # types turn the problem into a MIP; keep pure LPs as LPs
+                args["types"] = [kinds[v.var_type] for v in canon.variables]
+            cm.variables.add(**args)
+        handles = list(range(n))
+        self._handles = handles
+        self._variable_map = self._family_map(canon, handles)
+        senses = {LXConstraintSense.LE: "L", LXConstraintSense.GE: "G", LXConstraintSense.EQ: "E"}
+        for row in canon.rows:
+            idx = cm.linear_constraints.add(
+                lin_expr=[cplex.SparsePair(ind=list(row.coeffs), val=list(row.coeffs.values()))],
+                senses=[senses[row.sense]], rhs=[row.rhs], names=[native_name(row.name)])[0]
+            self._register_row(row, idx)
+        if canon.sense is not None:
+            if canon.objective:
+                cm.objective.set_linear(list(canon.objective.items()))
+            cm.objective.set_offset(canon.objective_constant)
+            if canon.objective_quadratic:
+                # CPLEX minimizes c'x + 1/2 x'Qx: Q_ii = 2c for c*x_i^2, Q_ij = c for c*x_i*x_j.
+                cm.objective.set_quadratic_coefficients(
+                    [(i, j, 2 * c if i == j else c) for (i, j), c in canon.objective_quadratic.items()])
+                cm.parameters.optimalitytarget.set(3)   # global optimum, also when nonconvex
+            cm.objective.set_sense(cm.objective.sense.maximize
+                                   if canon.sense == LXObjectiveSense.MAXIMIZE
+                                   else cm.objective.sense.minimize)
+        return cm
 
     def solve(
         self,
@@ -143,7 +133,8 @@ class LXCPLEXSolver(LXSolverInterface):
                 - mip_emphasis: MIP emphasis (0=balanced, 1=feasibility, 2=optimality, 3=bound, 4=hidden)
                 - preprocessing_presolve: Presolve level (0=off, 1=on)
                 - lpmethod: Algorithm for LP (0=auto, 1=primal, 2=dual, 3=network, 4=barrier)
-                - output_clonelog: Show solver output (0=off, 1=on)
+                - verbose: print the CPLEX log (True/False)
+                - any other parameter by its CPLEX path, e.g. ``mip_limits_cutsfactor``
 
         Returns:
             Solution object with results
@@ -156,11 +147,12 @@ class LXCPLEXSolver(LXSolverInterface):
         # Build the model
         cplex_model = self.build_model(model)
 
-        # Suppress output by default
-        cplex_model.set_log_stream(None)
-        cplex_model.set_error_stream(None)
-        cplex_model.set_warning_stream(None)
-        cplex_model.set_results_stream(None)
+        # Suppress output unless verbose=True
+        if not solver_params.pop("verbose", False):
+            cplex_model.set_log_stream(None)
+            cplex_model.set_error_stream(None)
+            cplex_model.set_warning_stream(None)
+            cplex_model.set_results_stream(None)
 
         # Set time limit
         if time_limit is not None:
@@ -178,38 +170,43 @@ class LXCPLEXSolver(LXSolverInterface):
                 if param_name == "threads":
                     cplex_model.parameters.threads.set(param_value)
                 elif param_name == "mip_emphasis":
-                    cplex_model.parameters.mip.strategy.emphasis.set(param_value)
+                    cplex_model.parameters.emphasis.mip.set(param_value)
                 elif param_name == "preprocessing_presolve":
                     cplex_model.parameters.preprocessing.presolve.set(param_value)
                 elif param_name == "lpmethod":
                     cplex_model.parameters.lpmethod.set(param_value)
+                elif param_name == "solution_limit":
+                    cplex_model.parameters.mip.limits.solutions.set(int(param_value))
                 elif param_name == "output_clonelog":
-                    if param_value:
-                        cplex_model.set_log_stream(None)
+                    cplex_model.parameters.output.clonelog.set(int(param_value))
                 else:
-                    self.logger.logger.warning(
-                        f"Unknown CPLEX parameter '{param_name}', skipping"
-                    )
+                    parameter = self._parameter(cplex_model.parameters, param_name)
+                    if parameter is None:
+                        self.logger.logger.warning(
+                            f"Unknown CPLEX parameter '{param_name}', skipping"
+                        )
+                    else:
+                        parameter.set(param_value)
             except Exception as e:
                 self.logger.logger.warning(
                     f"Failed to set CPLEX parameter '{param_name}': {e}"
                 )
 
-        # If sensitivity analysis is enabled and all variables are continuous,
-        # change problem type to LP to enable dual value extraction
-        if enable_sensitivity:
-            var_types = cplex_model.variables.get_types()
-            if all(vtype == 'C' for vtype in var_types):
-                try:
-                    # Force LP problem type (CPLEX defaults to MILP even with continuous vars)
-                    cplex_model.set_problem_type(cplex_model.problem_type.LP)
-                except Exception as e:
-                    self.logger.logger.debug(f"Could not set problem type to LP: {e}")
-
         # Solve
         start_time = time.time()
         try:
             cplex_model.solve()
+            st = cplex_model.solution.status
+            code = cplex_model.solution.get_status()
+            if code in (st.infeasible_or_unbounded, st.MIP_infeasible_or_unbounded, st.unbounded):
+                # Presolve could not tell infeasible from unbounded, or the dual simplex
+                # found a ray without a feasible point; ask once more without presolve,
+                # with the primal simplex for an LP (its phase 1 proves feasibility).
+                cplex_model.parameters.preprocessing.presolve.set(0)
+                if code != st.MIP_infeasible_or_unbounded:
+                    cplex_model.parameters.lpmethod.set(
+                        cplex_model.parameters.lpmethod.values.primal)
+                cplex_model.solve()
         except CplexError as e:
             self.logger.logger.error(f"CPLEX solve error: {e}")
             # Continue to parse solution even if error (may have partial solution)
@@ -219,6 +216,38 @@ class LXCPLEXSolver(LXSolverInterface):
         solution = self._parse_solution(model, cplex_model, solve_time, enable_sensitivity)
 
         return solution
+
+    @staticmethod
+    def _parameter(parameters: Any, name: str) -> Any:
+        """The CPLEX parameter at ``name`` read as a path (``mip_limits_cutsfactor``)."""
+        def walk(node: Any, parts: List[str]) -> Any:
+            if not parts:
+                return node if hasattr(node, "set") else None
+            for i in range(len(parts), 0, -1):    # names may contain "_" themselves
+                child = getattr(node, "_".join(parts[:i]), None)
+                if child is not None:
+                    found = walk(child, parts[i:])
+                    if found is not None:
+                        return found
+            return None
+        return walk(parameters, name.split("_"))
+
+    @staticmethod
+    def _status_name(st: Any, code: int, has_solution: bool) -> str:
+        """LumiX status for a CPLEX status code, using CPLEX's named constants."""
+        if code in (st.optimal, st.MIP_optimal, st.optimal_tolerance):
+            return "optimal"
+        if code in (st.infeasible, st.MIP_infeasible):
+            return "infeasible"
+        if code in (st.unbounded, st.MIP_unbounded):
+            return "unbounded"
+        if code in (st.infeasible_or_unbounded, st.MIP_infeasible_or_unbounded):
+            return "inf_or_unbounded"
+        if has_solution:
+            return "feasible"
+        if code in (st.abort_time_limit, st.MIP_time_limit_infeasible):
+            return "time_limit"
+        return f"unknown_{code}"
 
     def get_solver_model(self) -> Cplex:
         """
@@ -256,353 +285,6 @@ class LXCPLEXSolver(LXSolverInterface):
             Hashable index key
         """
         return lx_var.index_key(instance)
-
-    def _create_single_variable(self, lx_var: LXVariable) -> None:
-        """Create single CPLEX variable (not indexed)."""
-        model = self._model
-        assert model is not None
-
-        # Get bounds
-        lb = lx_var.lower_bound if lx_var.lower_bound is not None else -cplex.infinity
-        ub = lx_var.upper_bound if lx_var.upper_bound is not None else cplex.infinity
-
-        # Map variable type
-        if lx_var.var_type == LXVarType.CONTINUOUS:
-            vtype = model.variables.type.continuous
-        elif lx_var.var_type == LXVarType.INTEGER:
-            vtype = model.variables.type.integer
-        elif lx_var.var_type == LXVarType.BINARY:
-            vtype = model.variables.type.binary
-        else:
-            raise ValueError(f"Unknown variable type: {lx_var.var_type}")
-
-        # Create variable using CPLEX list-based API
-        var_idx = self._variable_counter
-        model.variables.add(
-            lb=[lb],
-            ub=[ub],
-            types=[vtype],
-            names=[lx_var.name]
-        )
-        self._variable_counter += 1
-
-        # Store in mapping
-        self._variable_map[lx_var.name] = var_idx
-
-    def _create_indexed_variables(
-        self, lx_var: LXVariable, instances: List[Any]
-    ) -> None:
-        """Create indexed family of CPLEX variables."""
-        model = self._model
-        assert model is not None
-
-        var_dict: Dict[Any, int] = {}
-
-        # Prepare lists for batch creation
-        lbs: List[float] = []
-        ubs: List[float] = []
-        types: List[str] = []
-        names: List[str] = []
-        index_keys: List[Any] = []
-
-        for instance in instances:
-            # Get index key (handles cartesian products)
-            index_key = self._get_index_key(lx_var, instance)
-
-            # Variable name: "varname[index]"
-            var_name = f"{lx_var.name}[{index_key}]"
-
-            # Get bounds (same for all instances for now)
-            # TODO: Support per-instance bounds via bound functions
-            lb = lx_var.lower_bound if lx_var.lower_bound is not None else -cplex.infinity
-            ub = lx_var.upper_bound if lx_var.upper_bound is not None else cplex.infinity
-
-            # Map variable type
-            if lx_var.var_type == LXVarType.CONTINUOUS:
-                vtype = model.variables.type.continuous
-            elif lx_var.var_type == LXVarType.INTEGER:
-                vtype = model.variables.type.integer
-            elif lx_var.var_type == LXVarType.BINARY:
-                vtype = model.variables.type.binary
-            else:
-                raise ValueError(f"Unknown variable type: {lx_var.var_type}")
-
-            # Add to lists
-            lbs.append(lb)
-            ubs.append(ub)
-            types.append(vtype)
-            names.append(var_name)
-            index_keys.append(index_key)
-
-        # Create all variables in batch
-        start_idx = self._variable_counter
-        model.variables.add(
-            lb=lbs,
-            ub=ubs,
-            types=types,
-            names=names
-        )
-
-        # Map index keys to variable indices
-        for i, index_key in enumerate(index_keys):
-            var_dict[index_key] = start_idx + i
-
-        self._variable_counter += len(instances)
-
-        # Store dictionary in mapping
-        self._variable_map[lx_var.name] = var_dict
-
-    def _create_single_constraint(self, lx_constraint: LXConstraint) -> None:
-        """Create single CPLEX constraint."""
-        model = self._model
-        assert model is not None
-
-        if lx_constraint.lhs is None:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
-
-        # Build linear expression
-        var_indices, coeffs = self._build_expression(lx_constraint.lhs)
-
-        # Get RHS value
-        if lx_constraint.rhs_value is not None:
-            rhs = lx_constraint.rhs_value
-        elif lx_constraint.rhs_func is not None:
-            # For single constraint with rhs function, call with None
-            rhs = lx_constraint.rhs_func(None)  # type: ignore
-        else:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no RHS value")
-
-        # Map constraint sense
-        if lx_constraint.sense == LXConstraintSense.LE:
-            sense = 'L'
-        elif lx_constraint.sense == LXConstraintSense.GE:
-            sense = 'G'
-        elif lx_constraint.sense == LXConstraintSense.EQ:
-            sense = 'E'
-        else:
-            raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
-
-        # Create constraint using CPLEX SparsePair format
-        linear_expr = cplex.SparsePair(ind=var_indices, val=coeffs)
-        constraint_idx = self._constraint_counter
-        model.linear_constraints.add(
-            lin_expr=[linear_expr],
-            senses=[sense],
-            rhs=[rhs],
-            names=[lx_constraint.name]
-        )
-        self._constraint_counter += 1
-
-        # Store in constraint map
-        self._constraint_map[lx_constraint.name] = constraint_idx
-        self._constraint_list.append(constraint_idx)
-
-    def _create_indexed_constraints(
-        self, lx_constraint: LXConstraint, instances: List[Any]
-    ) -> None:
-        """Create indexed family of CPLEX constraints."""
-        model = self._model
-        assert model is not None
-
-        if lx_constraint.lhs is None:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
-
-        # Prepare lists for batch creation
-        lin_exprs: List[cplex.SparsePair] = []
-        senses: List[str] = []
-        rhs_values: List[float] = []
-        names: List[str] = []
-        index_keys: List[Any] = []
-
-        for instance in instances:
-            # Get index for naming
-            if lx_constraint.index_func is not None:
-                index_key = lx_constraint.index_func(instance)
-            else:
-                index_key = instance
-
-            # Constraint name: "constraintname[index]"
-            ct_name = f"{lx_constraint.name}[{index_key}]"
-
-            # Build expression for this instance
-            var_indices, coeffs = self._build_expression(
-                lx_constraint.lhs, constraint_instance=instance
-            )
-
-            # Get RHS value for this instance
-            if lx_constraint.rhs_value is not None:
-                rhs = lx_constraint.rhs_value
-            elif lx_constraint.rhs_func is not None:
-                rhs = lx_constraint.rhs_func(instance)
-            else:
-                raise ValueError(f"Constraint '{lx_constraint.name}' has no RHS value")
-
-            # Map constraint sense
-            if lx_constraint.sense == LXConstraintSense.LE:
-                sense = 'L'
-            elif lx_constraint.sense == LXConstraintSense.GE:
-                sense = 'G'
-            elif lx_constraint.sense == LXConstraintSense.EQ:
-                sense = 'E'
-            else:
-                raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
-
-            # Add to lists
-            linear_expr = cplex.SparsePair(ind=var_indices, val=coeffs)
-            lin_exprs.append(linear_expr)
-            senses.append(sense)
-            rhs_values.append(rhs)
-            names.append(ct_name)
-            index_keys.append(index_key)
-
-        # Create all constraints in batch
-        start_idx = self._constraint_counter
-        model.linear_constraints.add(
-            lin_expr=lin_exprs,
-            senses=senses,
-            rhs=rhs_values,
-            names=names
-        )
-
-        # Map index keys to constraint indices
-        constraint_dict: Dict[Any, int] = {}
-        for i, index_key in enumerate(index_keys):
-            constraint_dict[index_key] = start_idx + i
-
-        self._constraint_counter += len(instances)
-
-        # Store dictionary in constraint map
-        self._constraint_map[lx_constraint.name] = constraint_dict
-        self._constraint_list.extend(range(start_idx, start_idx + len(instances)))
-
-    def _build_expression(
-        self,
-        lx_expr: LXLinearExpression,
-        constraint_instance: Optional[Any] = None,
-    ) -> Tuple[List[int], List[float]]:
-        """
-        Build CPLEX expression from LXLinearExpression.
-
-        Args:
-            lx_expr: LumiX linear expression
-            constraint_instance: Instance for indexed constraints (for multi-model coefficients)
-
-        Returns:
-            Tuple of (variable_indices, coefficients) for CPLEX SparsePair
-        """
-        var_indices: List[int] = []
-        coefficients: List[float] = []
-
-        # Process regular terms
-        for var_name, (lx_var, coeff_func, where_func) in lx_expr.terms.items():
-            solver_vars = self._variable_map[var_name]
-
-            if isinstance(solver_vars, dict):
-                # Indexed variable family
-                # A same-type constraint row narrows the family to its own instance
-                instances, where_func = self._candidates(lx_var, where_func, constraint_instance)
-
-                for instance in instances:
-                    # Check where clause
-                    if not where_func(instance):
-                        continue
-
-                    # Get index key (handles cartesian products)
-                    index_key = self._get_index_key(lx_var, instance)
-
-                    # Get coefficient
-                    # For multi-model constraints, coefficient function may need both instances
-                    if constraint_instance is not None:
-                        # Try to call with both arguments (multi-model case)
-                        try:
-                            coeff = coeff_func(instance, constraint_instance)
-                        except TypeError:
-                            # Fall back to single argument
-                            coeff = coeff_func(instance)
-                    else:
-                        coeff = coeff_func(instance)
-
-                    if abs(coeff) > 1e-10:  # Skip near-zero coefficients
-                        var_indices.append(solver_vars[index_key])
-                        coefficients.append(coeff)
-            else:
-                # Single variable
-                if constraint_instance is not None:
-                    try:
-                        coeff = coeff_func(constraint_instance)
-                    except TypeError:
-                        coeff = coeff_func(None)  # type: ignore
-                else:
-                    coeff = coeff_func(None)  # type: ignore
-
-                if abs(coeff) > 1e-10:
-                    var_indices.append(solver_vars)
-                    coefficients.append(coeff)
-
-        # Process multi-model terms
-        for lx_var, coeff_func, where_func in lx_expr._multi_terms:
-            solver_vars = self._variable_map[lx_var.name]
-
-            if isinstance(solver_vars, dict):
-                instances, where_func = self._candidates(lx_var, where_func)
-
-                for instance in instances:
-                    # Check where clause
-                    if where_func is not None:
-                        # Multi-model instances are tuples
-                        if isinstance(instance, tuple):
-                            if not where_func(*instance):
-                                continue
-                        else:
-                            if not where_func(instance):
-                                continue
-
-                    # Get coefficient
-                    if isinstance(instance, tuple):
-                        coeff = coeff_func(*instance)
-                    else:
-                        coeff = coeff_func(instance)
-
-                    # Get index key (handles cartesian products)
-                    index_key = self._get_index_key(lx_var, instance)
-
-                    if abs(coeff) > 1e-10:
-                        var_indices.append(solver_vars[index_key])
-                        coefficients.append(coeff)
-
-        # Note: CPLEX handles constant terms differently in constraints
-        # Constant is implicitly moved to RHS, so we don't include it here
-
-        return var_indices, coefficients
-
-    def _set_objective(self, model: LXModel) -> None:
-        """Set objective function in CPLEX model."""
-        cplex_model = self._model
-        assert cplex_model is not None
-
-        if model.objective_expr is None:
-            # No objective, just feasibility
-            return
-
-        # Build expression
-        var_indices, coeffs = self._build_expression(model.objective_expr)
-
-        # Set linear objective coefficients
-        for var_idx, coeff in zip(var_indices, coeffs):
-            cplex_model.objective.set_linear(var_idx, coeff)
-
-        # Handle constant term in objective
-        if model.objective_expr.constant != 0:
-            # CPLEX doesn't directly support constant in objective,
-            # but it doesn't affect optimization (only the objective value)
-            # We'll track it for solution reporting
-            pass
-
-        # Map objective sense
-        if model.objective_sense == LXObjectiveSense.MAXIMIZE:
-            cplex_model.objective.set_sense(cplex_model.objective.sense.maximize)
-        else:
-            cplex_model.objective.set_sense(cplex_model.objective.sense.minimize)
 
     def _extract_sensitivity_data(
         self,
@@ -717,86 +399,26 @@ class LXCPLEXSolver(LXSolverInterface):
                 mapped={},
             )
 
-        # CPLEX status codes (some common ones)
-        # 1 = optimal, 2 = unbounded, 3 = infeasible, 4 = inf_or_unbd
-        # 10 = node_limit, 11 = time_limit, 12 = dettime_limit
-        # 13 = iteration_limit, etc.
-        status_map = {
-            1: "optimal",  # CPX_STAT_OPTIMAL
-            2: "unbounded",  # CPX_STAT_UNBOUNDED
-            3: "infeasible",  # CPX_STAT_INFEASIBLE
-            4: "inf_or_unbounded",  # CPX_STAT_INForUNBD
-            5: "optimal_infeasible",  # CPX_STAT_OPTIMAL_INFEAS
-            6: "optimal",  # CPX_STAT_NUM_BEST - numerical best, treat as optimal
-            10: "abort_obj_lim",  # CPX_STAT_ABORT_OBJ_LIM
-            11: "time_limit",  # CPX_STAT_ABORT_TIME_LIM
-            12: "abort_dettime_lim",  # CPX_STAT_ABORT_DETTIME_LIM
-            13: "iteration_limit",  # CPX_STAT_ABORT_IT_LIM
-            101: "optimal",  # CPXMIP_OPTIMAL_TOL - optimal within tolerance
-            102: "solution_lim",  # CPXMIP_SOL_LIM
-            103: "feasible",  # CPXMIP_NODE_LIM_FEAS
-            104: "node_lim_infeas",  # CPXMIP_NODE_LIM_INFEAS
-            105: "feasible",  # CPXMIP_TIME_LIM_FEAS
-            106: "time_lim_infeas",  # CPXMIP_TIME_LIM_INFEAS
-            107: "feasible",  # CPXMIP_FAIL_FEAS
-            108: "fail_infeas",  # CPXMIP_FAIL_INFEAS
-            109: "feasible",  # CPXMIP_MEM_LIM_FEAS
-            110: "mem_lim_infeas",  # CPXMIP_MEM_LIM_INFEAS
-            111: "feasible",  # CPXMIP_ABORT_FEAS
-            112: "abort_infeas",  # CPXMIP_ABORT_INFEAS
-            113: "optimal_infeas",  # CPXMIP_OPTIMAL_INFEAS
-        }
-
-        lx_status = status_map.get(status, f"unknown_{status}")
-
-        # Extract objective value
-        obj_value = 0.0
-        if status in [1, 5, 6, 101, 103, 105, 107, 109, 111, 113]:  # Solution available
-            try:
-                obj_value = cplex_model.solution.get_objective_value()
-                # Add constant term if present
-                if model.objective_expr is not None and model.objective_expr.constant != 0:
-                    obj_value += model.objective_expr.constant
-            except CplexError:
-                pass
-
-        # Extract variable values
-        variables: Dict[str, Union[float, Dict[Any, float]]] = {}
-        mapped: Dict[str, Dict[Any, float]] = {}
-
-        if status in [1, 5, 6, 101, 103, 105, 107, 109, 111, 113]:  # Solution available
-            try:
-                # Get all variable values at once
-                all_values = cplex_model.solution.get_values()
-
-                for lx_var in model.variables:
-                    solver_vars = self._variable_map[lx_var.name]
-
-                    if isinstance(solver_vars, dict):
-                        # Indexed variable family
-                        var_values: Dict[Any, float] = {}
-                        mapped_values: Dict[Any, float] = {}
-                        instances = lx_var.get_instances()
-
-                        for instance in instances:
-                            # Get index key (handles cartesian products)
-                            index_key = self._get_index_key(lx_var, instance)
-
-                            var_idx = solver_vars[index_key]
-                            value = all_values[var_idx]
-
-                            var_values[index_key] = value
-                            mapped_values[index_key] = value
-
-                        variables[lx_var.name] = var_values
-                        mapped[lx_var.name] = mapped_values
-                    else:
-                        # Single variable
-                        value = all_values[solver_vars]
-                        variables[lx_var.name] = value
-
-            except CplexError as e:
-                self.logger.logger.warning(f"Failed to extract variable values: {e}")
+        sol = cplex_model.solution
+        code = sol.get_status()
+        st = sol.status
+        has_solution = sol.get_solution_type() != sol.type.none and code not in (
+            st.unbounded, st.MIP_unbounded, st.infeasible_or_unbounded,
+            st.MIP_infeasible_or_unbounded, st.infeasible, st.MIP_infeasible)
+        if has_solution and not sol.is_primal_feasible():
+            has_solution = False    # an LP stopped by a limit keeps an infeasible point
+        if code == st.relaxation_unbounded:
+            warn_user(
+                "CPLEX could not bound the objective (its relaxation is unbounded); the "
+                "model may be unbounded, and any point returned is only feasible",
+                UserWarning)
+        lx_status = self._status_name(sol.status, code, has_solution)
+        obj_value = sol.get_objective_value() if has_solution else 0.0
+        if has_solution:
+            values = sol.get_values()
+            variables, mapped = self._solution_values(lambda pos: values[pos])
+        else:
+            variables, mapped = {}, {}
 
         # Extract sensitivity data if enabled
         shadow_prices: Dict[str, float] = {}

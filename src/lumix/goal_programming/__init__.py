@@ -47,7 +47,8 @@ Examples:
         ... )
 """
 
-from .goal import LXGoal, LXGoalMetadata, LXGoalMode, get_deviation_var_name, priority_to_weight
+from .goal import (LXGoal, LXGoalMetadata, LXGoalMode, LXGoalStage, get_deviation_var_name,
+                   priority_to_weight)
 from .objective_builder import (
     build_sequential_objectives,
     build_weighted_objective,
@@ -62,6 +63,7 @@ __all__ = [
     "LXGoal",
     "LXGoalMetadata",
     "LXGoalMode",
+    "LXGoalStage",
     "RelaxedConstraint",
     # Relaxation functions
     "relax_constraint",

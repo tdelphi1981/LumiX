@@ -6,8 +6,16 @@ Detailed guide for configuring the linearization engine.
 Overview
 --------
 
-The :class:`~lumix.linearization.config.LXLinearizerConfig` class controls all aspects
-of the linearization process, from method selection to accuracy requirements.
+The :class:`~lumix.linearization.config.LXLinearizerConfig` class sets the constants
+and defaults the linearization techniques use: the Big-M bound for unbounded
+variables, the piecewise-linear settings, and the size limit of exact integer
+products.
+
+.. versionchanged:: 0.3.0
+   The configuration is applied: ``LXLinearizer(model, capability, config)`` and
+   ``LXOptimizer().enable_linearization(...)`` pass it to every technique. Before
+   0.3.0 the piecewise settings were overridden by the terms' own defaults. Six
+   fields that no technique reads are deprecated (see `Deprecated Fields`_).
 
 Basic Configuration
 -------------------
@@ -17,86 +25,32 @@ Creating a Configuration
 
 .. code-block:: python
 
-   from lumix.linearization import LXLinearizerConfig, LXLinearizationMethod
+   from lumix.linearization import LXLinearizerConfig
 
    # Default configuration
    config = LXLinearizerConfig()
 
    # Custom configuration
    config = LXLinearizerConfig(
-       default_method=LXLinearizationMethod.MCCORMICK,
        big_m_value=1e5,
        pwl_num_segments=30,
-       adaptive_breakpoints=True,
-       verbose_logging=True
+       adaptive_breakpoints=True
+   )
+
+The same settings can be given to the optimizer:
+
+.. code-block:: python
+
+   optimizer = LXOptimizer().use_solver("glpk").enable_linearization(
+       big_m=1e5,                  # big_m_value
+       pwl_segments=30,            # pwl_num_segments
+       pwl_method="sos2",          # pwl_method
+       adaptive_breakpoints=True,  # adaptive_breakpoints
+       binary_expansion_bits=12,   # other fields by name
    )
 
 Configuration Parameters
 ------------------------
-
-General Settings
-~~~~~~~~~~~~~~~~
-
-.. py:attribute:: default_method
-   :type: LXLinearizationMethod
-   :value: LXLinearizationMethod.MCCORMICK
-
-   Default linearization technique to use for bilinear products.
-
-   **Available Methods:**
-
-   - ``MCCORMICK``: McCormick envelopes (default, best for continuous variables)
-   - ``BIG_M``: Big-M method (for binary × continuous)
-   - ``BINARY_EXPANSION``: Binary expansion for integer products
-   - ``SOS2``: Special Ordered Set type 2 for piecewise functions
-   - ``LOGARITHMIC``: Logarithmic encoding for large integer products
-
-   **Example:**
-
-   .. code-block:: python
-
-      # Use McCormick by default
-      config = LXLinearizerConfig(
-          default_method=LXLinearizationMethod.MCCORMICK
-      )
-
-.. py:attribute:: tolerance
-   :type: float
-   :value: 1e-6
-
-   Numerical tolerance for comparisons and bound checking.
-
-   **When Used:**
-
-   - Checking if bounds are equal
-   - Validating linearization accuracy
-   - Comparing breakpoint values
-
-   **Example:**
-
-   .. code-block:: python
-
-      config = LXLinearizerConfig(tolerance=1e-8)
-
-.. py:attribute:: verbose_logging
-   :type: bool
-   :value: True
-
-   Enable detailed linearization logging for debugging and analysis.
-
-   **What Gets Logged:**
-
-   - Detected nonlinear terms
-   - Selected linearization techniques
-   - Created auxiliary variables and constraints
-   - Linearization statistics
-
-   **Example:**
-
-   .. code-block:: python
-
-      # Enable verbose logging
-      config = LXLinearizerConfig(verbose_logging=True)
 
 Big-M Settings
 ~~~~~~~~~~~~~~
@@ -105,35 +59,42 @@ Big-M Settings
    :type: float
    :value: 1e6
 
-   Big-M constant for conditional constraints and Big-M linearization.
+   Bound used where a variable or expression has no finite bound:
 
-   **Critical Setting:** Setting M too small can lead to incorrect solutions.
-   Setting M too large can cause numerical issues and slow solving.
+   - the product of a binary and an unbounded variable (see :doc:`bilinear`);
+   - an indicator whose expression is unbounded (see
+     :doc:`/user-guide/nonlinear/indicator`).
 
-   **Choosing M:**
+   Both cases issue a ``UserWarning``. Everywhere else the constants are computed
+   from the variable bounds, so finite bounds make ``big_m_value`` unnecessary.
+   Absolute values, min and max never use it: their exact form requires finite
+   bounds (see :doc:`engine`).
 
-   1. **Problem-Specific:** Use knowledge of variable bounds
-   2. **Conservative:** Use 100× the maximum expected value
-   3. **Validation:** Verify solutions don't hit M bounds
+   **Critical Setting:** Setting M too small cuts off solutions in which the
+   unbounded variable exceeds it. Setting M too large can cause numerical issues
+   and slow solving.
 
    **Example:**
 
    .. code-block:: python
 
-      # For variables bounded in [0, 1000]
-      config = LXLinearizerConfig(big_m_value=1e5)
-
-      # For normalized variables in [0, 1]
-      config = LXLinearizerConfig(big_m_value=100)
+      # Unbounded variables that never exceed 1000 in absolute value
+      config = LXLinearizerConfig(big_m_value=1e3)
 
 Piecewise-Linear Settings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These three settings apply to every piecewise-linear term that leaves the
+corresponding argument as ``None`` (the default of ``add_piecewise``,
+``LXPiecewiseLinearTerm`` and ``approximate_function``); a value given on the term
+wins. See :doc:`piecewise`.
 
 .. py:attribute:: pwl_num_segments
    :type: int
    :value: 20
 
-   Number of linear segments for piecewise-linear approximations.
+   Number of linear segments for piecewise-linear approximations (the term's
+   ``num_segments``).
 
    **Accuracy vs. Complexity:**
 
@@ -171,75 +132,39 @@ Piecewise-Linear Settings
    :type: Literal["sos2", "incremental", "logarithmic"]
    :value: "sos2"
 
-   Method for piecewise-linear formulation.
+   Method for the piecewise-linear formulation (the term's ``method``). All three
+   are exact for the piecewise-linear function through the breakpoints and work on
+   every MILP solver; LumiX does not pass SOS2 sets to the solver.
 
    **Methods:**
 
-   1. **SOS2** (Special Ordered Set type 2):
-      - Best when solver supports SOS2
-      - Fewest variables (n+1 continuous)
-      - Recommended for Gurobi, CPLEX
-
-   2. **Incremental**:
-      - Uses binary selection variables
-      - More variables but standard MILP
-      - Recommended for solvers without SOS2
-
-   3. **Logarithmic** (Gray code):
-      - Uses log₂(n) binary variables
-      - Best for many segments (>100)
-      - Not yet implemented in LumiX
+   1. **SOS2**: convex-combination weights, adjacency enforced with one binary per
+      segment
+   2. **Incremental**: one binary and one fraction variable per segment
+   3. **Logarithmic** (Gray code): ⌈log₂(n)⌉ binaries, the fewest for many segments
 
    **Example:**
 
    .. code-block:: python
 
-      # Use SOS2 if solver supports it
-      config = LXLinearizerConfig(
-          pwl_method="sos2",
-          prefer_sos2=True
-      )
-
-      # Use incremental for GLPK
-      config = LXLinearizerConfig(pwl_method="incremental")
-
-.. py:attribute:: prefer_sos2
-   :type: bool
-   :value: True
-
-   Use SOS2 formulation when solver supports it, regardless of ``pwl_method``.
-
-   **Auto-Detection:**
-
-   The linearizer checks solver capabilities and automatically uses SOS2 if:
-   - ``prefer_sos2=True``
-   - Solver supports SOS2 (Gurobi, CPLEX, some OR-Tools modes)
-
-   **Example:**
-
-   .. code-block:: python
-
-      config = LXLinearizerConfig(
-          prefer_sos2=True  # Use SOS2 if available
-      )
+      config = LXLinearizerConfig(pwl_method="sos2")
+      config = LXLinearizerConfig(pwl_method="logarithmic")
 
 .. py:attribute:: adaptive_breakpoints
    :type: bool
    :value: True
 
-   Use adaptive breakpoint generation based on function curvature.
+   Use adaptive breakpoint generation based on function curvature (the term's
+   ``adaptive``).
 
    **How It Works:**
 
-   - Samples function at many points
-   - Computes second derivative (curvature measure)
-   - Concentrates breakpoints where curvature is high
+   - Samples the function at 10 × ``num_segments`` + 1 points
+   - Mixes the curvature (absolute second differences) with a uniform density
+   - Places the breakpoints at equally spaced quantiles of that density
 
-   **Benefits:**
-
-   - Better accuracy with same number of segments
-   - Automatically adapts to function shape
-   - Especially useful for functions with varying curvature
+   The breakpoints are deterministic, and there are exactly ``num_segments + 1`` of
+   them.
 
    **When to Use:**
 
@@ -256,57 +181,6 @@ Piecewise-Linear Settings
           adaptive_breakpoints=True
       )
 
-McCormick Envelope Settings
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. py:attribute:: auto_detect_bounds
-   :type: bool
-   :value: True
-
-   Automatically detect variable bounds for McCormick envelopes.
-
-   **How It Works:**
-
-   - Checks variable lower_bound and upper_bound attributes
-   - Falls back to default bounds if not specified
-   - Raises error if bounds cannot be determined
-
-   **Example:**
-
-   .. code-block:: python
-
-      config = LXLinearizerConfig(auto_detect_bounds=True)
-
-      # Variables must have bounds
-      x = LXVariable[Product, float]("x").bounds(lower=0, upper=100)
-      y = LXVariable[Product, float]("y").bounds(lower=-50, upper=50)
-
-.. py:attribute:: mccormick_tighten_bounds
-   :type: bool
-   :value: True
-
-   Apply bound tightening preprocessing for McCormick envelopes.
-
-   **What It Does:**
-
-   - Tightens bounds using constraint propagation
-   - Results in stronger linear relaxation
-   - Improves solver performance
-
-   **Trade-off:**
-
-   - Small preprocessing overhead
-   - Significant solving time improvement
-
-   **Example:**
-
-   .. code-block:: python
-
-      # Enable bound tightening (recommended)
-      config = LXLinearizerConfig(
-          mccormick_tighten_bounds=True
-      )
-
 Binary Expansion Settings
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -314,31 +188,70 @@ Binary Expansion Settings
    :type: int
    :value: 10
 
-   Number of bits for binary expansion method.
+   Largest number of binary digits of the integer factor in an exact product
+   (integer × integer or integer × continuous, see :doc:`bilinear`).
 
-   **Purpose:**
-
-   Linearize integer × integer products by representing integers in binary.
+   An integer variable with bounds [L, U] needs ``(U - L).bit_length()`` digits.
+   When that exceeds ``binary_expansion_bits`` the linearizer raises
+   ``ValueError``; raise the setting, or use Gurobi or CPLEX for a quadratic
+   objective.
 
    **Capacity:**
 
-   - ``bits=10`` → integers up to 2¹⁰ = 1024
-   - ``bits=15`` → integers up to 2¹⁵ = 32,768
-   - ``bits=20`` → integers up to 2²⁰ = 1,048,576
+   - ``bits=10`` → up to 2¹⁰ = 1024 integer values
+   - ``bits=15`` → up to 2¹⁵ = 32,768 integer values
+   - ``bits=20`` → up to 2²⁰ = 1,048,576 integer values
 
    **Variables Created:**
 
-   - For product of two integers: ``2 × bits`` binary variables
+   - For each product: one binary per digit of the expanded factor, plus one
+     binary × variable product (one continuous variable, four constraints) per digit
 
    **Example:**
 
    .. code-block:: python
 
-      # For integers up to 1000
+      # For integers in [0, 1000]
       config = LXLinearizerConfig(binary_expansion_bits=10)
 
-      # For larger integers up to 100,000
+      # For integers in [0, 100000]
       config = LXLinearizerConfig(binary_expansion_bits=17)
+
+Deprecated Fields
+~~~~~~~~~~~~~~~~~
+
+.. deprecated:: 0.3.0
+   The following fields have no effect. Setting one of them to a value other than
+   its default issues a ``DeprecationWarning``. They will be removed in 0.4.0.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Field
+     - Default
+     - Note
+   * - ``default_method``
+     - ``LXLinearizationMethod.MCCORMICK``
+     - The technique follows from the variable types (see :doc:`bilinear`).
+   * - ``tolerance``
+     - ``1e-6``
+     - Not read by any technique.
+   * - ``verbose_logging``
+     - ``True``
+     - Nothing is logged; approximations are reported as ``UserWarning``.
+   * - ``prefer_sos2``
+     - ``True``
+     - Use ``pwl_method``.
+   * - ``auto_detect_bounds``
+     - ``True``
+     - The variable bounds are always used.
+   * - ``mccormick_tighten_bounds``
+     - ``True``
+     - Bounds are not tightened.
+
+The ``prefer_sos2`` and ``mccormick_tighten_bounds`` arguments of
+``LXOptimizer.enable_linearization()`` have no effect either.
 
 Configuration Examples
 ----------------------
@@ -351,8 +264,6 @@ Optimized for solve time and numerical stability:
 .. code-block:: python
 
    production_config = LXLinearizerConfig(
-       # Use proven methods
-       default_method=LXLinearizationMethod.MCCORMICK,
        pwl_method="sos2",
 
        # Tight M values (problem-specific)
@@ -361,16 +272,6 @@ Optimized for solve time and numerical stability:
        # Balanced accuracy
        pwl_num_segments=25,
        adaptive_breakpoints=True,
-
-       # Enable optimizations
-       mccormick_tighten_bounds=True,
-       prefer_sos2=True,
-
-       # Moderate logging
-       verbose_logging=False,
-
-       # Standard tolerance
-       tolerance=1e-6
    )
 
 Research / Prototyping
@@ -388,15 +289,8 @@ High accuracy for validation and experimentation:
        # Conservative Big-M
        big_m_value=1e6,
 
-       # Detailed logging
-       verbose_logging=True,
-
-       # Tight tolerance
-       tolerance=1e-8,
-
-       # Best formulations
-       prefer_sos2=True,
-       mccormick_tighten_bounds=True
+       # Larger exact integer products
+       binary_expansion_bits=14,
    )
 
 Memory-Constrained
@@ -411,55 +305,8 @@ Minimize auxiliary variables and constraints:
        pwl_num_segments=10,
        adaptive_breakpoints=True,  # Get more from fewer segments
 
-       # Prefer techniques with fewer variables
-       pwl_method="sos2",  # Fewer vars than incremental
-       prefer_sos2=True,
-
-       # Minimal logging
-       verbose_logging=False
-   )
-
-Solver-Specific Configurations
--------------------------------
-
-Gurobi / CPLEX
-~~~~~~~~~~~~~~
-
-Leverage advanced solver features:
-
-.. code-block:: python
-
-   advanced_solver_config = LXLinearizerConfig(
-       # Use SOS2 (natively supported)
-       pwl_method="sos2",
-       prefer_sos2=True,
-
-       # Can use smaller Big-M (better presolve)
-       big_m_value=1e4,
-
-       # Enable all optimizations
-       mccormick_tighten_bounds=True,
-       auto_detect_bounds=True
-   )
-
-GLPK / Basic Solvers
-~~~~~~~~~~~~~~~~~~~~
-
-No SOS2 support, use standard MILP:
-
-.. code-block:: python
-
-   basic_solver_config = LXLinearizerConfig(
-       # Use incremental (no SOS2 in GLPK)
-       pwl_method="incremental",
-       prefer_sos2=False,
-
-       # Fewer segments (slower with incremental)
-       pwl_num_segments=15,
-
-       # Standard settings
-       big_m_value=1e5,
-       adaptive_breakpoints=True
+       # Fewest binaries per piecewise term
+       pwl_method="logarithmic",
    )
 
 Validation and Debugging
@@ -470,35 +317,23 @@ Checking Configuration
 
 .. code-block:: python
 
-   config = LXLinearizerConfig(
-       pwl_num_segments=30,
-       verbose_logging=True
-   )
+   config = LXLinearizerConfig(pwl_num_segments=30)
 
    # Validate settings
    assert config.pwl_num_segments > 0, "Need at least one segment"
-   assert config.tolerance > 0, "Tolerance must be positive"
    assert config.big_m_value > 0, "Big-M must be positive"
 
-Logging Output
-~~~~~~~~~~~~~~
+Warnings
+~~~~~~~~
 
-With ``verbose_logging=True``, you'll see:
+The linearizer does not log. It issues a ``UserWarning`` when it
 
-.. code-block:: text
+- uses McCormick envelopes (a relaxation) for a product of two continuous
+  variables;
+- uses ``big_m_value`` for an unbounded variable or expression;
+- restricts a piecewise term's variable to a domain narrower than its bounds.
 
-   [Linearization] Scanning model for nonlinear terms...
-   [Linearization] Found 3 bilinear terms
-   [Linearization] Found 2 piecewise-linear terms
-   [Linearization] Linearizing bilinear term: price[p1] * quantity[p1]
-   [Linearization] Using McCormick envelopes (continuous × continuous)
-   [Linearization] Created auxiliary variable: aux_mccormick_price_quantity_1
-   [Linearization] Created 4 McCormick constraints
-   [Linearization] Summary:
-   [Linearization]   - Bilinear terms: 3
-   [Linearization]   - Piecewise terms: 2
-   [Linearization]   - Auxiliary variables: 8
-   [Linearization]   - Auxiliary constraints: 17
+See :doc:`engine` for turning them into errors.
 
 See Also
 --------

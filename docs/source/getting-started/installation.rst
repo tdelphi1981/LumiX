@@ -112,20 +112,25 @@ Verify your installation by checking the version:
    import lumix
    print(lumix.__version__)
 
-Check which solvers are available:
+Check which solvers are installed. ``use_solver()`` does not import the
+solver (that happens in ``solve()``), so check the solver packages:
 
 .. code-block:: python
 
-   from lumix import LXOptimizer
+   import importlib.util
 
-   optimizer = LXOptimizer()
+   packages = {
+       "ortools": "ortools",      # also "cpsat"
+       "gurobi": "gurobipy",
+       "cplex": "cplex",
+       "glpk": "swiglpk",
+   }
+   for solver, package in packages.items():
+       installed = importlib.util.find_spec(package) is not None
+       print(f"{solver}: {'installed' if installed else 'not installed'}")
 
-   # Try to use a solver
-   try:
-       optimizer.use_solver("ortools")
-       print("OR-Tools is available")
-   except ImportError:
-       print("OR-Tools is not installed")
+Gurobi and CPLEX also need a license; a model too large for the bundled
+restricted license fails at ``solve()``.
 
 Common Issues
 -------------

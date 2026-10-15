@@ -16,6 +16,7 @@ The :class:`~lumix.solution.solution.LXSolution` class provides methods to:
 - Check if goals are satisfied
 - Calculate total deviations
 - Analyze goal achievement
+- Inspect the stages of sequential goal programming (``goal_stages``)
 
 Goal Programming Concepts
 --------------------------
@@ -42,7 +43,7 @@ Deviation Variables
 Each goal creates two deviation variables:
 
 - **Positive deviation** (``pos``): Amount by which goal is exceeded
-- **Negative deviation** (neg``): Amount by which goal is under-achieved
+- **Negative deviation** (``neg``): Amount by which goal is under-achieved
 
 .. code-block:: python
 
@@ -67,11 +68,11 @@ Get Deviations
    deviations = solution.get_goal_deviations("production_target")
 
    if deviations:
-       pos_dev = deviations["pos"]  # Over-achievement
-       neg_dev = deviations["neg"]  # Under-achievement
+       pos_dev = deviations["pos"]  # Over-achievement, {row name: value}
+       neg_dev = deviations["neg"]  # Under-achievement, {row name: value}
 
-       print(f"Positive deviation: {pos_dev}")
-       print(f"Negative deviation: {neg_dev}")
+       print(f"Positive deviation: {sum(pos_dev.values()):.2f}")
+       print(f"Negative deviation: {sum(neg_dev.values()):.2f}")
    else:
        print("Goal 'production_target' not found")
 
@@ -82,27 +83,51 @@ The ``get_goal_deviations()`` method returns a dictionary:
 
 .. code-block:: python
 
+   Dict[str, Dict[Any, float]]
+
    {
-       "pos": Union[float, Dict[Any, float]],
-       "neg": Union[float, Dict[Any, float]]
+       "pos": {row_name: value, ...},
+       "neg": {row_name: value, ...}
    }
 
-For **scalar goals**:
+Both values are always dicts keyed by row name, for single goals too (deviation
+variables are indexed by :class:`~lumix.goal_programming.goal.LXGoal` instances).
+
+For **single goals** the key is the goal name:
 
 .. code-block:: python
 
    deviations = solution.get_goal_deviations("total_cost_target")
-   # {'pos': 0.0, 'neg': 150.5}
+   # {'pos': {'total_cost_target': 0.0}, 'neg': {'total_cost_target': 150.5}}
 
-For **indexed goals**:
+For **indexed goals** every row has its own deviations, keyed
+``<goal name>_<index key>``:
 
 .. code-block:: python
 
    deviations = solution.get_goal_deviations("demand_target")
    # {
-   #     'pos': {'product_A': 10.0, 'product_B': 0.0},
-   #     'neg': {'product_A': 0.0, 'product_B': 5.0}
+   #     'pos': {'demand_target_A': 10.0, 'demand_target_B': 0.0},
+   #     'neg': {'demand_target_A': 0.0, 'demand_target_B': 5.0}
    # }
+
+.. versionchanged:: 0.3.0
+
+   Each row of an indexed goal has its own pair of deviations. Before 0.3.0 every
+   row contained all deviations of the goal, so the values per key were not
+   meaningful.
+
+Priority 0 goals are objective terms, not goals with deviations:
+``get_goal_deviations()`` returns ``None`` for them (and ``is_goal_satisfied()`` and
+``get_total_deviation()`` return ``None`` too).
+
+A solve without a solution (infeasible, unbounded, or stopped before a solution
+was found) has no goal deviations: ``get_goal_deviations()``,
+``is_goal_satisfied()`` and ``get_total_deviation()`` return ``None``, and
+``summary()`` has no goal lines. Check ``solution.is_feasible()`` first.
+
+.. versionchanged:: 0.3.0
+   Such a solve used to report every goal as satisfied with zero deviation.
 
 Checking Goal Satisfaction
 ---------------------------
@@ -125,9 +150,25 @@ Check if a goal is achieved within tolerance:
 Return Values
 ~~~~~~~~~~~~~
 
-- ``True``: Goal is satisfied (both deviations within tolerance)
+- ``True``: Goal is satisfied (its undesired deviations are within tolerance)
 - ``False``: Goal is not satisfied
-- ``None``: Goal not found in solution
+- ``None``: Goal not found in solution (also for priority 0 goals, and when the
+  solve found no solution)
+
+Only the **undesired** deviations count: the shortfall (``neg``) of a ``>=`` goal,
+the excess (``pos``) of a ``<=`` goal, and both for an ``==`` goal. Exceeding a
+``>=`` goal or staying below a ``<=`` goal satisfies it. For an indexed goal, every
+row must be within tolerance.
+
+.. code-block:: python
+
+   # Goal: production >= 100, solved production = 110 (pos = 10, neg = 0)
+   solution.is_goal_satisfied("production_target")  # True
+
+.. versionchanged:: 0.3.0
+
+   Before 0.3.0 both deviations had to be within tolerance, so an over-achieved
+   ``>=`` goal or an under-used ``<=`` goal was reported as unsatisfied.
 
 .. code-block:: python
 
@@ -138,12 +179,13 @@ Return Values
    elif satisfied is False:
        print("Goal not achieved")
    else:
-       print("Goal not found in solution")
+       print("No deviations (unknown or priority 0 goal, or no solution)")
 
 Total Deviation
 ~~~~~~~~~~~~~~~
 
-Get the sum of absolute deviations:
+Get the sum of the **undesired** deviations (the ones the goal minimizes), over every
+row of an indexed goal:
 
 .. code-block:: python
 
@@ -152,18 +194,25 @@ Get the sum of absolute deviations:
    if total_dev is not None:
        print(f"Total deviation: {total_dev:.2f}")
    else:
-       print("Goal not found")
+       print("No deviations (unknown or priority 0 goal, or no solution)")
 
-**Calculation**:
+**Calculation** (undesired side only):
 
 .. code-block:: python
 
-   # For scalar goals
-   total_deviation = abs(pos_dev) + abs(neg_dev)
+   # ">=" goal: the shortfall
+   total_deviation = sum(neg_dev.values())
 
-   # For indexed goals
-   total_deviation = sum(abs(v) for v in pos_dev.values()) + \\
-                     sum(abs(v) for v in neg_dev.values())
+   # "<=" goal: the excess
+   total_deviation = sum(pos_dev.values())
+
+   # "==" goal: both sides
+   total_deviation = sum(pos_dev.values()) + sum(neg_dev.values())
+
+.. versionchanged:: 0.3.0
+
+   It used to add the desired side too, so an over-achieved ``>=`` goal reported a
+   deviation.
 
 Working with Goal Solutions
 ----------------------------
@@ -192,7 +241,7 @@ Analyzing Goal Achievement
            else:
                status = "✗ No"
 
-           dev_str = f"{total_dev:.2f}" if total_dev else "N/A"
+           dev_str = f"{total_dev:.2f}" if total_dev is not None else "N/A"
            print(f"{goal_name:<30} {status:<12} {dev_str}")
 
        print(f"\nGoals achieved: {satisfied_count}/{len(goal_names)}")
@@ -223,8 +272,8 @@ Prioritizing Unmet Goals
            # Show breakdown
            deviations = solution.get_goal_deviations(goal_name)
            if deviations:
-               print(f"    Positive: {deviations['pos']}")
-               print(f"    Negative: {deviations['neg']}")
+               print(f"    Positive: {sum(deviations['pos'].values()):.2f}")
+               print(f"    Negative: {sum(deviations['neg'].values()):.2f}")
 
 Deviation Breakdown
 ~~~~~~~~~~~~~~~~~~~
@@ -242,34 +291,25 @@ For indexed goals, analyze deviations by index:
            print(f"Goal '{goal_name}' not found")
            return
 
-       pos_dev = deviations["pos"]
+       pos_dev = deviations["pos"]  # {"<goal>_<key>": value}
        neg_dev = deviations["neg"]
 
-       # Check if indexed
-       if isinstance(pos_dev, dict):
-           print(f"Goal: {goal_name} (indexed)")
-           print(f"\n{'Index':<20} {'Pos Deviation':<18} {'Neg Deviation':<18} {'Status'}")
-           print("-" * 80)
+       print(f"Goal: {goal_name}")
+       print(f"\n{'Row':<20} {'Pos Deviation':<18} {'Neg Deviation':<18} {'Status'}")
+       print("-" * 80)
 
-           all_keys = set(pos_dev.keys()) | set(neg_dev.keys())
+       for row in sorted(pos_dev.keys() | neg_dev.keys()):
+           pos = pos_dev.get(row, 0.0)
+           neg = neg_dev.get(row, 0.0)
 
-           for key in sorted(all_keys):
-               pos = pos_dev.get(key, 0)
-               neg = neg_dev.get(key, 0)
+           if abs(pos) < 1e-6 and abs(neg) < 1e-6:
+               status = "On target"
+           elif pos > 1e-6:
+               status = f"Over by {pos:.2f}"
+           else:
+               status = f"Under by {neg:.2f}"
 
-               if abs(pos) < 1e-6 and abs(neg) < 1e-6:
-                   status = "Satisfied"
-               elif pos > 1e-6:
-                   status = f"Over by {pos:.2f}"
-               else:
-                   status = f"Under by {neg:.2f}"
-
-               print(f"{str(key):<20} {pos:<18.2f} {neg:<18.2f} {status}")
-       else:
-           # Scalar goal
-           print(f"Goal: {goal_name} (scalar)")
-           print(f"Positive deviation: {pos_dev:.2f}")
-           print(f"Negative deviation: {neg_dev:.2f}")
+           print(f"{row:<20} {pos:<18.2f} {neg:<18.2f} {status}")
 
 Solution Summary with Goals
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -289,6 +329,8 @@ Output::
 
    Goal Constraints: 5
    Goals Satisfied: 3/5
+
+"Goals Satisfied" counts the goals for which ``is_goal_satisfied()`` is ``True``.
 
 Example Workflows
 -----------------
@@ -311,6 +353,7 @@ Production Planning with Goals
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1)  # Higher priority
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    quality_goal = (
@@ -344,9 +387,8 @@ Production Planning with Goals
        if solution.is_goal_satisfied("quality_goal"):
            print("✓ Quality target met")
        else:
-           deviations = solution.get_goal_deviations("quality_goal")
-           if deviations["neg"] > 0:
-               print(f"✗ Quality {deviations['neg']:.2%} below target")
+           shortfall = solution.get_total_deviation("quality_goal")  # neg side of a >= goal
+           print(f"✗ Quality {shortfall:.2%} below target")
 
 Multi-Objective Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -398,42 +440,32 @@ Multi-Objective Optimization
 Sequential Goal Programming
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. versionadded:: 0.3.0
+
+In sequential mode (``model.set_goal_mode("sequential")``), ``optimizer.solve()``
+solves one stage per priority and a final stage for the model's own objective and
+the priority 0 goals. ``solution.goal_stages`` lists them in solve order as
+:class:`~lumix.goal_programming.goal.LXGoalStage` items (``priority``,
+``objective_value``, ``status``); the final stage has priority ``0``. In weighted
+mode and for models without goals, ``goal_stages`` is an empty list.
+
 .. code-block:: python
 
-   def sequential_goal_programming(products, goal_priorities):
-       """Solve goals sequentially by priority."""
+   model.set_goal_mode("sequential")
+   solution = optimizer.solve(model)
 
-       # Priority levels (1 = highest)
-       priorities = sorted(set(goal_priorities.values()))
+   for stage in solution.goal_stages:
+       name = "final objective" if stage.priority == 0 else f"priority {stage.priority}"
+       value = "n/a" if stage.objective_value is None else f"{stage.objective_value:.2f}"
+       print(f"{name}: {value} ({stage.status})")
 
-       solutions_by_priority = {}
+   # A stage that is not solved to optimality stops the sequence; its
+   # solution is returned and it is the last stage listed
+   if not solution.is_optimal():
+       print(f"Stopped at priority {solution.goal_stages[-1].priority}")
 
-       for priority in priorities:
-           print(f"\\n=== Solving Priority {priority} Goals ===")
-
-           # Get goals at this priority
-           current_goals = [
-               name for name, p in goal_priorities.items()
-               if p == priority
-           ]
-
-           # Build and solve model for this priority
-           model = build_model_with_goals(current_goals)
-           solution = optimizer.solve(model)
-
-           solutions_by_priority[priority] = solution
-
-           # Report results
-           for goal_name in current_goals:
-               satisfied = solution.is_goal_satisfied(goal_name)
-               status = "✓" if satisfied else "✗"
-               print(f"{status} {goal_name}")
-
-               if not satisfied:
-                   total_dev = solution.get_total_deviation(goal_name)
-                   print(f"   Deviation: {total_dev:.2f}")
-
-       return solutions_by_priority
+The variable values, goal deviations and ``objective_value`` of the solution are
+those of the last stage solved. See :doc:`/user-guide/goal_programming/sequential-mode`.
 
 Handling Deviation Types
 -------------------------
@@ -455,9 +487,7 @@ Sometimes you only care about one type of deviation:
 
        if direction == "under":
            # Only care about under-achievement (negative deviation)
-           total_under = deviations["neg"]
-           if isinstance(total_under, dict):
-               total_under = sum(total_under.values())
+           total_under = sum(deviations["neg"].values())
 
            if total_under < 1e-6:
                print(f"✓ {goal_name}: No under-achievement")
@@ -466,9 +496,7 @@ Sometimes you only care about one type of deviation:
 
        elif direction == "over":
            # Only care about over-achievement (positive deviation)
-           total_over = deviations["pos"]
-           if isinstance(total_over, dict):
-               total_over = sum(total_over.values())
+           total_over = sum(deviations["pos"].values())
 
            if total_over < 1e-6:
                print(f"✓ {goal_name}: No over-achievement")
@@ -490,16 +518,8 @@ Calculate weighted deviation for cost analysis:
        if not deviations:
            return None
 
-       pos_dev = deviations["pos"]
-       neg_dev = deviations["neg"]
-
-       # Handle scalar vs indexed
-       if isinstance(pos_dev, dict):
-           total_pos = sum(pos_dev.values())
-           total_neg = sum(neg_dev.values())
-       else:
-           total_pos = pos_dev
-           total_neg = neg_dev
+       total_pos = sum(deviations["pos"].values())
+       total_neg = sum(deviations["neg"].values())
 
        weighted_total = total_pos * pos_weight + total_neg * neg_weight
 
@@ -519,7 +539,7 @@ Best Practices
 
       deviations = solution.get_goal_deviations("my_goal")
       if deviations is None:
-          print("Goal not found")
+          print("No deviations (unknown or priority 0 goal, or no solution)")
           return
 
 2. **Use Appropriate Tolerance**
@@ -532,18 +552,17 @@ Best Practices
       # For absolute goals
       satisfied = solution.is_goal_satisfied("demand", tolerance=1.0)  # 1 unit
 
-3. **Handle Both Scalar and Indexed Goals**
+3. **Treat Deviations as Dicts**
+
+   Single and indexed goals both return ``{row name: value}`` dicts:
 
    .. code-block:: python
 
       deviations = solution.get_goal_deviations("my_goal")
-      pos_dev = deviations["pos"]
+      total_pos = sum(deviations["pos"].values())
 
-      # Check if indexed
-      if isinstance(pos_dev, dict):
-          total = sum(pos_dev.values())
-      else:
-          total = pos_dev
+      # Or the undesired side only
+      total = solution.get_total_deviation("my_goal")
 
 4. **Report Goal Achievement Clearly**
 

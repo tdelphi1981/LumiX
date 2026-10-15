@@ -77,7 +77,8 @@ Open/close decisions using binary variables:
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 119-124
+   :start-after: # [docs:open-variables]
+   :end-before: # [docs:open-variables-end]
    :dedent: 4
 
 **Key Points**:
@@ -93,7 +94,8 @@ Multi-indexed shipping quantities:
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 128-136
+   :start-after: # [docs:ship-variables]
+   :end-before: # [docs:ship-variables-end]
    :dedent: 4
 
 The flow variables are indexed by (Warehouse, Customer) pairs using cartesian product.
@@ -105,7 +107,8 @@ One-time costs paid if a facility is opened:
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 142-146
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 The objective combines fixed costs (binary variables) and variable costs (continuous variables).
@@ -117,7 +120,8 @@ Enforce "can only ship if open" using Big-M formulation:
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 186-205
+   :start-after: # [docs:bigm-constraint]
+   :end-before: # [docs:bigm-constraint-end]
    :dedent: 4
 
 **Big-M Logic**:
@@ -134,7 +138,8 @@ Conditional capacity constraints:
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 168-182
+   :start-after: # [docs:capacity-constraint]
+   :end-before: # [docs:capacity-constraint-end]
    :dedent: 4
 
 This ensures: :math:`\sum_c \text{ship}_{w,c} \leq \text{capacity}_w \cdot \text{open}_w`.
@@ -206,7 +211,8 @@ Step 1: Create Binary Opening Variables
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 119-124
+   :start-after: # [docs:open-variables]
+   :end-before: # [docs:open-variables-end]
    :dedent: 4
 
 Step 2: Create Continuous Shipping Variables
@@ -214,7 +220,8 @@ Step 2: Create Continuous Shipping Variables
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 128-136
+   :start-after: # [docs:ship-variables]
+   :end-before: # [docs:ship-variables-end]
    :dedent: 4
 
 Step 3: Set Objective (Fixed + Variable Costs)
@@ -222,7 +229,8 @@ Step 3: Set Objective (Fixed + Variable Costs)
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 142-147
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 Step 4: Add Demand Constraints
@@ -230,7 +238,8 @@ Step 4: Add Demand Constraints
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 150-162
+   :start-after: # [docs:demand-constraint]
+   :end-before: # [docs:demand-constraint-end]
    :dedent: 4
 
 Step 5: Add Capacity Constraints
@@ -238,7 +247,8 @@ Step 5: Add Capacity Constraints
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 165-182
+   :start-after: # [docs:capacity-constraint]
+   :end-before: # [docs:capacity-constraint-end]
    :dedent: 4
 
 Step 6: Add Big-M Constraints
@@ -246,7 +256,8 @@ Step 6: Add Big-M Constraints
 
 .. literalinclude:: ../../../examples/03_facility_location/facility_location.py
    :language: python
-   :lines: 186-205
+   :start-after: # [docs:bigm-constraint]
+   :end-before: # [docs:bigm-constraint-end]
    :dedent: 4
 
 Step 7: Solve and Access Solution
@@ -321,11 +332,12 @@ Pattern 2: Big-M Constraint
                .add_multi_term(
                    ship,
                    coeff=lambda w, c: 1.0,
-                   where=lambda w, c: w.id == warehouse.id and c.id == customer.id
+                   # wh=..., cu=... bind this loop's warehouse and customer
+                   where=lambda w, c, wh=warehouse, cu=customer: w.id == wh.id and c.id == cu.id
                )
                .add_term(
                    open_var,
-                   coeff=lambda w: -BIG_M if w.id == warehouse.id else 0
+                   coeff=lambda w, wh=warehouse: -BIG_M if w.id == wh.id else 0
                )
            )
            model.add_constraint(
@@ -362,7 +374,7 @@ Pattern 4: Demand Satisfaction
        demand_expr = LXLinearExpression().add_multi_term(
            flow,
            coeff=lambda src, dst: 1.0,
-           where=lambda src, dst: dst.id == customer.id
+           where=lambda src, dst, cust=customer: dst.id == cust.id
        )
        model.add_constraint(
            LXConstraint(f"demand_{customer.id}")

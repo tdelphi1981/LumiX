@@ -2,12 +2,15 @@
 
 import itertools
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, List, Optional, Tuple, Type, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, List, Optional, Tuple, Type, TypeVar
 
 from typing_extensions import Self
 
 from ..indexing import LXCartesianProduct, LXIndexDimension
 from .enums import LXVarType
+
+if TYPE_CHECKING:
+    from .expressions import LXLinearExpression
 
 TModel = TypeVar("TModel")
 TValue = TypeVar("TValue", int, float)
@@ -89,31 +92,22 @@ class LXVariable(Generic[TModel, TValue]):
     _cartesian: Optional[LXCartesianProduct] = None
     _multi_cost_func: Optional[Callable[..., float]] = None
     _join_config: Optional[dict] = None
+    _multi_filter: Optional[Callable[..., bool]] = None
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+        """Copy the family structure; share data instances and callables.
 
-        This method enables what-if analysis on variables using ORM data sources by:
-        1. Materializing lazy-loaded ORM data before copying
-        2. Detaching ORM objects from database sessions
-        3. Safely copying lambda functions (index_func, cost_func, filters, etc.)
-        4. Deep copying cartesian products and join configurations
+        Data instances (plain objects and ORM objects alike) and callables are shared
+        with the original, so closures and identity checks behave the same in the copy.
+        An ORM-backed source is materialized once (its query runs at copy time).
 
         Args:
             memo: Dictionary for tracking circular references during deepcopy
 
-        Returns:
-            Deep copy of this variable with all ORM dependencies resolved
-
-        Note:
-            After copying, the new variable will have _session=None and all data
-            stored in _data as detached objects safe for pickling.
+        .. versionchanged:: 0.3.0
+           Instances are shared instead of deep-copied/detached (catalog A23, B15).
         """
         from copy import deepcopy
-        from ..utils.copy_utils import (
-            materialize_and_detach_list,
-            copy_function_detaching_closure
-        )
 
         # Create new instance without calling __init__
         cls = self.__class__
@@ -127,34 +121,19 @@ class LXVariable(Generic[TModel, TValue]):
         result.upper_bound = self.upper_bound
         result.model_type = self.model_type
 
-        # Copy callable attributes - may have closures capturing ORM objects
-        result.index_func = (
-            copy_function_detaching_closure(self.index_func, memo)
-            if self.index_func is not None
-            else None
-        )
-        result.cost_func = (
-            copy_function_detaching_closure(self.cost_func, memo)
-            if self.cost_func is not None
-            else None
-        )
-        result._filter = (
-            copy_function_detaching_closure(self._filter, memo)
-            if self._filter is not None
-            else None
-        )
-        result._multi_cost_func = (
-            copy_function_detaching_closure(self._multi_cost_func, memo)
-            if self._multi_cost_func is not None
-            else None
-        )
+        # Callables are shared, not copied: closures keep seeing the user's own objects.
+        result.index_func = self.index_func
+        result.cost_func = self.cost_func
+        result._filter = self._filter
+        result._multi_filter = self._multi_filter
+        result._multi_cost_func = self._multi_cost_func
 
         # Handle data sources
         if self._session is not None:
-            # Materialize ORM data before copying
+            # Materialize the ORM query once; the instances themselves are shared
             try:
                 instances = self.get_instances()
-                result._data = materialize_and_detach_list(instances, memo)
+                result._data = list(instances)
             except Exception as e:
                 import warnings
                 warnings.warn(
@@ -165,8 +144,8 @@ class LXVariable(Generic[TModel, TValue]):
                 result._data = []
             result._session = None
         elif self._data is not None:
-            # Already have data - just detach and copy
-            result._data = materialize_and_detach_list(self._data, memo)
+            # Data instances are shared (never copied or detached)
+            result._data = list(self._data)
             result._session = None
         else:
             result._data = None
@@ -184,12 +163,8 @@ class LXVariable(Generic[TModel, TValue]):
             result._join_config = {}
             result._join_config['primary'] = self._join_config['primary']
             result._join_config['related'] = self._join_config['related']
-            result._join_config['join_func'] = copy_function_detaching_closure(
-                self._join_config['join_func'], memo
-            )
-            result._join_config['key_func'] = copy_function_detaching_closure(
-                self._join_config['key_func'], memo
-            )
+            result._join_config['join_func'] = self._join_config['join_func']
+            result._join_config['key_func'] = self._join_config['key_func']
         else:
             result._join_config = None
 
@@ -250,7 +225,19 @@ class LXVariable(Generic[TModel, TValue]):
 
         Returns:
             Self for chaining
+
+        Raises:
+            TypeError: If a bound is a function. Bounds apply to the whole family; for
+                per-instance bounds add an indexed constraint
+                (``LXConstraint("cap").expression(...).le().rhs(lambda p: p.capacity)``).
         """
+        for value in (lower, upper):
+            if callable(value):
+                raise TypeError(
+                    f"Variable '{self.name}': bounds are numbers for the whole family; "
+                    "per-instance bounds are not supported. Add an indexed constraint "
+                    "instead, e.g. LXConstraint(...).expression(LXLinearExpression()"
+                    ".add_term(var, 1)).le().rhs(lambda item: item.capacity)")
         self.lower_bound = lower
         self.upper_bound = upper
         return self
@@ -293,44 +280,65 @@ class LXVariable(Generic[TModel, TValue]):
         """
         Get the data instances for this variable family.
 
+        ``where()`` filters every instance (for ``indexed_by_product`` the tuple of
+        dimension instances; for ``indexed_by_join`` the primary record) and
+        ``where_multi()`` filters product and join combinations with one argument
+        per part, whatever the order of the calls.
+
         Returns:
             List of model instances
 
         Raises:
             ValueError: If no data source configured
         """
-        # If data provided directly, use it
-        if self._data is not None:
-            instances = self._data
-        # If ORM model configured, query it
-        elif self.model_type is not None and self._session is not None:
-            from ..utils.orm import LXTypedQuery
-            query = LXTypedQuery(self._session, self.model_type)
-            instances = query.all()
-        # If Cartesian product, get from dimensions
-        elif self._cartesian is not None:
-            # Get instances from each dimension
+        if self._cartesian is not None:
             dimension_instances = [dim.get_instances() for dim in self._cartesian.dimensions]
-
-            # Generate cartesian product of all dimensions
-            combinations = list(itertools.product(*dimension_instances))
-
-            # Apply cross-filter if present
+            instances = list(itertools.product(*dimension_instances))
             if self._cartesian._cross_filter is not None:
-                combinations = [combo for combo in combinations if self._cartesian._cross_filter(*combo)]
-
-            return combinations
+                instances = [c for c in instances if self._cartesian._cross_filter(*c)]
         else:
-            raise ValueError(
-                f"Variable '{self.name}' has no data source. "
-                "Use .from_data(data) or .from_model(Model, session)"
-            )
-
-        # Apply filter if present
-        if self._filter is not None:
-            instances = [inst for inst in instances if self._filter(inst)]
-
+            if self._data is not None:
+                instances = list(self._data)
+            elif self.model_type is not None and self._session is not None:
+                from ..utils.orm import LXTypedQuery
+                instances = LXTypedQuery(self._session, self.model_type).all()
+            else:
+                raise ValueError(
+                    f"Variable '{self.name}' has no data source. "
+                    "Use .from_data(data) or .from_model(Model, session)"
+                )
+            if self._join_config is not None:
+                if self._filter is not None:            # where() filters primary records
+                    instances = [p for p in instances if self._filter(p)]
+                join = self._join_config["join_func"]
+                instances = [(p, r) for p in instances for r in join(p)]
+        if self._multi_filter is not None:
+            if not self.is_multi_indexed:
+                raise ValueError(
+                    f"Variable '{self.name}': where_multi() filters the parts of a "
+                    "multi-index (indexed_by_product / indexed_by_join); use where() "
+                    "on a single index")
+            instances = [i for i in instances if self._multi_filter(*i)]
+        if self._filter is not None and self._join_config is None:
+            instances = [i for i in instances if self._filter(i)]
         return instances
+
+    @property
+    def is_scalar(self) -> bool:
+        """True for a single variable without a data source (no ``from_data``,
+        ``from_model``, ``indexed_by``, ``indexed_by_product`` or join); it has one
+        instance, ``None``, and its solution value is a number, not a dict."""
+        return (self._data is None and self._session is None and self.model_type is None
+                and self._cartesian is None and self._join_config is None
+                and self.index_func is None)
+
+    @property
+    def is_multi_indexed(self) -> bool:
+        """True when instances are tuples of one model per dimension
+        (``indexed_by_product``); coefficients and filters then receive one
+        argument per dimension."""
+        return self.index_func is None and (self._cartesian is not None
+                                            or self._join_config is not None)
 
     def index_key(self, instance: Any) -> Any:
         """
@@ -351,6 +359,8 @@ class LXVariable(Generic[TModel, TValue]):
         """
         if self.index_func is not None:
             return self.index_func(instance)
+        if self._join_config is not None:
+            return self._join_config["key_func"](*instance)
         if self._cartesian is not None and isinstance(instance, tuple):
             return tuple(
                 dim.key_func(part)
@@ -419,6 +429,12 @@ class LXVariable(Generic[TModel, TValue]):
         Index by a relationship/join between models.
         Only creates variables where relationship exists (sparse).
 
+        The primary records come from ``from_data(...)`` or ``from_model(...)``;
+        instances are ``(primary, related)`` pairs for every ``related`` in
+        ``join_func(primary)``, keyed by ``key_func(primary, related)``. Coefficients
+        and ``where_multi`` filters receive the two records as two arguments;
+        ``where()`` filters the primary records.
+
         Args:
             primary: Primary model type
             related: Related model type
@@ -438,6 +454,7 @@ class LXVariable(Generic[TModel, TValue]):
                     join_func=lambda d: d.qualified_routes,  # ORM relationship
                     key_func=lambda d, r: (d.id, r.id)
                 )
+                .from_data(drivers)
         """
         self._join_config = {
             "primary": primary,
@@ -457,11 +474,32 @@ class LXVariable(Generic[TModel, TValue]):
         Returns:
             Self for chaining
 
+        On an ``indexed_by_product`` / join family the function may take one
+        argument per part, like :meth:`cost_multi`.
+
         Example:
             .cost(lambda product: product.unit_cost)
+
+        .. versionchanged:: 0.3.0
+           Accepts one argument per part on multi-index families.
         """
         self.cost_func = func
         return self
+
+    def cost_expression(self) -> Optional["LXLinearExpression"]:
+        """The objective contribution defined by ``cost()`` / ``cost_multi()``:
+        ``sum(cost(instance) * self[instance])``, or ``None`` without a cost.
+
+        .. versionadded:: 0.3.0
+        """
+        from .expressions import LXLinearExpression, call_arity
+        if self._multi_cost_func is not None:
+            return LXLinearExpression().add_multi_term(self, coeff=self._multi_cost_func)
+        if self.cost_func is not None:
+            if self.is_multi_indexed and call_arity(self.cost_func) > 1:
+                return LXLinearExpression().add_multi_term(self, coeff=self.cost_func)
+            return LXLinearExpression().add_term(self, self.cost_func)
+        return None
 
     def cost_multi(self, func: Callable[..., float]) -> Self:
         """
@@ -513,8 +551,7 @@ class LXVariable(Generic[TModel, TValue]):
                 date.weekday() not in driver.days_off
             )
         """
-        if self._cartesian:
-            self._cartesian.where(predicate)
+        self._multi_filter = predicate
         return self
 
 

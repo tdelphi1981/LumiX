@@ -120,6 +120,7 @@ def build_timetabling_model_with_goals(session) -> LXModel:
     model = LXModel("high_school_timetabling_goals")
     model.add_variable(assignment)
 
+    # [docs:data-counts]
     # Report data counts (query count only, not loading into memory)
     print(f"  Loaded {session.query(Teacher).count()} teachers")
     print(f"  Loaded {session.query(Classroom).count()} classrooms")
@@ -127,6 +128,7 @@ def build_timetabling_model_with_goals(session) -> LXModel:
     print(f"  Loaded {session.query(Lecture).count()} lectures")
     print(f"  Loaded {session.query(TimeSlot).count()} timeslots")
     print(f"  Loaded {session.query(TeacherPreference).count()} teacher preferences")
+    # [docs:data-counts-end]
 
     # ========== HARD CONSTRAINTS (same as Steps 1 & 2) ==========
 
@@ -228,6 +230,7 @@ def build_timetabling_model_with_goals(session) -> LXModel:
         teacher_name = teacher.name
 
         if pref.preference_type == "DAY_OFF":
+            # [docs:day-off-goal]
             # Goal: Minimize assignments on the preferred day off
             # Get all timeslots for the specified day using ORM filtering
             day_timeslot_ids = [
@@ -260,12 +263,14 @@ def build_timetabling_model_with_goals(session) -> LXModel:
                 .rhs(0)  # Target: 0 assignments on this day
                 .as_goal(priority=priority, weight=1.0)
             )
+            # [docs:day-off-goal-end]
 
             print(
                 f"    [P{priority}] {teacher_name}: wants {day_name} off (goal: 0 lectures)"
             )
 
         elif pref.preference_type == "SPECIFIC_TIME":
+            # [docs:specific-time-goal]
             # Goal: Assign specific lecture to specific timeslot
             # Expression: sum of assignments for this lecture at this timeslot (across all classrooms)
             expr = LXLinearExpression().add_multi_term(
@@ -286,6 +291,7 @@ def build_timetabling_model_with_goals(session) -> LXModel:
                 .rhs(1)  # Target: exactly 1 (assigned to this timeslot)
                 .as_goal(priority=priority, weight=1.0)
             )
+            # [docs:specific-time-goal-end]
 
             # Query lecture and timeslot using ORM
             lecture = session.query(Lecture).filter_by(id=pref.lecture_id).first()
@@ -297,8 +303,10 @@ def build_timetabling_model_with_goals(session) -> LXModel:
                     f"    [P{priority}] {teacher_name}: wants {subject_name} {class_name} on {timeslot.day_name} Period {timeslot.period}"
                 )
 
+    # [docs:goal-mode]
     # Set goal programming mode
     model.set_goal_mode("weighted")
+    # [docs:goal-mode-end]
 
     print(f"\nModel built successfully!")
     print(f"  Hard constraints: {len([c for c in model.constraints if not c.is_goal()])}")
@@ -322,6 +330,7 @@ def analyze_goal_satisfaction(solution, session):
     print("GOAL SATISFACTION ANALYSIS")
     print(f"{'=' * 80}")
 
+    # [docs:goal-satisfaction-check]
     # Group preferences by priority
     priority_groups = {1: [], 2: [], 3: []}
 
@@ -358,6 +367,7 @@ def analyze_goal_satisfaction(solution, session):
             )
         except Exception as e:
             print(f"  Warning: Could not analyze goal {goal_name}: {e}")
+    # [docs:goal-satisfaction-check-end]
 
     # Display by priority
     for priority in [1, 2, 3]:

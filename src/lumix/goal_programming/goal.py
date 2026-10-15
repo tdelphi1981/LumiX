@@ -52,6 +52,13 @@ class LXGoalMetadata:
                 # expr == rhs: both deviations are undesired
                 self.undesired_deviations = {"pos", "neg"}
 
+    def update_sense(self, sense: LXConstraintSense) -> None:
+        """Use the constraint's current sense; ``as_goal()`` may come before ``.ge()``."""
+        if sense != self.constraint_sense:
+            self.constraint_sense = sense
+            self.undesired_deviations = set()
+            self.__post_init__()
+
     def is_custom_objective(self) -> bool:
         """Check if this is a custom objective term (priority 0)."""
         return self.priority == 0
@@ -175,10 +182,26 @@ def priority_to_weight(priority: int, base: float = 10.0, exponent_offset: int =
     return base ** (exponent_offset - priority + 1)
 
 
+@dataclass(frozen=True)
+class LXGoalStage:
+    """One solve of sequential goal programming: the priority it optimized (0 for the
+    final objective: the model's own objective and the priority-0 goals), the
+    optimal value of that stage (None when the stage has no feasible solution) and the
+    solver status.
+
+    .. versionadded:: 0.3.0
+    """
+
+    priority: int
+    objective_value: Optional[float]
+    status: str
+
+
 __all__ = [
     "LXGoalMode",
     "LXGoalMetadata",
     "LXGoal",
+    "LXGoalStage",
     "get_deviation_var_name",
     "priority_to_weight",
 ]

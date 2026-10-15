@@ -49,10 +49,12 @@ Module Structure
 
 **Key modules**:
 
-- ``goal.py``: Data structures (LXGoal, LXGoalMetadata, LXGoalMode)
+- ``goal.py``: Data structures (LXGoal, LXGoalMetadata, LXGoalMode, LXGoalStage)
 - ``relaxation.py``: Constraint relaxation and deviation variable creation
 - ``objective_builder.py``: Objective function construction
 - ``solver.py``: Sequential solving orchestration
+- ``view.py``: ``goal_form(model)``, the model with its goals relaxed on a shallow copy
+  (used by ``LXOptimizer.solve`` and ``LXModel.to_canonical``)
 
 Component Architecture
 ----------------------
@@ -94,7 +96,10 @@ goal.py: Metadata and Data Structures
 - **Automatic deviation determination**: ``__post_init__`` automatically sets ``undesired_deviations``
   based on ``constraint_sense`` (LE → pos, GE → neg, EQ → both)
 
-- **Priority 0 for custom objectives**: Allows mixing traditional objectives with goal programming
+- **Priority 0 for custom objectives**: Allows mixing traditional objectives with goal programming.
+  Priority 0 goals are not relaxed: they are objective terms (``.ge()`` maximizes the
+  expression, ``.le()`` minimizes it) combined with the model's own objective by
+  ``final_objective()``, which is optimized after all goals
 
 relaxation.py: Constraint Transformation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -172,14 +177,18 @@ objective_builder.py: Objective Construction
                           exponent_offset: int = 6) -> float:
        if priority == 0:
            return 1.0  # Custom objectives
-       return base ** (exponent_offset - priority)
+       return base ** (exponent_offset - priority + 1)
 
 **Design decisions**:
 
 - **Exponential scaling**: Ensures higher priorities dominate lower priorities
 - **Configurable base**: Allow custom weight scaling if needed
-- **Priority 0 handling**: Custom objectives use weight 1.0 (no scaling)
-- **Sequential excludes priority 0**: Custom objectives handled separately
+- **Priority 0 handling**: Priority 0 goals and the model's own objective form the
+  final objective (``final_objective()``); in weighted mode it is added with weight
+  1.0 (no scaling)
+- **Builders skip priority 0**: ``build_weighted_objective`` and
+  ``build_sequential_objectives`` only use goals of priority 1 or lower; in sequential
+  mode the final objective is the last stage
 
 solver.py: Orchestration
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -194,15 +203,15 @@ solver.py: Orchestration
 
        def solve_sequential(
            self, model: LXModel[TModel],
-           relaxed_constraints: List[RelaxedConstraint[TModel]],
+           relaxed_constraints: Optional[List[RelaxedConstraint[TModel]]] = None,
            **solver_params
        ) -> LXSolution[TModel]:
            """
            Solve one priority at a time:
            1. Optimize priority 1
-           2. Fix priority 1 deviations
+           2. Bound priority 1 by its optimum
            3. Optimize priority 2
-           4. Repeat
+           4. Repeat, then solve the final objective
            """
 
        def solve_weighted(
@@ -213,19 +222,28 @@ solver.py: Orchestration
 
 **Sequential solving algorithm**:
 
-1. Build objectives for each priority level
-2. For each priority (sorted):
+1. Relax the goals on a copy of the model (``goal_form``) and build objectives for
+   each priority level
+2. For each priority (sorted), on a shallow copy of the relaxed model:
    a. Set objective for current priority
-   b. Solve
-   c. Record optimal deviation values
-   d. Fix deviations as constraints (conceptually; currently via large weights)
-3. Return final solution
+   b. Solve (``LXOptimizer._solve_once``) and record an ``LXGoalStage``
+   c. Stop if the stage is not optimal (warning on the module logger)
+   d. Add the bound ``objective_p <= z_p* + SEQUENTIAL_TOLERANCE * max(1, |z_p*|)``
+3. Solve the final objective (model objective and priority 0 goals), if any, as
+   stage priority 0
+4. Return the last solution with ``goal_stages`` and goal deviations
 
 **Design decisions**:
 
+- **Automatic relaxation**: ``LXOptimizer.solve`` calls ``goal_form(model)`` and
+  dispatches on ``model.goal_mode``; the user's model is not changed, so the mode can
+  change between solves. ``prepare_goal_programming()`` relaxes in place and remains
+  available for inspection
 - **Weighted mode pass-through**: Weighted mode is handled in LXModel, solver just calls optimizer
 - **Sequential mode complexity**: Sequential mode requires multiple solve iterations
-- **Deviation fixing**: Currently uses implicit fixing via weight dominance
+- **Stage bounds**: Each solved priority is bounded by its optimum with an explicit
+  constraint; ``SEQUENTIAL_TOLERANCE`` defaults to 0 (exact bound, the solver's
+  feasibility tolerance absorbs rounding)
 
 Data Flow
 ---------
@@ -250,7 +268,10 @@ Model Building Phase
        Model->>Relaxation: relax_constraint()
        Relaxation-->>Model: RelaxedConstraint
 
-**Key point**: Relaxation happens when model is being prepared for solving, not during constraint definition.
+**Key point**: Relaxation happens when the model is solved or converted with
+``to_canonical()``, on a shallow copy of the model (``goal_form``), not during
+constraint definition. ``prepare_goal_programming()`` performs the same relaxation in
+place.
 
 Solving Phase (Weighted)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -288,11 +309,12 @@ Solving Phase (Sequential)
            Solver->>Model: Set objective = obj_p
            Solver->>Optimizer: solve(model)
            Optimizer-->>Solver: Solution at priority p
-           Solver->>Solver: Record deviation values
-           Note over Solver: Fix deviations for next priority
+           Solver->>Solver: Record LXGoalStage
+           Note over Solver: Bound obj_p by its optimum for next priority
        end
 
-       Solver-->>Solver: Return final solution
+       Solver->>Optimizer: solve final objective (priority 0)
+       Solver-->>Solver: Return final solution with goal_stages
 
 Type System
 -----------
@@ -427,7 +449,8 @@ Computational Complexity
 
 **Weighted mode**: O(1) solves (single optimization)
 
-**Sequential mode**: O(P) solves where P = number of priority levels
+**Sequential mode**: O(P) solves where P = number of priority levels (plus one for
+the final objective)
 
 **Trade-off**:
 

@@ -25,6 +25,7 @@
    .. autosummary::
    
       ~LXQuadraticTerm.coefficient
+      ~LXQuadraticTerm.diagonal
       ~LXQuadraticTerm.var1
       ~LXQuadraticTerm.var2
    

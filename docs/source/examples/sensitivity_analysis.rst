@@ -52,7 +52,9 @@ Analyze marginal value of constraints:
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 133-143
+   :start-after: # [docs:constraint-sensitivity]
+   :end-before: # [docs:constraint-sensitivity-end]
+   :dedent: 4
 
 **Interpretation**:
 
@@ -67,7 +69,8 @@ Find constraints limiting profitability:
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 164-174
+   :start-after: # [docs:bottlenecks]
+   :end-before: # [docs:bottlenecks-end]
    :dedent: 4
 
 Bottlenecks are binding constraints with significant shadow prices.
@@ -79,7 +82,8 @@ Rank constraints by sensitivity:
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 181-188
+   :start-after: # [docs:top-constraints]
+   :end-before: # [docs:top-constraints-end]
    :dedent: 4
 
 Prioritize relaxing constraints with highest shadow prices.
@@ -91,7 +95,9 @@ Analyze variable opportunity costs:
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 198-203
+   :start-after: # [docs:variable-sensitivity]
+   :end-before: # [docs:variable-sensitivity-end]
+   :dedent: 4
 
 **Interpretation**:
 
@@ -175,7 +181,8 @@ Step 1: Solve Model with Sensitivity Enabled
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 106-109
+   :start-after: # [docs:solve-with-sensitivity]
+   :end-before: # [docs:solve-with-sensitivity-end]
    :dedent: 4
 
 **Note**: ``.enable_sensitivity()`` requests dual values from solver.
@@ -185,7 +192,8 @@ Step 2: Create Sensitivity Analyzer
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 112
+   :start-after: # [docs:create-analyzer]
+   :end-before: # [docs:create-analyzer-end]
    :dedent: 4
 
 Step 3: Analyze Individual Constraints
@@ -193,7 +201,8 @@ Step 3: Analyze Individual Constraints
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 131-143
+   :start-after: # [docs:constraint-sensitivity]
+   :end-before: # [docs:constraint-sensitivity-end]
    :dedent: 4
 
 Step 4: Identify Bottlenecks
@@ -201,7 +210,8 @@ Step 4: Identify Bottlenecks
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 160-174
+   :start-after: # [docs:bottlenecks]
+   :end-before: # [docs:bottlenecks-end]
    :dedent: 4
 
 Step 5: Generate Business Insights
@@ -209,7 +219,8 @@ Step 5: Generate Business Insights
 
 .. literalinclude:: ../../../examples/09_sensitivity_analysis/sensitivity_analysis.py
    :language: python
-   :lines: 249-265
+   :start-after: # [docs:investment-priorities]
+   :end-before: # [docs:investment-priorities-end]
    :dedent: 4
 
 Learning Objectives
@@ -232,12 +243,31 @@ Pattern 1: Constraint Sensitivity Check
 
 .. code-block:: python
 
+   # A scalar constraint, or one row of an indexed family: "min_production[Widget A]"
    sens = analyzer.analyze_constraint("constraint_name")
 
    if sens.is_binding:
        print(f"Bottleneck: ${sens.shadow_price:.2f} per unit")
    else:
        print(f"Has slack: {sens.slack:.2f} units available")
+
+Pattern 1b: Indexed Families
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+``min_production`` is indexed by product, so it has one row (and one shadow price) per
+product. ``production`` has one value and one reduced cost per product:
+
+.. code-block:: python
+
+   for key, sens in analyzer.analyze_constraint_family("min_production").items():
+       print(f"min_production[{key}]: shadow price {sens.shadow_price}")
+
+   for key, sens in analyzer.analyze_variable_family("production").items():
+       print(f"production[{key}]: {sens.value:.1f} (reduced cost {sens.reduced_cost})")
+
+   # Passing a family name to analyze_constraint / analyze_variable raises ValueError
 
 Pattern 2: Investment Decision
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

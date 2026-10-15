@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import time
+from fractions import Fraction
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
@@ -12,9 +14,7 @@ except ImportError:
 
 from ..core.constraints import LXConstraint
 from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
-from ..core.expressions import LXLinearExpression
 from ..core.model import LXModel
-from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
 from ..utils.rational import LXRationalConverter
 from .base import LXSolverInterface
@@ -56,6 +56,13 @@ class LXCPSATSolver(LXSolverInterface):
     - Symmetry breaking
     """
 
+    #: Bound used for an open variable bound (CP-SAT domains must stay well inside int64).
+    OPEN_BOUND = 2**40
+    #: Largest integer coefficient or right-hand side passed to CP-SAT.
+    INT_LIMIT = 2**62
+    #: An open bound B of a variable keeps abs(coefficient) * row length * B below this.
+    ROW_BUDGET = 2**60
+
     def __init__(
         self,
         enable_rational_conversion: bool = False,
@@ -86,95 +93,191 @@ class LXCPSATSolver(LXSolverInterface):
         self._variable_map: Dict[str, Union[Any, Dict[Any, Any]]] = {}
         self._constraint_list: List[Any] = []
         self._rational_converter = LXRationalConverter(max_denominator=rational_max_denom)
-        self._scale_objective = scale_objective
-        self._objective_scale: int = 1
-
-        # Rational conversion enables auto-scaling for continuous variables
         self._enable_rational_conversion = enable_rational_conversion
         self._scaling_factor = scaling_factor
-        self._scaled_variables: set = set()  # Names of variables that were scaled
-        self._variable_scales: Dict[str, int] = {}  # Variable name -> scale factor
-        self._objective_has_scaled_vars: bool = False  # Track if objective needs de-scaling
-        self._objective_coeff_scale: int = 1  # Coefficient scale from rational conversion
+        self._max_denom = rational_max_denom
+        self._scale_objective = scale_objective   # kept for API compatibility; no effect since 0.3.0
+        self._handles: List[Any] = []
+        self._scales: List[int] = []
+        self._open: List[int] = []
+        self._objective_scale = 1
+        self._objective_constant = 0.0
+        self._has_objective = False
+        self._approximate = False
+        self._approximation_error = 0.0
+        self._relax_grid = 0          # equalities on scaled continuous variables as bands
+        self._grid_relaxed = False
 
     def build_model(self, model: LXModel) -> cp_model.CpModel:
-        """
-        Build CP-SAT native model from LXModel.
+        """Build a CP-SAT model from the canonical form of ``model``. Every row and
+        the objective are scaled to integers exactly (see ``_integer_row``)."""
+        canon = self._canonicalize(model)
+        self._approximation_error = 0.0
+        continuous = sorted({v.family for v in canon.variables
+                             if v.var_type == LXVarType.CONTINUOUS})
+        if continuous and not self._enable_rational_conversion:
+            raise ValueError(
+                f"CP-SAT does not support continuous variables. "
+                f"Found continuous variables: {', '.join(continuous)}.\n"
+                f"Options:\n"
+                f"  1. Use integer/binary variables only\n"
+                f"  2. Switch to 'ortools', 'gurobi', or 'cplex' solvers\n"
+                f"  3. Enable rational conversion: optimizer.enable_rational_conversion()\n"
+                f"     This will scale continuous variables to integers and de-scale solutions."
+            )
+        if continuous:
+            self._log_scaling_warning(continuous)
 
-        Args:
-            model: LumiX model to build
-
-        Returns:
-            CP-SAT CpModel instance
-
-        Raises:
-            ValueError: If model contains continuous variables or unsupported features
-        """
-        # Check for continuous variables (not supported by CP-SAT)
-        continuous_vars = [
-            var.name for var in model.variables
-            if var.var_type == LXVarType.CONTINUOUS
-        ]
-        if continuous_vars:
-            if not self._enable_rational_conversion:
-                raise ValueError(
-                    f"CP-SAT does not support continuous variables. "
-                    f"Found continuous variables: {', '.join(continuous_vars)}.\n"
-                    f"Options:\n"
-                    f"  1. Use integer/binary variables only\n"
-                    f"  2. Switch to 'ortools', 'gurobi', or 'cplex' solvers\n"
-                    f"  3. Enable rational conversion: optimizer.enable_rational_conversion()\n"
-                    f"     This will scale continuous variables to integers and de-scale solutions."
-                )
-            else:
-                # Rational conversion enabled: warn and proceed with auto-scaling
-                self._log_scaling_warning(continuous_vars)
-                # Track which variables will be scaled
-                self._scaled_variables = set(continuous_vars)
-                for var_name in continuous_vars:
-                    self._variable_scales[var_name] = self._scaling_factor
-
-        # Create CP-SAT model instance
         self._model = cp_model.CpModel()
-
-        # Reset internal state
-        self._variable_map = {}
-        self._reset_instance_cache()
-        self._constraint_list = []
+        cm = self._model
+        self._scales = [self._scaling_factor if v.var_type == LXVarType.CONTINUOUS else 1
+                        for v in canon.variables]
+        # Integer rows first: open bounds are sized so that no row can overflow int64.
+        rows = [(row, *self._integer_row(row.coeffs, row.rhs, f"constraint '{row.name}'")[:2])
+                for row in canon.rows]
+        self._objective_constant = canon.objective_constant
+        self._has_objective = canon.sense is not None and bool(canon.objective)
         self._objective_scale = 1
+        objective: Dict[int, int] = {}
+        if self._has_objective:
+            objective, _, self._objective_scale = self._integer_row(
+                canon.objective, 0.0, "the objective")
+        weight = [1] * len(canon.variables)        # largest |coefficient| x row length
+        for ints in [r[1] for r in rows] + [objective]:
+            for pos, c in ints.items():
+                weight[pos] = max(weight[pos], abs(c) * len(ints))
+        self._grid_equalities = any(
+            row.sense == LXConstraintSense.EQ and any(self._scales[p] > 1 for p in ints)
+            for row, ints, _ in rows)
 
-        # Build variables
-        for lx_var in model.variables:
-            instances = lx_var.get_instances()
-
-            if not instances:
-                # Single variable (not indexed)
-                self._create_single_variable(lx_var)
+        self._handles, self._open = [], {}
+        for pos, v in enumerate(canon.variables):
+            scale = self._scales[pos]
+            open_bound = max(1, min(self.OPEN_BOUND, self.ROW_BUDGET // weight[pos]))
+            lo = self._int_bound(v.lower * scale, math.ceil, pos, open_bound)
+            hi = self._int_bound(v.upper * scale, math.floor, pos, open_bound)
+            if lo > hi:
+                raise ValueError(f"Variable '{v.name}' has no value on the CP-SAT grid "
+                                 f"1/{scale} within [{v.lower}, {v.upper}]")
+            if v.var_type == LXVarType.BINARY and (lo, hi) == (0, 1):
+                handle = cm.NewBoolVar(v.name)
             else:
-                # Variable family (indexed by data)
-                self._create_indexed_variables(lx_var, instances)
+                handle = cm.NewIntVar(lo, hi, v.name)
+            self._handles.append(handle)
+        self._variable_map = self._family_map(canon, self._handles)
 
-        # Build constraints
-        for lx_constraint in model.constraints:
-            instances = lx_constraint.get_instances()
-
-            if not instances:
-                # Single constraint
-                self._create_single_constraint(lx_constraint)
+        for row, ints, rhs in rows:
+            expr = self._expr(ints)
+            if row.sense == LXConstraintSense.LE:
+                ct = cm.Add(expr <= rhs)
+            elif row.sense == LXConstraintSense.GE:
+                ct = cm.Add(expr >= rhs)
             else:
-                # Constraint family (indexed by data)
-                self._create_indexed_constraints(lx_constraint, instances)
+                band = self._grid_band(ints, rhs) if self._relax_grid else 0
+                ct = cm.AddLinearConstraint(expr, rhs - band, rhs + band) if band else cm.Add(expr == rhs)
+            ct.with_name(row.name)
+            self._register_row(row, ct)
 
-        # Set objective
-        self._set_objective(model)
+        if self._has_objective:
+            if canon.sense == LXObjectiveSense.MAXIMIZE:
+                cm.Maximize(self._expr(objective))
+            else:
+                cm.Minimize(self._expr(objective))
 
-        return self._model
+        if self._approximation_error:
+            self.logger.logger.warning(
+                f"CP-SAT: coefficients approximated with denominators up to {self._max_denom} "
+                f"(largest relative error {self._approximation_error:.2e})")
+        problem = cm.Validate()
+        if problem:
+            raise ValueError(f"CP-SAT rejected the model: {problem}")
+        return cm
+
+    def _int_bound(self, value: float, rounding: Any, pos: int, open_bound: int) -> int:
+        if math.isfinite(value) and abs(value) <= open_bound:
+            return int(rounding(value - 1e-9 if rounding is math.ceil else value + 1e-9))
+        # open, or so large that rows could overflow: capped like an open bound
+        self._open[pos] = open_bound
+        return open_bound if value > 0 else -open_bound
+
+    def _grid_band(self, ints: Dict[int, int], rhs: int) -> int:
+        """Half-width of an equality row's band when its continuous variables live on
+        the 1/scaling_factor grid. Rounding each of them to the nearest grid point moves
+        the row by at most half the sum of their integer coefficients; a bound that is
+        itself off the grid can cost a whole step.
+
+        ``_relax_grid`` == 1 widens (by half a step) only rows with no integer solution
+        at all (the gcd of their coefficients does not divide the right-hand side);
+        == 2 widens every such row by half a step, == 3 by a whole step."""
+        total = sum(abs(c) for pos, c in ints.items() if self._scales[pos] > 1)
+        if not total:
+            return 0
+        if self._relax_grid == 1 and rhs % math.gcd(*ints.values()) == 0:
+            return 0
+        return total if self._relax_grid > 2 else (total + 1) // 2
+
+    def _expr(self, ints: Dict[int, int]) -> Any:
+        if not ints:
+            return self._model.NewConstant(0)
+        return cp_model.LinearExpr.WeightedSum([self._handles[p] for p in ints], list(ints.values()))
+
+    def _fraction(self, value: float, what: str) -> Fraction:
+        frac = Fraction(value).limit_denominator(self._max_denom)
+        if value == 0:
+            return frac
+        error = abs(float(frac) - value) / abs(value)
+        if frac != 0 and error <= 1e-9:
+            return frac
+        if self._approximate and frac != 0:
+            self._approximation_error = max(self._approximation_error, error)
+            return frac
+        raise ValueError(
+            f"CP-SAT cannot represent {value!r} in {what} with denominators up to "
+            f"{self._max_denom}; pass approximate_coefficients=True to solve() or "
+            "use_solver('cpsat', ...) to accept an approximation, raise "
+            "enable_rational_conversion(max_denom=...), or use a linear solver "
+            "('ortools', 'gurobi', 'cplex', 'glpk')"
+        )
+
+    def _integer_row(self, coeffs: Dict[int, float], rhs: float,
+                     what: str) -> Tuple[Dict[int, int], int, int]:
+        """Exact integer form of ``sum(c * x) <sense> rhs`` on the CP-SAT variables
+        (``x_cpsat = x * scale``): every value becomes a fraction and the row is
+        multiplied by the LCM of the denominators, right-hand side included."""
+        fracs = {pos: self._fraction(c, what) / self._scales[pos] for pos, c in coeffs.items()}
+        rhs_frac = self._fraction(rhs, what)
+        scale = math.lcm(rhs_frac.denominator, *(f.denominator for f in fracs.values()))
+        ints = {pos: int(f * scale) for pos, f in fracs.items()}
+        rhs_int = int(rhs_frac * scale)
+        if max(map(abs, [rhs_int, *ints.values()])) <= self.INT_LIMIT:
+            return ints, rhs_int, scale
+        if not self._approximate:
+            raise ValueError(
+                f"CP-SAT needs a common denominator of {scale} for {what}, which puts its "
+                "integer coefficients beyond the 64-bit range; pass approximate_coefficients=True "
+                "to solve() or use_solver('cpsat', ...) to accept an approximation, or use a "
+                "linear solver ('ortools', 'gurobi', 'cplex', 'glpk')"
+            )
+        # Approximate: a power-of-ten scale that keeps the largest value near 2**40.
+        biggest = float(max(map(abs, [rhs_frac, *fracs.values()])))
+        scale = 10 ** max(0, math.floor(math.log10(2**40 / biggest)))
+        ints = {pos: round(f * scale) for pos, f in fracs.items()}
+        for pos, f in fracs.items():
+            if f and not ints[pos]:
+                raise ValueError(f"CP-SAT cannot represent coefficient {float(f)!r} in {what}: "
+                                 "it is too small next to the largest value of the row")
+            if f:
+                self._approximation_error = max(self._approximation_error,
+                                                abs(ints[pos] / scale - f) / abs(f))
+        return ints, round(rhs_frac * scale), scale
 
     def solve(
         self,
         model: LXModel,
         time_limit: Optional[float] = None,
         gap_tolerance: Optional[float] = None,
+        enable_sensitivity: bool = False,
+        approximate_coefficients: bool = False,
         **solver_params: Any,
     ) -> LXSolution:
         """
@@ -184,6 +287,10 @@ class LXCPSATSolver(LXSolverInterface):
             model: LumiX model to solve
             time_limit: Time limit in seconds (None = no limit)
             gap_tolerance: Relative optimality gap tolerance (None = 0.0001)
+            enable_sensitivity: Accepted for API symmetry; CP-SAT has no sensitivity data
+            approximate_coefficients: Accept coefficients that ``max_denom`` cannot
+                represent within a relative error of 1e-9, using the nearest fraction
+                (a warning reports the largest error). Default: raise ``ValueError``.
             **solver_params: Additional CP-SAT parameters
                 Examples:
                 - num_search_workers: Number of parallel workers (default: auto)
@@ -202,8 +309,10 @@ class LXCPSATSolver(LXSolverInterface):
             - Assumption-based solving
             - Multiple solutions enumeration
         """
-        # Build the model
-        cpsat_model = self.build_model(model)
+        if enable_sensitivity:
+            self.logger.logger.info("CP-SAT provides no sensitivity data")
+        self._approximate = approximate_coefficients
+        self._relax_grid, self._grid_relaxed = 0, False
 
         # Create solver instance
         solver = cp_model.CpSolver()
@@ -239,10 +348,26 @@ class LXCPSATSolver(LXSolverInterface):
                     f"Failed to set CP-SAT parameter '{param_name}': {e}"
                 )
 
-        # Solve
-        start_time = time.time()
-        status = solver.Solve(cpsat_model)
-        solve_time = time.time() - start_time
+        try:
+            cpsat_model = self.build_model(model)
+            start_time = time.time()
+            status = solver.Solve(cpsat_model)
+            if status == cp_model.INFEASIBLE and self._grid_equalities:
+                # An equality on continuous variables can miss the 1/scaling_factor grid
+                # (3x == 1). Solve again with each such equality as a band one grid step
+                # wide per variable (as CP-SAT's own MIP import does).
+                for steps in (1, 2, 3):        # rows without a grid solution, then all rows
+                    self._relax_grid = steps
+                    cpsat_model = self.build_model(model)
+                    status = solver.Solve(cpsat_model)
+                    if status != cp_model.INFEASIBLE:
+                        break
+                self._grid_relaxed = True
+            solve_time = time.time() - start_time
+            self._stopped_by_time_limit = status == cp_model.UNKNOWN and time_limit is not None
+        finally:
+            self._approximate = False
+            self._relax_grid = 0
 
         # Parse and return solution
         solution = self._parse_solution(model, solver, status, solve_time)
@@ -293,461 +418,6 @@ class LXCPSATSolver(LXSolverInterface):
         self.logger.logger.warning("╚════════════════════════════════════════════════════════════╝")
         self.logger.logger.warning("")
 
-    def _create_single_variable(self, lx_var: LXVariable) -> None:
-        """Create single CP-SAT variable (not indexed)."""
-        model = self._model
-        assert model is not None
-
-        # Get bounds (CP-SAT requires integer bounds)
-        lb = lx_var.lower_bound if lx_var.lower_bound is not None else cp_model.INT32_MIN
-        ub = lx_var.upper_bound if lx_var.upper_bound is not None else cp_model.INT32_MAX
-
-        # Create variable based on type
-        if lx_var.var_type == LXVarType.BINARY:
-            var = model.NewBoolVar(lx_var.name)
-        elif lx_var.var_type == LXVarType.INTEGER:
-            # Ensure integer bounds
-            lb = int(lb)
-            ub = int(ub)
-            var = model.NewIntVar(lb, ub, lx_var.name)
-        elif lx_var.var_type == LXVarType.CONTINUOUS:
-            if not self._enable_rational_conversion:
-                raise ValueError(
-                    f"CP-SAT does not support continuous variables. "
-                    f"Variable '{lx_var.name}' is continuous."
-                )
-            # Rational conversion enabled: auto-scale continuous to integer
-            scale = self._variable_scales.get(lx_var.name, self._scaling_factor)
-            lb_scaled = int(lb * scale) if lb != cp_model.INT32_MIN else cp_model.INT32_MIN
-            ub_scaled = int(ub * scale) if ub != cp_model.INT32_MAX else cp_model.INT32_MAX
-            var = model.NewIntVar(lb_scaled, ub_scaled, lx_var.name)
-        else:
-            raise ValueError(f"Unknown variable type: {lx_var.var_type}")
-
-        # Store in mapping
-        self._variable_map[lx_var.name] = var
-
-    def _create_indexed_variables(
-        self, lx_var: LXVariable, instances: List[Any]
-    ) -> None:
-        """Create indexed family of CP-SAT variables."""
-        model = self._model
-        assert model is not None
-
-        var_dict: Dict[Any, Any] = {}
-
-        for instance in instances:
-            # Get index for this instance
-            index_key = lx_var.index_key(instance)
-
-            # Variable name: "varname[index]"
-            var_name = f"{lx_var.name}[{index_key}]"
-
-            # Get bounds (same for all instances for now)
-            # TODO: Support per-instance bounds via bound functions
-            lb = lx_var.lower_bound if lx_var.lower_bound is not None else cp_model.INT32_MIN
-            ub = lx_var.upper_bound if lx_var.upper_bound is not None else cp_model.INT32_MAX
-
-            # Create CP-SAT variable based on type
-            if lx_var.var_type == LXVarType.BINARY:
-                var = model.NewBoolVar(var_name)
-            elif lx_var.var_type == LXVarType.INTEGER:
-                # Ensure integer bounds
-                lb = int(lb)
-                ub = int(ub)
-                var = model.NewIntVar(lb, ub, var_name)
-            elif lx_var.var_type == LXVarType.CONTINUOUS:
-                if not self._enable_rational_conversion:
-                    raise ValueError(
-                        f"CP-SAT does not support continuous variables. "
-                        f"Variable '{lx_var.name}' is continuous."
-                    )
-                # Rational conversion enabled: auto-scale continuous to integer
-                scale = self._variable_scales.get(lx_var.name, self._scaling_factor)
-                lb_scaled = int(lb * scale) if lb != cp_model.INT32_MIN else cp_model.INT32_MIN
-                ub_scaled = int(ub * scale) if ub != cp_model.INT32_MAX else cp_model.INT32_MAX
-                var = model.NewIntVar(lb_scaled, ub_scaled, var_name)
-            else:
-                raise ValueError(f"Unknown variable type: {lx_var.var_type}")
-
-            var_dict[index_key] = var
-
-        # Store dictionary in mapping
-        self._variable_map[lx_var.name] = var_dict
-
-    def _create_single_constraint(self, lx_constraint: LXConstraint) -> None:
-        """Create single CP-SAT constraint."""
-        model = self._model
-        assert model is not None
-
-        if lx_constraint.lhs is None:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
-
-        # Build linear expression with integer coefficients
-        terms, int_coeffs = self._build_expression(lx_constraint.lhs)
-
-        # Get RHS value
-        if lx_constraint.rhs_value is not None:
-            rhs = lx_constraint.rhs_value
-        elif lx_constraint.rhs_func is not None:
-            # For single constraint with rhs function, call with None
-            rhs = lx_constraint.rhs_func(None)  # type: ignore
-        else:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no RHS value")
-
-        # Scale RHS if constraint involves scaled variables
-        # Original: sum(coeff * var_cont) <= RHS
-        # Scaled: sum(coeff * var_int / scale) <= RHS
-        # Multiply both sides by scale: sum(coeff * var_int) <= RHS * scale
-        rhs_scaled = self._scale_rhs_if_needed(lx_constraint.lhs, rhs)
-
-        # Convert RHS to integer
-        if not isinstance(rhs_scaled, int):
-            rhs_scaled = int(round(rhs_scaled))
-
-        # Build linear expression
-        if not terms:
-            # Empty constraint (0 sense rhs)
-            linear_expr = 0
-        else:
-            linear_expr = sum(var * coeff for var, coeff in zip(terms, int_coeffs))
-
-        # Create constraint based on sense
-        if lx_constraint.sense == LXConstraintSense.LE:
-            ct = model.Add(linear_expr <= rhs_scaled)
-        elif lx_constraint.sense == LXConstraintSense.GE:
-            ct = model.Add(linear_expr >= rhs_scaled)
-        elif lx_constraint.sense == LXConstraintSense.EQ:
-            ct = model.Add(linear_expr == rhs_scaled)
-        else:
-            raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
-
-        # Set constraint name (for debugging). ct.Proto() returns a temporary
-        # proxy in OR-Tools 9.13+; writing through it crashes the process.
-        ct.with_name(lx_constraint.name)
-
-        self._constraint_list.append(ct)
-
-    def _create_indexed_constraints(
-        self, lx_constraint: LXConstraint, instances: List[Any]
-    ) -> None:
-        """Create indexed family of CP-SAT constraints."""
-        model = self._model
-        assert model is not None
-
-        if lx_constraint.lhs is None:
-            raise ValueError(f"Constraint '{lx_constraint.name}' has no LHS expression")
-
-        for instance in instances:
-            # Get index for naming
-            if lx_constraint.index_func is not None:
-                index_key = lx_constraint.index_func(instance)
-            else:
-                index_key = instance
-
-            # Constraint name: "constraintname[index]"
-            ct_name = f"{lx_constraint.name}[{index_key}]"
-
-            # Build expression for this instance
-            terms, int_coeffs = self._build_expression(
-                lx_constraint.lhs, constraint_instance=instance
-            )
-
-            # Get RHS value for this instance
-            if lx_constraint.rhs_value is not None:
-                rhs = lx_constraint.rhs_value
-            elif lx_constraint.rhs_func is not None:
-                rhs = lx_constraint.rhs_func(instance)
-            else:
-                raise ValueError(f"Constraint '{lx_constraint.name}' has no RHS value")
-
-            # Scale RHS if constraint involves scaled variables
-            rhs_scaled = self._scale_rhs_if_needed(lx_constraint.lhs, rhs)
-
-            # Convert RHS to integer
-            if not isinstance(rhs_scaled, int):
-                rhs_scaled = int(round(rhs_scaled))
-
-            # Build linear expression
-            if not terms:
-                # Empty constraint
-                linear_expr = 0
-            else:
-                linear_expr = sum(var * coeff for var, coeff in zip(terms, int_coeffs))
-
-            # Create constraint
-            if lx_constraint.sense == LXConstraintSense.LE:
-                ct = model.Add(linear_expr <= rhs_scaled)
-            elif lx_constraint.sense == LXConstraintSense.GE:
-                ct = model.Add(linear_expr >= rhs_scaled)
-            elif lx_constraint.sense == LXConstraintSense.EQ:
-                ct = model.Add(linear_expr == rhs_scaled)
-            else:
-                raise ValueError(f"Unknown constraint sense: {lx_constraint.sense}")
-
-            # Set constraint name (with_name: see _create_single_constraint)
-            ct.with_name(ct_name)
-
-            self._constraint_list.append(ct)
-
-    def _scale_rhs_if_needed(self, lx_expr: LXLinearExpression, rhs: float) -> float:
-        """
-        Scale RHS if expression contains scaled variables.
-
-        When variables are scaled (var_int = var_cont * scale), constraints must be adjusted:
-        Original: sum(coeff * var_cont) <= RHS
-        Scaled: sum(coeff * var_int / scale) <= RHS
-        Multiply both sides by scale: sum(coeff * var_int) <= RHS * scale
-
-        Args:
-            lx_expr: Expression to check
-            rhs: Original RHS value
-
-        Returns:
-            Scaled RHS if any variables are scaled, otherwise original RHS
-        """
-        # Check if any variables in the expression are scaled
-        has_scaled_vars = False
-
-        # Check regular terms
-        for var_name in lx_expr.terms.keys():
-            if var_name in self._scaled_variables:
-                has_scaled_vars = True
-                break
-
-        # Check multi-model terms
-        if not has_scaled_vars:
-            for lx_var, _, _ in lx_expr._multi_terms:
-                if lx_var.name in self._scaled_variables:
-                    has_scaled_vars = True
-                    break
-
-        # If any scaled variables, multiply RHS by the scale factor
-        if has_scaled_vars:
-            # Assume uniform scaling for now (all variables have same scale)
-            scale = self._scaling_factor
-            return rhs * scale
-
-        return rhs
-
-    def _build_expression(
-        self,
-        lx_expr: LXLinearExpression,
-        constraint_instance: Optional[Any] = None,
-    ) -> Tuple[List[Any], List[int]]:
-        """
-        Build CP-SAT expression from LXLinearExpression.
-
-        Converts float coefficients to integers using rational approximation.
-
-        Args:
-            lx_expr: LumiX linear expression
-            constraint_instance: Instance for indexed constraints (for multi-model coefficients)
-
-        Returns:
-            Tuple of (CP-SAT variables, integer coefficients)
-        """
-        terms: List[Any] = []
-        float_coeffs: List[float] = []
-
-        # Process regular terms
-        for var_name, (lx_var, coeff_func, where_func) in lx_expr.terms.items():
-            solver_vars = self._variable_map[var_name]
-
-            if isinstance(solver_vars, dict):
-                # Indexed variable family
-                instances, where_func = self._candidates(lx_var, where_func)
-
-                for instance in instances:
-                    # Check where clause
-                    if not where_func(instance):
-                        continue
-
-                    # Get index key
-                    index_key = lx_var.index_key(instance)
-
-                    # Get coefficient
-                    if constraint_instance is not None:
-                        try:
-                            coeff = coeff_func(instance, constraint_instance)
-                        except TypeError:
-                            coeff = coeff_func(instance)
-                    else:
-                        coeff = coeff_func(instance)
-
-                    # Note: For scaled variables, coefficients stay the same
-                    # but RHS will be scaled instead (see _create_single_constraint)
-
-                    if abs(coeff) > 1e-10:  # Skip near-zero coefficients
-                        terms.append(solver_vars[index_key])
-                        float_coeffs.append(coeff)
-            else:
-                # Single variable
-                if constraint_instance is not None:
-                    try:
-                        coeff = coeff_func(constraint_instance)
-                    except TypeError:
-                        coeff = coeff_func(None)  # type: ignore
-                else:
-                    coeff = coeff_func(None)  # type: ignore
-
-                # Note: Coefficients stay the same for scaled variables
-                # RHS will be scaled instead
-
-                if abs(coeff) > 1e-10:
-                    terms.append(solver_vars)
-                    float_coeffs.append(coeff)
-
-        # Process multi-model terms
-        for lx_var, coeff_func, where_func in lx_expr._multi_terms:
-            solver_vars = self._variable_map[lx_var.name]
-
-            if isinstance(solver_vars, dict):
-                instances, where_func = self._candidates(lx_var, where_func)
-
-                for instance in instances:
-                    # Check where clause
-                    if where_func is not None:
-                        if isinstance(instance, tuple):
-                            if not where_func(*instance):
-                                continue
-                        else:
-                            if not where_func(instance):
-                                continue
-
-                    # Get coefficient
-                    if isinstance(instance, tuple):
-                        coeff = coeff_func(*instance)
-                    else:
-                        coeff = coeff_func(instance)
-
-                    # Note: Coefficients stay the same for scaled variables
-                    # RHS will be scaled instead
-
-                    # Get index key
-                    index_key = lx_var.index_key(instance)
-
-                    if abs(coeff) > 1e-10:
-                        terms.append(solver_vars[index_key])
-                        float_coeffs.append(coeff)
-
-        # Convert float coefficients to integers
-        int_coeffs, coeff_scale = self._convert_coefficients_to_integers(float_coeffs)
-
-        return terms, int_coeffs
-
-    def _convert_coefficients_to_integers(self, coeffs: List[float]) -> Tuple[List[int], int]:
-        """
-        Convert float coefficients to integers using rational approximation.
-
-        Args:
-            coeffs: List of float coefficients
-
-        Returns:
-            Tuple of (integer coefficients, common scale factor)
-        """
-        # Check if all coefficients are already integers
-        if all(isinstance(c, int) or c.is_integer() for c in coeffs):
-            return [int(c) for c in coeffs], 1
-
-        # Use rational converter for float coefficients
-        coeff_dict = {i: c for i, c in enumerate(coeffs)}
-        int_coeff_dict, scale = self._rational_converter.convert_coefficients(coeff_dict)
-
-        # Return scaled integer coefficients and scale factor
-        return [int_coeff_dict[i] for i in range(len(coeffs))], scale
-
-    def _set_objective(self, model: LXModel) -> None:
-        """Set objective function in CP-SAT model."""
-        cpsat_model = self._model
-        assert cpsat_model is not None
-
-        if model.objective_expr is None:
-            # No objective, just feasibility
-            return
-
-        # Check if objective involves scaled variables (for later de-scaling)
-        self._objective_has_scaled_vars = False
-        if model.objective_expr:
-            # Check regular terms
-            for var_name in model.objective_expr.terms.keys():
-                if var_name in self._scaled_variables:
-                    self._objective_has_scaled_vars = True
-                    break
-            # Check multi-model terms
-            if not self._objective_has_scaled_vars:
-                for lx_var, _, _ in model.objective_expr._multi_terms:
-                    if lx_var.name in self._scaled_variables:
-                        self._objective_has_scaled_vars = True
-                        break
-
-        # Build expression - need to handle scaling manually for objective
-        terms: List[Any] = []
-        float_coeffs: List[float] = []
-
-        # Collect terms and coefficients from objective expression
-        for var_name, (lx_var, coeff_func, where_func) in model.objective_expr.terms.items():
-            solver_vars = self._variable_map[var_name]
-            if isinstance(solver_vars, dict):
-                instances, where_func = self._candidates(lx_var, where_func)
-                for instance in instances:
-                    if not where_func(instance):
-                        continue
-                    index_key = lx_var.index_key(instance)
-                    coeff = coeff_func(instance)
-                    if abs(coeff) > 1e-10:
-                        terms.append(solver_vars[index_key])
-                        float_coeffs.append(coeff)
-            else:
-                coeff = coeff_func(None)  # type: ignore
-                if abs(coeff) > 1e-10:
-                    terms.append(solver_vars)
-                    float_coeffs.append(coeff)
-
-        # Handle multi-model terms
-        for lx_var, coeff_func, where_func in model.objective_expr._multi_terms:
-            solver_vars = self._variable_map[lx_var.name]
-            if isinstance(solver_vars, dict):
-                instances, where_func = self._candidates(lx_var, where_func)
-                for instance in instances:
-                    if where_func is not None:
-                        if isinstance(instance, tuple):
-                            if not where_func(*instance):
-                                continue
-                        else:
-                            if not where_func(instance):
-                                continue
-                    if isinstance(instance, tuple):
-                        coeff = coeff_func(*instance)
-                    else:
-                        coeff = coeff_func(instance)
-                    index_key = lx_var.index_key(instance)
-                    if abs(coeff) > 1e-10:
-                        terms.append(solver_vars[index_key])
-                        float_coeffs.append(coeff)
-
-        # Convert coefficients to integers and track the scale factor
-        int_coeffs, self._objective_coeff_scale = self._convert_coefficients_to_integers(float_coeffs)
-
-        # Handle constant term (convert to integer)
-        constant = model.objective_expr.constant
-        int_constant = int(round(constant)) if constant != 0 else 0
-
-        # Build objective expression
-        if not terms:
-            # Constant objective only
-            obj_expr = int_constant
-        else:
-            obj_expr = sum(var * coeff for var, coeff in zip(terms, int_coeffs))
-            if int_constant != 0:
-                obj_expr += int_constant
-
-        # Set sense (maximize or minimize)
-        if model.objective_sense == LXObjectiveSense.MAXIMIZE:
-            cpsat_model.Maximize(obj_expr)
-        else:
-            cpsat_model.Minimize(obj_expr)
-
     def _parse_solution(
         self,
         model: LXModel,
@@ -777,85 +447,47 @@ class LXCPSATSolver(LXSolverInterface):
         }
 
         lx_status = status_map.get(status, "unknown")
-
-        # Extract objective value
-        if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-            obj_value = float(solver.ObjectiveValue())
-            # De-scale objective
-            # The objective is scaled by:
-            # 1. Variable scaling (if continuous variables): var_int = var_cont * var_scale
-            # 2. Coefficient rational conversion: coefficients multiplied by coeff_scale
-            #
-            # So: CP-SAT minimizes sum((coeff * coeff_scale) * (var_cont * var_scale))
-            #                      = coeff_scale * var_scale * sum(coeff * var_cont)
-            #
-            # To get original objective: divide by both scales
-            if self._objective_has_scaled_vars:
-                obj_value = obj_value / self._scaling_factor
-            obj_value = obj_value / self._objective_coeff_scale
-        else:
-            obj_value = 0.0
-
-        # Extract variable values
-        variables: Dict[str, Union[float, Dict[Any, float]]] = {}
-        mapped: Dict[str, Dict[Any, float]] = {}
-
-        if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-            for lx_var in model.variables:
-                solver_vars = self._variable_map[lx_var.name]
-
-                if isinstance(solver_vars, dict):
-                    # Indexed variable family
-                    var_values: Dict[Any, float] = {}
-                    mapped_values: Dict[Any, float] = {}
-                    instances = lx_var.get_instances()
-
-                    for instance in instances:
-                        # Get index key
-                        index_key = lx_var.index_key(instance)
-
-                        var = solver_vars[index_key]
-                        value = float(solver.Value(var))
-
-                        # De-scale if variable was scaled
-                        if lx_var.name in self._scaled_variables:
-                            scale = self._variable_scales[lx_var.name]
-                            value = value / scale
-
-                        var_values[index_key] = value
-                        mapped_values[index_key] = value
-
-                    variables[lx_var.name] = var_values
-                    mapped[lx_var.name] = mapped_values
-                else:
-                    # Single variable
-                    value = float(solver.Value(solver_vars))
-
-                    # De-scale if variable was scaled
-                    if lx_var.name in self._scaled_variables:
-                        scale = self._variable_scales[lx_var.name]
-                        value = value / scale
-
-                    variables[lx_var.name] = value
-
+        if getattr(self, "_stopped_by_time_limit", False):
+            lx_status = "time_limit"
+        has_solution = status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+        variables: Dict[str, Any] = {}
+        mapped: Dict[str, Any] = {}
+        obj_value = 0.0
+        gap: Optional[float] = None
+        if has_solution:
+            values = [solver.Value(h) / sc for h, sc in zip(self._handles, self._scales)]
+            variables, mapped = self._solution_values(lambda pos: values[pos])
+            obj_value = self._objective_constant
+            if self._has_objective:
+                obj_value += solver.ObjectiveValue() / self._objective_scale
+                bound = solver.BestObjectiveBound() / self._objective_scale + self._objective_constant
+                gap = abs(obj_value - bound) / max(abs(obj_value), 1e-10)
+            for pos, bound in self._open.items():
+                if abs(solver.Value(self._handles[pos])) >= bound:
+                    var = self._canonical.variables[pos]
+                    self.logger.logger.warning(
+                        f"Variable '{var.name}' reached ±{bound}, the bound CP-SAT uses for an "
+                        "open bound; the true optimum may lie beyond it or the model may be "
+                        "unbounded")
+                    if lx_status == "optimal":
+                        lx_status = "feasible"     # optimality is only proven inside the box
+            if self._grid_relaxed:
+                worst = max((abs(sum(c * values[p] for p, c in row.coeffs.items()) - row.rhs)
+                             for row in self._canonical.rows
+                             if row.sense == LXConstraintSense.EQ
+                             and any(self._scales[p] > 1 for p in row.coeffs)), default=0.0)
+                self.logger.logger.warning(
+                    f"CP-SAT: no solution satisfies the equalities on continuous variables "
+                    f"exactly on the 1/{self._scaling_factor} grid; they hold within {worst:.3g} "
+                    "(increase scaling_factor for a finer grid, or use a linear solver)")
         # CP-SAT doesn't provide sensitivity analysis
         # TODO: Could compute reduced costs for feasibility/bound analysis
         shadow_prices: Dict[str, float] = {}
         reduced_costs: Dict[str, float] = {}
 
         # Extract solver statistics
-        gap: Optional[float] = None
         iterations: Optional[int] = None
         nodes: Optional[int] = None
-
-        # Get best objective bound for gap calculation
-        if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-            try:
-                best_bound = solver.BestObjectiveBound()
-                if obj_value != 0 and abs(obj_value - best_bound) > 1e-10:
-                    gap = abs(obj_value - best_bound) / abs(obj_value)
-            except Exception:
-                pass
 
         # CP-SAT provides branch count and conflict count
         try:

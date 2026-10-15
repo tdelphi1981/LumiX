@@ -72,7 +72,8 @@ ONE variable declaration expands to multiple solver variables:
 
 .. literalinclude:: ../../../examples/04_basic_lp/basic_lp.py
    :language: python
-   :lines: 112-118
+   :start-after: # [docs:servings-variable]
+   :end-before: # [docs:servings-variable-end]
    :dedent: 4
 
 **Key Points**:
@@ -90,7 +91,8 @@ Coefficients extracted from data using lambda functions:
 
 .. literalinclude:: ../../../examples/04_basic_lp/basic_lp.py
    :language: python
-   :lines: 125-128
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 The lambda function ``lambda f: f.cost_per_serving`` extracts the cost attribute from each Food instance.
@@ -102,7 +104,8 @@ Expressions automatically sum over all indexed data:
 
 .. literalinclude:: ../../../examples/04_basic_lp/basic_lp.py
    :language: python
-   :lines: 133-140
+   :start-after: # [docs:nutrition-constraints]
+   :end-before: # Constraint 2: Minimum protein
    :dedent: 4
 
 This constraint expands to: :math:`\sum_f \text{calories}_f \cdot x_f \geq 2000` automatically.
@@ -206,7 +209,8 @@ Step 2: Create Variable Family
 
 .. literalinclude:: ../../../examples/04_basic_lp/basic_lp.py
    :language: python
-   :lines: 112-118
+   :start-after: # [docs:servings-variable]
+   :end-before: # [docs:servings-variable-end]
    :dedent: 4
 
 Step 3: Set Objective Function
@@ -214,7 +218,8 @@ Step 3: Set Objective Function
 
 .. literalinclude:: ../../../examples/04_basic_lp/basic_lp.py
    :language: python
-   :lines: 123-129
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
    :dedent: 4
 
 Step 4: Add Nutritional Constraints
@@ -222,7 +227,8 @@ Step 4: Add Nutritional Constraints
 
 .. literalinclude:: ../../../examples/04_basic_lp/basic_lp.py
    :language: python
-   :lines: 132-160
+   :start-after: # [docs:nutrition-constraints]
+   :end-before: # [docs:nutrition-constraints-end]
    :dedent: 4
 
 Step 5: Solve and Interpret Solution

@@ -1,364 +1,158 @@
 """
 Bilinear product linearization techniques.
 
-Implements three main methods:
-1. Binary × Binary: AND logic
-2. Binary × Continuous: Big-M method
-3. Continuous × Continuous: McCormick envelopes
+Exact unless both factors are continuous:
+
+1. Binary × Binary: AND logic (b * b = b)
+2. Binary × bounded variable: four bound rows (z = y when b = 1, else 0)
+3. Integer × (integer | continuous): binary expansion of the integer factor
+4. Continuous × Continuous: McCormick envelopes, a relaxation (UserWarning, solution.relaxation)
 """
 
-from typing import Any, List, Optional
+import math
+from typing import Any, List
 
 from ...core.constraints import LXConstraint
 from ...core.enums import LXVarType
-from ...core.expressions import LXLinearExpression
 from ...core.variables import LXVariable
 from ...nonlinear.terms import LXBilinearTerm
+from ...utils._warn import warn_user
 from ..config import LXLinearizerConfig
+from ..refs import LXAuxFactory, LXVarRef, value_kind
 
 
 class LXBilinearLinearizer:
-    """
-    Linearization techniques for bilinear products (x * y).
-
-    Automatically selects the appropriate technique based on variable types.
-    """
+    """Linearization of products of two single variables (public API; the
+    linearization engine uses :func:`product` per instance)."""
 
     def __init__(self, config: LXLinearizerConfig):
-        """
-        Initialize bilinear linearizer.
-
-        Args:
-            config: Linearization configuration
-        """
         self.config = config
-        self.auxiliary_vars: List[LXVariable] = []
-        self.auxiliary_constraints: List[LXConstraint] = []
-        self._aux_counter = 0
+        self._aux = LXAuxFactory()
+        self.auxiliary_vars: List[LXVariable] = self._aux.variables
+        self.auxiliary_constraints: List[LXConstraint] = self._aux.constraints
+        self.relaxation_terms: List[str] = []
+
 
     def linearize_bilinear(self, term: LXBilinearTerm) -> LXVariable:
         """
-        Linearize bilinear product based on variable types.
+        Linearize the product of two single variables (scalars or families with one
+        instance); terms in an LXNonLinearExpression apply to every instance.
 
         Args:
             term: Bilinear term to linearize
 
         Returns:
-            Auxiliary variable representing the product
-
-        Raises:
-            ValueError: If variable types are not supported
+            Variable representing the product (the coefficient is not applied)
         """
-        x, y = term.var1, term.var2
-
-        # Binary × Binary → AND logic
-        if x.var_type == LXVarType.BINARY and y.var_type == LXVarType.BINARY:
-            return self._binary_and(x, y, term.coefficient)
-
-        # Binary × Continuous → Big-M
-        elif x.var_type == LXVarType.BINARY and y.var_type in [
-            LXVarType.CONTINUOUS,
-            LXVarType.INTEGER,
-        ]:
-            return self._big_m_product(x, y, term.coefficient)
-        elif y.var_type == LXVarType.BINARY and x.var_type in [
-            LXVarType.CONTINUOUS,
-            LXVarType.INTEGER,
-        ]:
-            return self._big_m_product(y, x, term.coefficient)
-
-        # Continuous × Continuous → McCormick envelopes
-        elif x.var_type in [LXVarType.CONTINUOUS, LXVarType.INTEGER] and y.var_type in [
-            LXVarType.CONTINUOUS,
-            LXVarType.INTEGER,
-        ]:
-            return self._mccormick_envelope(x, y, term.coefficient)
-
-        else:
-            raise ValueError(
-                f"Unsupported variable type combination for bilinear product: "
-                f"{x.name} ({x.var_type}) × {y.name} ({y.var_type})"
-            )
-
-    def _binary_and(
-        self, x: LXVariable, y: LXVariable, coeff: float
-    ) -> LXVariable:
-        """
-        Linearize Binary × Binary using AND logic.
-
-        Creates auxiliary binary variable z with constraints:
-            z <= x
-            z <= y
-            z >= x + y - 1
-
-        This ensures z = 1 if and only if both x = 1 and y = 1.
-
-        Args:
-            x: First binary variable
-            y: Second binary variable
-            coeff: Coefficient (usually 1.0)
-
-        Returns:
-            Auxiliary binary variable z representing x AND y
-        """
-        z_name = self._generate_aux_name("and", x.name, y.name)
-        z = (
-            LXVariable[str, int](z_name)
-            .binary()
-            .indexed_by(lambda x: x)
-            .from_data([z_name])  # Use variable name as unique index
-        )
-        self.auxiliary_vars.append(z)
-
-        # Constraint: z <= x
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_le_x")
-            .expression(LXLinearExpression().add_term(z, 1.0).add_term(x, -1.0))
-            .le()
-            .rhs(0)
-        )
-
-        # Constraint: z <= y
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_le_y")
-            .expression(LXLinearExpression().add_term(z, 1.0).add_term(y, -1.0))
-            .le()
-            .rhs(0)
-        )
-
-        # Constraint: z >= x + y - 1
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_ge_sum")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(x, -1.0)
-                .add_term(y, -1.0)
-            )
-            .ge()
-            .rhs(-1)
-        )
-
-        return z
-
-    def _big_m_product(
-        self, binary_var: LXVariable, cont_var: LXVariable, coeff: float
-    ) -> LXVariable:
-        """
-        Linearize Binary × Continuous using Big-M method.
-
-        Creates auxiliary continuous variable z = b * x with constraints:
-            z <= M * b
-            z >= m * b
-            z <= x - m * (1 - b)
-            z >= x - M * (1 - b)
-
-        where M = upper bound of x, m = lower bound of x.
-
-        Args:
-            binary_var: Binary variable (b)
-            cont_var: Continuous/integer variable (x)
-            coeff: Coefficient
-
-        Returns:
-            Auxiliary variable z representing b * x
-        """
-        # Determine bounds
-        M = cont_var.upper_bound
-        m = cont_var.lower_bound
-
-        if M is None:
-            M = self.config.big_m_value
-        if m is None:
-            m = -self.config.big_m_value
-
-        # Create auxiliary variable (with scalar data source)
-        z_name = self._generate_aux_name("prod", binary_var.name, cont_var.name)
-        z = (
-            LXVariable[str, float](z_name)
-            .continuous()
-            .bounds(lower=m, upper=M)
-            .indexed_by(lambda x: x)
-            .from_data([z_name])  # Use variable name as unique index
-        )
-        self.auxiliary_vars.append(z)
-
-        # Constraint: z <= M * b
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_ub")
-            .expression(
-                LXLinearExpression().add_term(z, 1.0).add_term(binary_var, -M)
-            )
-            .le()
-            .rhs(0)
-        )
-
-        # Constraint: z >= m * b
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_lb")
-            .expression(
-                LXLinearExpression().add_term(z, 1.0).add_term(binary_var, -m)
-            )
-            .ge()
-            .rhs(0)
-        )
-
-        # Constraint: z <= x - m * (1 - b) → z - x + m*b <= m
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_ub_tight")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(cont_var, -1.0)
-                .add_term(binary_var, m)
-            )
-            .le()
-            .rhs(m)
-        )
-
-        # Constraint: z >= x - M * (1 - b) → z - x + M*b >= M
-        self.auxiliary_constraints.append(
-            LXConstraint(f"{z_name}_lb_tight")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(cont_var, -1.0)
-                .add_term(binary_var, M)
-            )
-            .ge()
-            .rhs(M)
-        )
-
-        return z
-
-    def _mccormick_envelope(
-        self, x: LXVariable, y: LXVariable, coeff: float
-    ) -> LXVariable:
-        """
-        Linearize Continuous × Continuous using McCormick envelopes.
-
-        Creates auxiliary variable z = x * y with convex hull constraints:
-            z >= xL*y + yL*x - xL*yL  (convex envelope 1)
-            z >= xU*y + yU*x - xU*yU  (convex envelope 2)
-            z <= xL*y + yU*x - xL*yU  (concave envelope 1)
-            z <= xU*y + yL*x - xU*yL  (concave envelope 2)
-
-        where x ∈ [xL, xU], y ∈ [yL, yU].
-
-        These four constraints form a tight linear relaxation of the bilinear
-        term z = x * y.
-
-        Args:
-            x: First continuous/integer variable
-            y: Second continuous/integer variable
-            coeff: Coefficient
-
-        Returns:
-            Auxiliary variable z representing x * y
-
-        Raises:
-            ValueError: If variables don't have bounds (required for McCormick)
-        """
-        # Extract bounds
-        xL = x.lower_bound
-        xU = x.upper_bound
-        yL = y.lower_bound
-        yU = y.upper_bound
-
-        # Validate bounds are available
-        if xL is None or xU is None or yL is None or yU is None:
-            raise ValueError(
-                f"McCormick envelopes require bounds on both variables. "
-                f"Detected: {x.name} ∈ [{xL}, {xU}], {y.name} ∈ [{yL}, {yU}]. "
-                f"Please specify bounds using .bounds(lower=..., upper=...) "
-                f"or enable auto_detect_bounds in configuration."
-            )
-
-        # Create auxiliary variable z = x * y
-        z_name = self._generate_aux_name("mccormick", x.name, y.name)
-
-        # Compute bounds for z
-        corner_products = [xL * yL, xL * yU, xU * yL, xU * yU]
-        z_lower = min(corner_products)
-        z_upper = max(corner_products)
-
-        z = (
-            LXVariable[str, float](z_name)
-            .continuous()
-            .bounds(lower=z_lower, upper=z_upper)
-            .indexed_by(lambda x: x)
-            .from_data([z_name])  # Use variable name as unique index
-        )
-        self.auxiliary_vars.append(z)
-
-        # McCormick envelope constraint 1: z >= xL*y + yL*x - xL*yL
-        self.auxiliary_constraints.append(
-            LXConstraint(f"mccormick_{z_name}_1")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(y, -xL)
-                .add_term(x, -yL)
-            )
-            .ge()
-            .rhs(-xL * yL)
-        )
-
-        # McCormick envelope constraint 2: z >= xU*y + yU*x - xU*yU
-        self.auxiliary_constraints.append(
-            LXConstraint(f"mccormick_{z_name}_2")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(y, -xU)
-                .add_term(x, -yU)
-            )
-            .ge()
-            .rhs(-xU * yU)
-        )
-
-        # McCormick envelope constraint 3: z <= xL*y + yU*x - xL*yU
-        self.auxiliary_constraints.append(
-            LXConstraint(f"mccormick_{z_name}_3")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(y, -xL)
-                .add_term(x, -yU)
-            )
-            .le()
-            .rhs(-xL * yU)
-        )
-
-        # McCormick envelope constraint 4: z <= xU*y + yL*x - xU*yL
-        self.auxiliary_constraints.append(
-            LXConstraint(f"mccormick_{z_name}_4")
-            .expression(
-                LXLinearExpression()
-                .add_term(z, 1.0)
-                .add_term(y, -xU)
-                .add_term(x, -yL)
-            )
-            .le()
-            .rhs(-xU * yL)
-        )
-
-        return z
-
-    def _generate_aux_name(self, prefix: str, name1: str, name2: str) -> str:
-        """
-        Generate unique name for auxiliary variable.
-
-        Args:
-            prefix: Prefix (e.g., "and", "prod", "mccormick")
-            name1: First variable name
-            name2: Second variable name
-
-        Returns:
-            Unique auxiliary variable name
-        """
-        self._aux_counter += 1
-        return f"aux_{prefix}_{name1}_{name2}_{self._aux_counter}"
+        x = LXVarRef.single(term.var1, "linearize_bilinear")
+        y = LXVarRef.single(term.var2, "linearize_bilinear")
+        tag = self._aux.tag("prod", [term.var1.name, term.var2.name])
+        return product(self._aux, tag, None, x, y, self.config, self.relaxation_terms).var
 
 
-__all__ = ["LXBilinearLinearizer"]
+def product(aux: LXAuxFactory, tag: str, key: Any, x: LXVarRef, y: LXVarRef,
+            config: LXLinearizerConfig, relaxation: List[str]) -> LXVarRef:
+    """``z = x * y``: exact when a factor is binary or integer; McCormick envelopes
+    (a relaxation, recorded in ``relaxation``) for two continuous variables."""
+    binary = LXVarType.BINARY
+    if x.var_type == binary and y.var_type == binary:
+        return _and(aux, tag, key, x, y)
+    if x.var_type == binary or y.var_type == binary:
+        b, other = (x, y) if x.var_type == binary else (y, x)
+        return _binary_times(aux, tag, key, b, other, config)
+    integer = LXVarType.INTEGER
+    ints = [r for r in (x, y) if r.var_type == integer]
+    if ints:
+        primary = min(ints, key=lambda r: (not r.bounded, r.upper - r.lower))
+        other = y if primary is x else x
+        return _expansion(aux, tag, key, primary, other, config)
+    return _mccormick(aux, tag, key, x, y, relaxation)
+
+
+def _same(x: LXVarRef, y: LXVarRef) -> bool:
+    return x.var is y.var and x.key == y.key
+
+
+def _and(aux, tag, key, x, y):
+    if _same(x, y):
+        return x                                   # b * b = b
+    z = aux.var(tag, "z", key, "binary")
+    aux.row(tag, "le_x", key, [(z, 1.0), (x, -1.0)], "<=", 0.0)
+    aux.row(tag, "le_y", key, [(z, 1.0), (y, -1.0)], "<=", 0.0)
+    aux.row(tag, "ge_sum", key, [(z, 1.0), (x, -1.0), (y, -1.0)], ">=", -1.0)
+    return z
+
+
+def _binary_times(aux, tag, key, b, y, config):
+    """``z = b * y`` for ``y`` in [lo, hi]: z = y when b = 1, z = 0 when b = 0 (A14)."""
+    lo, hi = y.lower, y.upper
+    if not y.bounded:
+        warn_user(
+            f"'{y.label}' has no finite bounds; its product with binary '{b.label}' uses "
+            f"big_m_value={config.big_m_value} (LXLinearizerConfig) as the bound",
+            UserWarning)
+        lo = lo if math.isfinite(lo) else -config.big_m_value
+        hi = hi if math.isfinite(hi) else config.big_m_value
+    z = aux.var(tag, "z", key, value_kind([y]), min(lo, 0.0), max(hi, 0.0))
+    aux.row(tag, "ub", key, [(z, 1.0), (b, -hi)], "<=", 0.0)                   # z <= hi b
+    aux.row(tag, "lb", key, [(z, 1.0), (b, -lo)], ">=", 0.0)                   # z >= lo b
+    aux.row(tag, "ub_y", key, [(z, 1.0), (y, -1.0), (b, -lo)], "<=", -lo)      # z <= y - lo (1 - b)
+    aux.row(tag, "lb_y", key, [(z, 1.0), (y, -1.0), (b, -hi)], ">=", -hi)      # z >= y - hi (1 - b)
+    return z
+
+
+def _expansion(aux, tag, key, x, y, config):
+    """``z = x * y`` for integer ``x`` in [L, U]: x = L + sum 2^k d_k, so
+    z = L y + sum 2^k (d_k y), each d_k y exact by :func:`_binary_times`."""
+    if not x.bounded:
+        raise ValueError(
+            f"The product {x.label} * {y.label} needs finite bounds on the integer variable "
+            f"'{x.var.name}' (binary expansion)")
+    low, span = int(x.lower), int(x.upper - x.lower)
+    bits = span.bit_length()
+    if bits > config.binary_expansion_bits:
+        raise ValueError(
+            f"{x.label} takes {span + 1} values; its binary expansion needs {bits} bits, more "
+            f"than LXLinearizerConfig.binary_expansion_bits={config.binary_expansion_bits}. "
+            "Raise it, or, in the objective, write the product with add_quadratic and solve "
+            "it on Gurobi or CPLEX")
+    digits = [aux.var(tag, f"bit{k}", key, "binary") for k in range(bits)]
+    aux.row(tag, "expand", key, [(x, 1.0)] + [(d, -float(2 ** k)) for k, d in enumerate(digits)],
+            "==", float(low))
+    corners = [a * b for a in (x.lower, x.upper) for b in (y.lower, y.upper)]
+    finite = all(math.isfinite(c) for c in corners)
+    z = aux.var(tag, "z", key, value_kind([y]), min(corners) if finite else -math.inf,
+                max(corners) if finite else math.inf)
+    terms = [(z, 1.0), (y, -float(low))]
+    for k, d in enumerate(digits):
+        terms.append((_binary_times(aux, f"{tag}_bit{k}", key, d, y, config), -float(2 ** k)))
+    aux.row(tag, "sum", key, terms, "==", 0.0)
+    return z
+
+
+def _mccormick(aux, tag, key, x, y, relaxation):
+    if not (x.bounded and y.bounded):
+        raise ValueError(
+            f"McCormick envelopes require bounds on both variables. "
+            f"Detected: {x.label} ∈ [{x.lower}, {x.upper}], {y.label} ∈ [{y.lower}, {y.upper}]. "
+            "Please specify bounds using .bounds(lower=..., upper=...)")
+    relaxation.append(f"{x.label} * {y.label}")
+    warn_user(
+        f"The product {x.label} * {y.label} of two continuous variables is linearized with "
+        "McCormick envelopes, a relaxation: the reported optimum may not be attainable "
+        "(solution.relaxation is True). Make a factor integer or binary, or, in the "
+        "objective, write it as an LXQuadraticExpression "
+        f"(add_quadratic({x.var.name}, {y.var.name})) to solve it exactly on Gurobi or CPLEX",
+        UserWarning)
+    xl, xu, yl, yu = x.lower, x.upper, y.lower, y.upper
+    corners = [xl * yl, xl * yu, xu * yl, xu * yu]
+    z = aux.var(tag, "z", key, "continuous", min(corners), max(corners))
+    aux.row(tag, "mc1", key, [(z, 1.0), (y, -xl), (x, -yl)], ">=", -xl * yl)
+    aux.row(tag, "mc2", key, [(z, 1.0), (y, -xu), (x, -yu)], ">=", -xu * yu)
+    aux.row(tag, "mc3", key, [(z, 1.0), (y, -xl), (x, -yu)], "<=", -xl * yu)
+    aux.row(tag, "mc4", key, [(z, 1.0), (y, -xu), (x, -yl)], "<=", -xu * yl)
+    return z
+
+
+
+__all__ = ["LXBilinearLinearizer", "product"]

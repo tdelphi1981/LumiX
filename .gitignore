@@ -146,6 +146,7 @@ cython_debug/
 
 # Solver-specific files
 *.lp
+!tests/golden/*.lp
 *.mps
 *.sav
 *.sol

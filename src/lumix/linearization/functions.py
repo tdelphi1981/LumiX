@@ -46,9 +46,6 @@ class LXNonLinearFunctions:
         Example:
             # Population growth model
             population = LXNonLinearFunctions.exp(time, linearizer)
-
-            # Compound interest
-            future_value = principal * LXNonLinearFunctions.exp(rate * time, linearizer)
         """
         return linearizer.approximate_function(
             lambda x: math.exp(x), var, num_segments=segments, adaptive=True  # Exponential curves sharply
@@ -79,9 +76,6 @@ class LXNonLinearFunctions:
 
             # Base-10 logarithm
             log10_quantity = LXNonLinearFunctions.log(quantity, linearizer, base=10)
-
-            # Information entropy
-            entropy = -probability * LXNonLinearFunctions.log(probability, linearizer, base=2)
         """
 
         def log_func(x: float) -> float:
@@ -112,9 +106,6 @@ class LXNonLinearFunctions:
         Example:
             # Standard deviation
             std_dev = LXNonLinearFunctions.sqrt(variance, linearizer)
-
-            # Euclidean distance (after squaring)
-            distance = LXNonLinearFunctions.sqrt(x_squared + y_squared, linearizer)
 
             # Flow velocity in pipes
             velocity = LXNonLinearFunctions.sqrt(pressure_drop, linearizer)
@@ -161,7 +152,11 @@ class LXNonLinearFunctions:
         """
 
         def power_func(x: float) -> float:
-            return x**exponent if x >= 0 else 0
+            if x < 0 and not float(exponent).is_integer():
+                raise ValueError(
+                    f"x**{exponent} is not real for x = {x} < 0; restrict the variable "
+                    "to x >= 0")
+            return x ** exponent
 
         return linearizer.approximate_function(
             power_func,
@@ -190,9 +185,6 @@ class LXNonLinearFunctions:
         Example:
             # Probability of success
             probability = LXNonLinearFunctions.sigmoid(score, linearizer)
-
-            # Market saturation
-            market_share = capacity * LXNonLinearFunctions.sigmoid(time, linearizer)
 
             # Learning curve
             efficiency = LXNonLinearFunctions.sigmoid(experience, linearizer)
@@ -227,14 +219,9 @@ class LXNonLinearFunctions:
             Output variable representing sin(var) ∈ [-1, 1]
 
         Example:
-            # Seasonal demand pattern (annual cycle)
-            import math
-            day_angle = day_of_year * 2 * math.pi / 365
+            # Seasonal factor; day_angle is a variable holding the angle in radians
+            # (constrain it to day_of_year * 2 * pi / 365 with a linear row)
             seasonal_factor = LXNonLinearFunctions.sin(day_angle, linearizer)
-
-            # Daily temperature variation
-            hour_angle = hour * 2 * math.pi / 24
-            temp_variation = LXNonLinearFunctions.sin(hour_angle, linearizer)
         """
         return linearizer.approximate_function(
             math.sin, var, num_segments=segments, adaptive=False  # Sine is smooth
@@ -258,13 +245,8 @@ class LXNonLinearFunctions:
             Output variable representing cos(var) ∈ [-1, 1]
 
         Example:
-            # Phase-shifted seasonal pattern
-            import math
-            day_angle = day_of_year * 2 * math.pi / 365
+            # Phase-shifted seasonal factor; day_angle is a variable in radians
             seasonal_factor = LXNonLinearFunctions.cos(day_angle, linearizer)
-
-            # Circular motion x-coordinate
-            x_pos = radius * LXNonLinearFunctions.cos(angle, linearizer)
         """
         return linearizer.approximate_function(
             math.cos, var, num_segments=segments, adaptive=False  # Cosine is smooth

@@ -283,6 +283,42 @@ CP-SAT
 - ✗ Quadratic programming
 - ✗ Callbacks
 
+**Coefficients and bounds** (0.3.0):
+
+- Each row and the objective are converted to integers exactly: every coefficient
+  and right-hand side becomes a fraction with a denominator up to max_denom
+  (enable_rational_conversion(max_denom=...), default 10000), and the row is
+  multiplied by the least common multiple of the denominators.
+- A value that no such fraction matches within a relative error of 1e-9 (for
+  example 0.12345), or a row whose common denominator exceeds the 64-bit
+  range, raises ValueError. Pass approximate_coefficients=True to accept
+  the nearest fraction instead; a warning reports the largest relative error:
+
+  .. code-block:: python
+
+     LXOptimizer().use_solver("cpsat", approximate_coefficients=True).solve(model)
+
+- With rational conversion enabled, continuous variables are represented as
+  x * scaling_factor integers (default 1000).
+- Open variable bounds become at most ±2**40, smaller when a large coefficient
+  would let a row overflow 64-bit integers. When a variable ends at such a bound,
+  the status is ``"feasible"`` (optimality is only proven inside the bounds; the
+  model may be unbounded) and a warning is logged.
+- Continuous variables live on the 1/scaling_factor grid, so an equality on them
+  can have no exact grid solution although the continuous model is feasible
+  (``3 * x == 1``). When the model is infeasible on the grid, CP-SAT solves
+  again in up to three steps, as CP-SAT's own MIP import does, and stops at the
+  first step that is not infeasible:
+
+  1. only the equalities that have no integer solution on the grid (the gcd of
+     their scaled coefficients does not divide the right-hand side) become a
+     band of half a grid step per variable; the other equalities stay exact;
+  2. every equality on scaled continuous variables becomes such a band;
+  3. every such equality becomes a band of a whole grid step per variable.
+
+  It logs how far the equalities are from exact. A model that is still
+  infeasible with the widest bands is reported infeasible.
+
 Querying Capabilities
 ---------------------
 
@@ -351,12 +387,10 @@ Automatic Feature Detection
 
    def solve_with_best_available(model):
        """Solve using best available solver for the model."""
-       # Try Gurobi first (if available)
+       # Try Gurobi first: it solves quadratic objectives natively.
+       # The solver is imported at solve time, so ImportError comes from solve().
        try:
-           optimizer = LXOptimizer().use_solver("gurobi")
-           if model.has_quadratic_terms():
-               # Gurobi supports quadratic natively
-               return optimizer.solve(model)
+           return LXOptimizer().use_solver("gurobi").solve(model)
        except ImportError:
            pass
 

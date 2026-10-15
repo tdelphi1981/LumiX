@@ -73,7 +73,9 @@ Define the nonlinear objective naturally:
 
 .. literalinclude:: ../../../examples/06_mccormick_bilinear/rectangle_area.py
    :language: python
-   :lines: 108-111
+   :start-after: # [docs:bilinear-objective]
+   :end-before: # [docs:bilinear-objective-end]
+   :dedent: 4
 
 **Key Point**: LumiX detects the bilinear product ``length × width`` and automatically linearizes it.
 
@@ -84,7 +86,9 @@ Create linearizer and apply McCormick envelopes:
 
 .. literalinclude:: ../../../examples/06_mccormick_bilinear/rectangle_area.py
    :language: python
-   :lines: 146-167
+   :start-after: # [docs:linearize]
+   :end-before: # [docs:linearize-end]
+   :dedent: 4
 
 The linearizer:
 
@@ -100,7 +104,9 @@ McCormick envelopes **require** finite bounds:
 
 .. literalinclude:: ../../../examples/06_mccormick_bilinear/rectangle_area.py
    :language: python
-   :lines: 77-90
+   :start-after: # [docs:define-variables]
+   :end-before: # [docs:define-variables-end]
+   :dedent: 4
 
 Without bounds, McCormick cannot compute the envelope coefficients.
 
@@ -168,21 +174,27 @@ Step 1: Create Bounded Variables
 
 .. literalinclude:: ../../../examples/06_mccormick_bilinear/rectangle_area.py
    :language: python
-   :lines: 77-91
+   :start-after: # [docs:define-variables]
+   :end-before: # [docs:define-variables-end]
+   :dedent: 4
 
 Step 2: Add Linear Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/06_mccormick_bilinear/rectangle_area.py
    :language: python
-   :lines: 98-105
+   :start-after: # [docs:perimeter-constraint]
+   :end-before: # [docs:perimeter-constraint-end]
+   :dedent: 4
 
 Step 3: Define Nonlinear Objective
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/06_mccormick_bilinear/rectangle_area.py
    :language: python
-   :lines: 108-111
+   :start-after: # [docs:bilinear-objective]
+   :end-before: # [docs:bilinear-objective-end]
+   :dedent: 4
 
 Step 4: Apply Linearization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -191,10 +203,7 @@ Step 4: Apply Linearization
 
    from lumix.linearization import LXLinearizer, LXLinearizerConfig
 
-   config = LXLinearizerConfig(
-       mccormick_tighten_bounds=True,
-       verbose_logging=True
-   )
+   config = LXLinearizerConfig()
    linearizer = LXLinearizer(model, solver_capabilities, config)
 
    if linearizer.needs_linearization():

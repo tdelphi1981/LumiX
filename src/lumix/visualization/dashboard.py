@@ -12,6 +12,7 @@ from typing_extensions import Self
 
 from ._base import LXBaseVisualizer, LXVisualizationConfig
 from ._compat import go, make_subplots
+from .scenario import _ranked_feasible
 
 if TYPE_CHECKING:
     from ..analysis.scenario import LXScenarioAnalyzer
@@ -126,68 +127,44 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
         Returns:
             Plotly Figure with all panels.
         """
-        # Determine grid size based on components
         has_goals = bool(self.solution.goal_deviations)
         has_sensitivity = self._sensitivity_analyzer is not None
-        has_scenarios = self._scenario_analyzer is not None
-
-        # Build subplot configuration
-        n_rows = 2
-        if has_sensitivity:
-            n_rows = 3
-        if has_goals:
-            n_rows = max(n_rows, 3)
-        if has_scenarios:
-            n_rows = max(n_rows, 3)
+        has_scenarios = self._scenario_analyzer is not None and bool(
+            self._scenario_analyzer.results
+        )
 
         subplot_titles = ["Solution Summary", "Variable Values"]
         specs: List[List[dict]] = [[{"type": "indicator"}, {"type": "bar"}]]
-
         if has_sensitivity:
-            subplot_titles.extend(["Shadow Prices (Top 10)", "Binding Constraints"])
+            subplot_titles += ["Shadow Prices (Top 10)", "Binding Constraints"]
             specs.append([{"type": "bar"}, {"type": "pie"}])
-
         if has_goals:
-            subplot_titles.extend(["Goal Achievement", "Goal Deviations"])
+            subplot_titles += ["Goal Achievement", "Goal Deviations"]
             specs.append([{"type": "pie"}, {"type": "bar"}])
-
         if has_scenarios:
-            subplot_titles.extend(["Scenario Comparison", "Best Scenarios"])
-            if len(specs) < 4:
-                specs.append([{"type": "bar"}, {"type": "table"}])
+            subplot_titles += ["Scenario Comparison", "Best Scenarios"]
+            specs.append([{"type": "bar"}, {"type": "table"}])
+        n_rows = len(specs)
 
-        fig = make_subplots(
-            rows=n_rows,
-            cols=2,
-            subplot_titles=subplot_titles[:n_rows * 2],
-            specs=specs[:n_rows],
-        )
+        fig = make_subplots(rows=n_rows, cols=2, subplot_titles=subplot_titles, specs=specs)
 
-        # Row 1: Solution overview
         self._add_solution_summary(fig, row=1, col=1)
         self._add_variable_bars(fig, row=1, col=2)
-
-        # Row 2: Sensitivity (if available)
         current_row = 2
         if has_sensitivity:
             self._add_sensitivity_panels(fig, row=current_row)
             current_row += 1
-
-        # Row 3: Goals (if available)
         if has_goals:
             self._add_goal_panels(fig, row=current_row)
             current_row += 1
-
-        # Row 4: Scenarios (if available)
-        if has_scenarios and current_row <= n_rows:
+        if has_scenarios:
             self._add_scenario_panels(fig, row=current_row)
 
         fig.update_layout(
             title=f"Optimization Dashboard: {self.model.name}",
-            height=self.config.height * n_rows // 2,
+            height=self.config.height * max(n_rows, 2) // 2,
             showlegend=True,
         )
-
         return self._apply_theme(fig)
 
     def plot_summary_only(self) -> Any:
@@ -213,7 +190,7 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
                 mode="number",
                 value=self.solution.objective_value,
                 title={"text": "Objective Value"},
-                number={"prefix": "$", "valueformat": ",.0f"},
+                number={"valueformat": ",.4g"},
             ),
             row=1,
             col=1,
@@ -258,7 +235,7 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
                 mode="number+delta",
                 value=self.solution.objective_value,
                 title={"text": f"Objective ({self.solution.status})"},
-                number={"prefix": "$", "valueformat": ",.0f"},
+                number={"valueformat": ",.4g"},
             ),
             row=row,
             col=col,
@@ -274,7 +251,7 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
 
         for var_name, var_value in self.solution.variables.items():
             if isinstance(var_value, dict):
-                for idx, val in list(var_value.items())[:5]:
+                for idx, val in var_value.items():
                     if abs(val) > 1e-6:
                         names.append(f"{var_name}[{idx}]")
                         values.append(float(val))
@@ -378,11 +355,7 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
         colors = self._get_colors()
 
         # Scenario comparison bar
-        items = sorted(
-            self._scenario_analyzer.results.items(),
-            key=lambda x: x[1].objective_value,
-            reverse=True,
-        )
+        items = _ranked_feasible(self._scenario_analyzer)
 
         names = [name for name, _ in items][:10]
         objectives = [sol.objective_value for _, sol in items][:10]
@@ -400,7 +373,7 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
         # Best scenarios table
         ranks = list(range(1, min(6, len(items) + 1)))
         top_names = [name for name, _ in items][:5]
-        top_objectives = [f"${sol.objective_value:,.0f}" for _, sol in items][:5]
+        top_objectives = [f"{sol.objective_value:,.2f}" for _, sol in items][:5]
 
         fig.add_trace(
             go.Table(

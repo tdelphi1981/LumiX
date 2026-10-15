@@ -1,8 +1,10 @@
 """Objective function construction for goal programming."""
 
+import warnings
 from collections import defaultdict
-from typing import Dict, List, Tuple, TypeVar
+from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
+from lumix.core.enums import LXObjectiveSense
 from lumix.core.expressions import LXLinearExpression
 from lumix.core.variables import LXVariable
 
@@ -30,6 +32,9 @@ def build_weighted_objective(
         base: Base for exponential priority-to-weight conversion (default: 10)
         exponent_offset: Offset for exponent (default: 6, so P1=10^6, P2=10^5)
 
+    Priority 0 goals are skipped: they are objective terms (see
+    :func:`final_objective`), not relaxed rows.
+
     Returns:
         Linear expression for weighted goal programming objective
 
@@ -41,6 +46,8 @@ def build_weighted_objective(
 
     for relaxed in relaxed_constraints:
         metadata = relaxed.goal_metadata
+        if metadata.priority == 0:
+            continue  # priority 0 goals are objective terms (final_objective)
 
         # Get priority weight (exponential scaling)
         prio_weight = priority_to_weight(
@@ -65,6 +72,60 @@ def build_weighted_objective(
     return objective
 
 
+def _model_objective(model: Any) -> Any:
+    """The model's own objective expression (from the costs for ``minimize()`` /
+    ``maximize()`` without an argument), or ``None``."""
+    if getattr(model, "_objective_from_costs", False):
+        return model.cost_objective()
+    return model.objective_expr
+
+
+def final_objective(model: Any, custom_goals: List[Any]
+                    ) -> Optional[Tuple[Any, LXObjectiveSense]]:
+    """The objective that comes after all goals (spec W5, user decision 2026-10-15):
+    the model's own objective and the priority-0 goals, whose expression is
+    maximized for ``>=`` and minimized for ``<=``, times the goal weight. Without
+    priority-0 goals the model's objective keeps its sense; with them everything is
+    one minimization. ``None`` when there is neither.
+
+    .. versionadded:: 0.3.0
+    """
+    from lumix.core.enums import LXConstraintSense
+    from lumix.core.expressions import LXNonLinearExpression
+
+    user = _model_objective(model)
+    if isinstance(user, LXNonLinearExpression):
+        raise ValueError(
+            "A model with goals cannot have a nonlinear objective: the objective is "
+            "combined with the goal deviations. Write the nonlinear terms in a goal "
+            "constraint, or solve without goals")
+    terms = []
+    for c in custom_goals:
+        if c.index_func is not None:
+            raise ValueError(
+                f"Priority 0 goal '{c.name}' is indexed; write the custom objective as one "
+                "constraint without indexed_by")
+        if c.sense == LXConstraintSense.EQ:
+            raise ValueError(
+                f"Priority 0 goal '{c.name}' must use .ge() (maximize its expression) or "
+                ".le() (minimize it), not .eq()")
+        lhs = c.lhs
+        if isinstance(lhs, LXNonLinearExpression):
+            if lhs.nonlinear_terms:
+                raise ValueError(f"Priority 0 goal '{c.name}' has nonlinear terms")
+            lhs = lhs.linear_terms
+        w = float(c.goal_metadata.weight)
+        terms.append(lhs * (-w if c.sense == LXConstraintSense.GE else w))
+    if not terms:
+        return None if user is None else (user, model.objective_sense)
+    expr = terms[0]
+    for t in terms[1:]:
+        expr = expr + t
+    if user is not None:
+        expr = expr + (user if model.objective_sense == LXObjectiveSense.MINIMIZE else -user)
+    return expr, LXObjectiveSense.MINIMIZE
+
+
 def build_sequential_objectives(
     relaxed_constraints: List[RelaxedConstraint],
 ) -> List[Tuple[int, LXLinearExpression]]:
@@ -73,7 +134,7 @@ def build_sequential_objectives(
 
     Creates one objective per priority level. These are solved sequentially:
     1. Solve priority 1, record optimal deviation values
-    2. Fix priority 1 deviations, solve priority 2
+    2. Bound priority 1 by its optimum, solve priority 2
     3. Continue for all priorities
 
     Args:
@@ -199,7 +260,18 @@ def extract_custom_objectives(
 
     Returns:
         List of relaxed constraints with priority 0
+
+    .. deprecated:: 0.3.0
+       Priority 0 goals are objective terms, not relaxed rows, so this always returns
+       an empty list. Use :func:`final_objective`.
     """
+    warnings.warn(
+        "extract_custom_objectives is deprecated since 0.3.0 and always returns an empty "
+        "list: priority 0 goals are objective terms, not relaxed rows; use "
+        "final_objective(model, goals)",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return [
         relaxed
         for relaxed in relaxed_constraints
@@ -210,6 +282,7 @@ def extract_custom_objectives(
 __all__ = [
     "build_weighted_objective",
     "build_sequential_objectives",
+    "final_objective",
     "combine_objectives",
     "extract_custom_objectives",
 ]

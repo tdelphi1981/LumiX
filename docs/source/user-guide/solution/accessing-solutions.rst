@@ -26,6 +26,7 @@ Basic Structure
        gap: Optional[float] = None
        iterations: Optional[int] = None
        nodes: Optional[int] = None
+       relaxation: bool = False
 
 Accessing Variable Values
 --------------------------
@@ -80,6 +81,12 @@ Variables with a single value:
    # Access value
    cost = solution.get_variable(total_cost)
    print(f"Total cost: ${cost:.2f}")
+
+.. versionchanged:: 0.3.0
+   Scalar variables (no data source) are supported by every solver. Before 0.3.0
+   they raised "has no data source" at solve time, and from_data([]) was
+   sometimes used as a workaround; an empty family now has no variables (a
+   warning is logged), so use the scalar form above.
 
 Single-Indexed Variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,7 +231,19 @@ Check the optimization status:
 
    # Raw status string
    print(f"Status: {solution.status}")
-   # Common values: "optimal", "feasible", "infeasible", "unbounded"
+   # Common values: "optimal", "feasible", "infeasible", "unbounded",
+   # "time_limit" (the time limit stopped the search before any solution)
+
+.. versionchanged:: 0.3.0
+   A solve without a solution (infeasible, unbounded) returns
+   ``solution.variables == {}`` with every solver. OR-Tools used to return zeros,
+   and CPLEX returned values for unbounded MIPs.
+
+.. versionchanged:: 0.3.0
+   When presolve cannot tell an infeasible LP from an unbounded one, OR-Tools (GLOP)
+   and CPLEX solve once more without presolve to report which it is. GLPK settles a
+   MIP with an unbounded relaxation with a feasibility check of at most 2 s and
+   reports ``"inf_or_unbounded"`` when that check does not finish.
 
 Objective Value
 ~~~~~~~~~~~~~~~
@@ -268,6 +287,60 @@ Some solvers provide additional information:
    # Node count (for branch-and-bound)
    if solution.nodes is not None:
        print(f"Nodes explored: {solution.nodes}")
+
+Relaxation Flag
+~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+``solution.relaxation`` is ``True`` when ``LXOptimizer`` solved a linearized model
+(through ``enable_linearization()``, or a model returned by
+``LXLinearizer.linearize_model()``) in which the linearizer had to use a
+relaxation: McCormick envelopes for a product of two continuous variables. The objective value is then
+a bound on the true optimum (an upper bound when maximizing, a lower bound when
+minimizing), and the variable values may not attain it. All other linearizations
+are exact, and the flag is ``False``.
+
+.. code-block:: python
+
+   solution = LXOptimizer().use_solver("glpk").enable_linearization().solve(model)
+
+   if solution.relaxation:
+       print(f"Bound on the optimum: {solution.objective_value}")
+   else:
+       print(f"Optimum: {solution.objective_value}")
+
+See :doc:`/user-guide/linearization/bilinear` for ways to get an exact model.
+
+Constraint Activity
+~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+:func:`~lumix.solution.activity.row_activity` evaluates every constraint row at a
+solution. It returns a dict keyed by row name (``name[key]`` for rows of an indexed
+constraint) of :class:`~lumix.solution.activity.LXRowActivity` records with ``lhs``,
+``rhs``, ``sense``, ``slack`` and ``binding``:
+
+.. code-block:: python
+
+   from lumix.solution import row_activity
+
+   for name, row in row_activity(model, solution).items():
+       state = "binding" if row.binding else f"slack {row.slack:.2f}"
+       print(f"{name}: {row.lhs:.2f} vs {row.rhs:.2f} ({state})")
+
+Slack is ``rhs - lhs`` for ``<=`` rows and ``lhs - rhs`` for ``>=`` rows, so it is
+never negative at a feasible solution. Rows on variables the solution does not
+report are left out, and a solution without values gives an empty dict. A goal row
+is reported as the goal itself: its expression without the deviation variables,
+with the goal's sense (so ``x >= 5`` solved at ``x = 10`` has slack 5).
+``LXSolutionVisualizer(solution, model).plot_constraint_utilization()`` draws the
+same data.
+
+.. versionchanged:: 0.3.0
+   ``plot_constraint_utilization()`` needs the model and no longer needs duals. It
+   used to draw every non-binding row at a fixed 50 %.
 
 Solution Summary
 ~~~~~~~~~~~~~~~~

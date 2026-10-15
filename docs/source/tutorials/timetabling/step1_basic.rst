@@ -124,7 +124,8 @@ Variables indexed by **tuples of three models**:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 110-122
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 **Traditional Approach (Other Libraries)**:
@@ -181,8 +182,10 @@ Filter out infeasible combinations based on relationships between models:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 119-121
-   :dedent: 8
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
+   :dedent: 4
+   :emphasize-lines: 12-14
 
 **Purpose**: Only create variables where the class fits in the classroom. This:
 
@@ -199,15 +202,19 @@ Sum over specific dimensions using filters:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 133-138
-   :dedent: 8
+   :start-after: # [docs:lecture-coverage]
+   :end-before: # [docs:lecture-coverage-end]
+   :dedent: 4
+   :emphasize-lines: 4-9
 
 **Pattern 2: Sum over lectures for a specific timeslot and classroom**
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 149-155
-   :dedent: 12
+   :start-after: # [docs:classroom-conflict]
+   :end-before: # [docs:classroom-conflict-end]
+   :dedent: 4
+   :emphasize-lines: 5-11
 
 .. important::
    Notice the closure capture: ``current_lecture=lecture`` captures the loop variable by **value**.
@@ -223,20 +230,19 @@ The sample data uses dataclasses for type-safe data representation:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/sample_data.py
    :language: python
-   :lines: 33-49
-   :dedent: 0
+   :pyobject: Teacher
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/sample_data.py
    :language: python
-   :lines: 109-132
-   :dedent: 0
+   :pyobject: Lecture
 
 Step 2: Create 3D Decision Variable
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 108-127
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 Step 3: Add Lecture Coverage Constraints
@@ -244,7 +250,8 @@ Step 3: Add Lecture Coverage Constraints
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 131-142
+   :start-after: # [docs:lecture-coverage]
+   :end-before: # [docs:lecture-coverage-end]
    :dedent: 4
 
 Step 4: Add Classroom Conflict Constraints
@@ -252,7 +259,8 @@ Step 4: Add Classroom Conflict Constraints
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 144-161
+   :start-after: # [docs:classroom-conflict]
+   :end-before: # [docs:classroom-conflict-end]
    :dedent: 4
 
 Step 5: Add Teacher Conflict Constraints
@@ -260,7 +268,8 @@ Step 5: Add Teacher Conflict Constraints
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 163-183
+   :start-after: # [docs:teacher-conflict]
+   :end-before: # [docs:teacher-conflict-end]
    :dedent: 4
 
 Step 6: Add Class Conflict Constraints
@@ -268,7 +277,8 @@ Step 6: Add Class Conflict Constraints
 
 .. literalinclude:: ../../../../tutorials/timetabling/step1_basic_timetabling/timetabling.py
    :language: python
-   :lines: 185-205
+   :start-after: # [docs:class-conflict]
+   :end-before: # [docs:class-conflict-end]
    :dedent: 4
 
 Running the Example

@@ -17,7 +17,9 @@
       ~LXSensitivityAnalyzer.analyze_all_constraints
       ~LXSensitivityAnalyzer.analyze_all_variables
       ~LXSensitivityAnalyzer.analyze_constraint
+      ~LXSensitivityAnalyzer.analyze_constraint_family
       ~LXSensitivityAnalyzer.analyze_variable
+      ~LXSensitivityAnalyzer.analyze_variable_family
       ~LXSensitivityAnalyzer.generate_report
       ~LXSensitivityAnalyzer.generate_summary
       ~LXSensitivityAnalyzer.get_binding_constraints

@@ -67,9 +67,14 @@ Quick Start
     print(f"Impact: ${result.delta_objective:,.2f}")
 """
 
-__version__ = "0.2.0"
+import logging as _logging
+
+_logging.getLogger("lumix").addHandler(_logging.NullHandler())
+
+__version__ = "0.3.0"
 
 # Core classes
+from .core.canonical import LXCanonicalModel, LXCanonicalNonlinear, LXCanonicalRow, LXCanonicalVariable
 from .core import (
     LXConstraint,
     LXConstraintSense,
@@ -83,6 +88,7 @@ from .core import (
     LXVariable,
     LXVarType,
 )
+from .core.expressions import LXRowKeyFilter
 
 # Indexing
 from .indexing import LXCartesianProduct, LXIndexDimension
@@ -94,6 +100,7 @@ from .linearization import (
     LXLinearizationMethod,
     LXNonLinearFunctions,
 )
+from .linearization.techniques import LXPiecewiseLinearizer
 
 # Nonlinear terms
 from .nonlinear import (
@@ -110,6 +117,8 @@ from .solution import LXSolution, LXSolutionMapper
 # Solvers
 from .solvers import (
     CPLEX_CAPABILITIES,
+    CPSAT_CAPABILITIES,
+    GLPK_CAPABILITIES,
     GUROBI_CAPABILITIES,
     ORTOOLS_CAPABILITIES,
     LXOptimizer,
@@ -122,9 +131,11 @@ from .solvers import (
 from .analysis import (
     LXConstraintSensitivity,
     LXScenario,
+    LXResultStore,
     LXScenarioAnalyzer,
     LXScenarioModification,
     LXSensitivityAnalyzer,
+    LXStoredRun,
     LXVariableSensitivity,
     LXWhatIfAnalyzer,
     LXWhatIfChange,
@@ -132,7 +143,14 @@ from .analysis import (
 )
 
 # Utils
-from .utils import LXModelLogger, LXORMContext, LXORMModel, LXRationalConverter, LXTypedQuery
+from .utils import (
+    LXModelLogger,
+    LXORMContext,
+    LXORMModel,
+    LXRationalConverter,
+    LXTypedQuery,
+    enable_logging,
+)
 
 # Goal Programming
 from .goal_programming import (
@@ -140,6 +158,7 @@ from .goal_programming import (
     LXGoalMetadata,
     LXGoalMode,
     LXGoalProgrammingSolver,
+    LXGoalStage,
     RelaxedConstraint,
     build_sequential_objectives,
     build_weighted_objective,
@@ -171,6 +190,11 @@ __all__ = [
     "LXVariable",
     "LXConstraint",
     "LXKeyFilter",
+    "LXRowKeyFilter",
+    "LXCanonicalModel",
+    "LXCanonicalNonlinear",
+    "LXCanonicalRow",
+    "LXCanonicalVariable",
     "LXLinearExpression",
     "LXQuadraticExpression",
     "LXQuadraticTerm",
@@ -186,6 +210,7 @@ __all__ = [
     "LXLinearizerConfig",
     "LXLinearizationMethod",
     "LXNonLinearFunctions",
+    "LXPiecewiseLinearizer",
     # Nonlinear terms
     "LXAbsoluteTerm",
     "LXBilinearTerm",
@@ -201,6 +226,8 @@ __all__ = [
     "LXSolverFeature",
     "LXSolverCapability",
     "ORTOOLS_CAPABILITIES",
+    "CPSAT_CAPABILITIES",
+    "GLPK_CAPABILITIES",
     "GUROBI_CAPABILITIES",
     "CPLEX_CAPABILITIES",
     # Analysis
@@ -208,6 +235,8 @@ __all__ = [
     "LXScenarioAnalyzer",
     "LXScenarioModification",
     "LXSensitivityAnalyzer",
+    "LXResultStore",
+    "LXStoredRun",
     "LXVariableSensitivity",
     "LXConstraintSensitivity",
     "LXWhatIfAnalyzer",
@@ -219,11 +248,13 @@ __all__ = [
     "LXTypedQuery",
     "LXRationalConverter",
     "LXModelLogger",
+    "enable_logging",
     # Goal Programming
     "LXGoal",
     "LXGoalMetadata",
     "LXGoalMode",
     "LXGoalProgrammingSolver",
+    "LXGoalStage",
     "RelaxedConstraint",
     "build_sequential_objectives",
     "build_weighted_objective",

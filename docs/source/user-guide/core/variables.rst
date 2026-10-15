@@ -97,7 +97,7 @@ Index by multiple models using Cartesian product:
 
 .. code-block:: python
 
-   from lumix import LXIndexDimension, LXCartesianProduct
+   from lumix import LXIndexDimension
 
    assignment = (
        LXVariable[tuple[Driver, Date, Shift], int]("assignment")
@@ -148,6 +148,34 @@ Multi-Model Filter
        )
    )
 
+.. versionchanged:: 0.3.0
+   ``where_multi`` may be called before or after ``indexed_by_product``, and
+   ``.where(...)`` on a product variable filters the ``(driver, date)`` pairs
+   (it receives both instances). Both were silently ignored before.
+   ``where_multi`` on a variable with a single index raises ``ValueError``.
+
+Joined Index
+~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+When the second dimension depends on the first (each driver serves its own
+routes), use ``indexed_by_join``. The instances are the ``(driver, route)``
+pairs that ``join_func`` returns; ``key_func`` gives each pair's index key.
+
+.. code-block:: python
+
+   assignment = (
+       LXVariable[tuple[Driver, Route], int]("assignment")
+       .binary()
+       .indexed_by_join(
+           Driver, Route,
+           join_func=lambda d: d.routes,
+           key_func=lambda d, r: (d.id, r.id),
+       )
+       .from_data(drivers)
+   )
+
 Data Sources
 ------------
 
@@ -182,15 +210,20 @@ Query from database:
 Cartesian Product
 ~~~~~~~~~~~~~~~~~
 
-For multi-dimensional variables:
+For multi-dimensional variables, give each dimension its own data and use
+``indexed_by_product`` (see `Multi-Model Indexing`_):
 
 .. code-block:: python
 
-   from lumix import LXCartesianProduct
+   from lumix import LXIndexDimension
 
    assignment = (
        LXVariable[tuple[Driver, Date], int]("assignment")
-       .from_data(LXCartesianProduct(drivers, dates))
+       .binary()
+       .indexed_by_product(
+           LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
+           LXIndexDimension(Date, lambda dt: dt.id).from_data(dates),
+       )
    )
 
 Cost Coefficients
@@ -209,10 +242,19 @@ Single-Model
        .from_data(products)
    )
 
-   # Use in objective
-   model.maximize(
-       LXLinearExpression().add_term(production, lambda p: p.profit)
-   )
+   # The objective is the sum of the costs: called without an expression,
+   # minimize()/maximize() use the variables' cost() / cost_multi().
+   model.maximize()
+
+   # The same objective, written out:
+   model.maximize(production.cost_expression())
+
+.. versionchanged:: 0.3.0
+   ``cost()`` and ``cost_multi()`` define objective coefficients.
+   ``model.minimize()`` / ``model.maximize()`` without an argument use the sum
+   of all cost expressions (``model.cost_objective()``) and raise
+   ``ValueError`` if no variable has a cost. An explicit objective expression
+   ignores the costs. Before 0.3.0 the costs were never used.
 
 Multi-Model
 ~~~~~~~~~~~
@@ -244,26 +286,32 @@ Simple Bounds
 Data-Driven Bounds
 ~~~~~~~~~~~~~~~~~~
 
-Bounds can vary per instance:
+``bounds()`` sets one pair of bounds for the whole family. Limits that vary
+per instance are written as an indexed constraint:
 
 .. code-block:: python
 
-   # Use where clause for conditional bounds
    production = (
        LXVariable[Product, float]("production")
        .continuous()
        .bounds(lower=0)
+       .indexed_by(lambda p: p.id)
        .from_data(products)
    )
 
-   # Add constraints for upper bounds from data
+   # Per-instance upper bounds: one constraint row per product
    model.add_constraint(
        LXConstraint[Product]("max_production")
        .expression(LXLinearExpression().add_term(production, 1.0))
        .le()
        .rhs(lambda p: p.max_capacity)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
+
+Each row ``max_production[id]`` contains only the matching
+``production[id]``, because the row has the variable's own data type.
+Passing a function to ``bounds()`` raises ``TypeError``.
 
 Best Practices
 --------------

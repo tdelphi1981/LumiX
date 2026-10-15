@@ -114,28 +114,19 @@ class LXIndexDimension(Generic[TModel]):
     _session: Optional[Any] = None
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that detaches ORM sessions and handles lambda closures.
+        """Copy the dimension structure; share data instances and callables.
 
-        This method enables what-if analysis on models using ORM data sources by:
-        1. Materializing lazy-loaded ORM data before copying
-        2. Detaching ORM objects from database sessions
-        3. Safely copying lambda functions that may capture ORM objects
+        Data instances (plain objects and ORM objects alike) and callables are shared
+        with the original, so closures and identity checks behave the same in the copy.
+        An ORM-backed source is materialized once (its query runs at copy time).
 
         Args:
             memo: Dictionary for tracking circular references during deepcopy
 
-        Returns:
-            Deep copy of this dimension with all ORM dependencies resolved
-
-        Note:
-            After copying, the new dimension will have _session=None and all data
-            stored in _data as detached objects safe for pickling.
+        .. versionchanged:: 0.3.0
+           Instances are shared instead of deep-copied/detached (catalog A23, B15).
         """
         from copy import deepcopy
-        from ..utils.copy_utils import (
-            materialize_and_detach_list,
-            copy_function_detaching_closure
-        )
 
         # Create new instance without calling __init__
         cls = self.__class__
@@ -146,20 +137,16 @@ class LXIndexDimension(Generic[TModel]):
         result.model_type = self.model_type
         result.label = self.label
 
-        # Copy functions - may have closures capturing ORM objects
-        result.key_func = copy_function_detaching_closure(self.key_func, memo)
-        result.filter_func = (
-            copy_function_detaching_closure(self.filter_func, memo)
-            if self.filter_func is not None
-            else None
-        )
+        # Callables are shared, not copied: closures keep seeing the user's own objects.
+        result.key_func = self.key_func
+        result.filter_func = self.filter_func
 
         # CRITICAL: Handle data sources
         # If using ORM session, materialize data before copying
         if self._session is not None:
             try:
                 instances = self.get_instances()
-                result._data = materialize_and_detach_list(instances, memo)
+                result._data = list(instances)
             except Exception as e:
                 import warnings
                 warnings.warn(
@@ -170,8 +157,8 @@ class LXIndexDimension(Generic[TModel]):
                 result._data = []
             result._session = None
         elif self._data is not None:
-            # Already have data - just detach and copy
-            result._data = materialize_and_detach_list(self._data, memo)
+            # Data instances are shared (never copied or detached)
+            result._data = list(self._data)
             result._session = None
         else:
             # No data source configured

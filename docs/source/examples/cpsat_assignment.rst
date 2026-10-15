@@ -66,7 +66,9 @@ Multi-indexed binary variables for (worker, task) pairs:
 
 .. literalinclude:: ../../../examples/05_cpsat_assignment/cpsat_assignment.py
    :language: python
-   :lines: 50-58
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
+   :dedent: 4
 
 **Key Points**:
 
@@ -81,7 +83,9 @@ Each task assigned to exactly one worker:
 
 .. literalinclude:: ../../../examples/05_cpsat_assignment/cpsat_assignment.py
    :language: python
-   :lines: 76-86
+   :start-after: # [docs:task-coverage]
+   :end-before: # [docs:task-coverage-end]
+   :dedent: 4
 
 The ``.eq().rhs(1)`` ensures exactly one assignment per task.
 
@@ -180,28 +184,36 @@ Step 1: Create Assignment Variables
 
 .. literalinclude:: ../../../examples/05_cpsat_assignment/cpsat_assignment.py
    :language: python
-   :lines: 50-58
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
+   :dedent: 4
 
 Step 2: Set Objective
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/05_cpsat_assignment/cpsat_assignment.py
    :language: python
-   :lines: 64-69
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
+   :dedent: 4
 
 Step 3: Add Task Coverage Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/05_cpsat_assignment/cpsat_assignment.py
    :language: python
-   :lines: 73-86
+   :start-after: # [docs:task-coverage]
+   :end-before: # [docs:task-coverage-end]
+   :dedent: 4
 
 Step 4: Add Worker Capacity Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/05_cpsat_assignment/cpsat_assignment.py
    :language: python
-   :lines: 90-103
+   :start-after: # [docs:worker-capacity]
+   :end-before: # [docs:worker-capacity-end]
+   :dedent: 4
 
 Step 5: Solve and Access Solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -257,7 +269,7 @@ Pattern 2: Exactly-One Constraint
        expr = LXLinearExpression().add_multi_term(
            assignment,
            coeff=lambda a, b_var: 1.0,
-           where=lambda a, b_var: b_var.id == b.id
+           where=lambda a, b_var, bid=b.id: b_var.id == bid  # bid binds this b
        )
        model.add_constraint(
            LXConstraint(f"coverage_{b.id}")
@@ -276,7 +288,7 @@ Pattern 3: Capacity Constraint
        expr = LXLinearExpression().add_multi_term(
            assignment,
            coeff=lambda a_var, b: 1.0,
-           where=lambda a_var, b: a_var.id == a.id
+           where=lambda a_var, b, aid=a.id: a_var.id == aid  # aid binds this a
        )
        model.add_constraint(
            LXConstraint(f"capacity_{a.id}")

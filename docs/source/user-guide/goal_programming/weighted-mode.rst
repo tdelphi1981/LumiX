@@ -28,6 +28,7 @@ Weighted goal programming is ideal when:
 
 - Priorities must be absolutely enforced (use :doc:`sequential-mode` instead)
 - You need exact lexicographic optimization
+- Goals have very different scales (see `Limits of the Weight Approximation`_)
 
 How It Works
 ------------
@@ -43,14 +44,23 @@ LumiX automatically scales weights exponentially based on priority:
    Priority 2 → Weight = 10^5
    Priority 3 → Weight = 10^4
    ...
+   Priority 6 → Weight = 10
+   Priority 7 → Weight = 1
+   Priority 8 → Weight = 0.1
 
 This ensures higher priorities **effectively dominate** lower priorities in the objective.
+
+.. note::
+   Weights are ``10 ** (7 - priority)``: priority 6 weighs 10 and priority 7 weighs 1, the
+   same as the model objective. Goals at priority 7 or higher therefore do **not** dominate
+   the objective (priority 8 weighs 0.1). Keep goals that must win at priorities 1–6, or use
+   sequential mode, which is lexicographic.
 
 **Mathematical formulation**:
 
 .. math::
 
-   \text{minimize} \sum_{p=1}^{P} 10^{(6-p)} \sum_{g \in G_p} w_g (d_g^+ + d_g^-)
+   \text{minimize} \sum_{p=1}^{P} 10^{(7-p)} \sum_{g \in G_p} w_g \sum_{s \in U_g} d_g^s
 
 Where:
 
@@ -58,6 +68,7 @@ Where:
 - :math:`G_p` = set of goals at priority :math:`p`
 - :math:`w_g` = weight for goal :math:`g`
 - :math:`d_g^+, d_g^-` = positive/negative deviations
+- :math:`U_g` = the undesired sides of goal :math:`g`: :math:`\{-\}` for ``>=``, :math:`\{+\}` for ``<=``, both for ``==``
 
 Objective Construction
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -79,6 +90,33 @@ For each goal, the system:
 
    EQ (=): minimize both deviations
        budget == 50000  →  minimize (pos_dev + neg_dev)
+
+The model's own objective and the priority 0 goals are added to this sum (see
+`Combining with Custom Objectives`_).
+
+.. _weighted-scale-example:
+
+Limits of the Weight Approximation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The weights ``10^(7-p)`` approximate the priority order; they do not enforce it.
+A lower priority wins whenever one unit of its weighted deviation is worth more
+than the higher priority's, which happens when goal expressions have very
+different scales. For example, with ``x + y <= 10`` as a hard constraint:
+
+.. code-block:: python
+
+   gx = (LXConstraint("gx").expression(LXLinearExpression().add_term(x, 1.0))
+         .ge().rhs(8).as_goal(priority=1, weight=1.0))
+   gy = (LXConstraint("gy").expression(LXLinearExpression().add_term(y, 20.0))
+         .ge().rhs(160).as_goal(priority=2, weight=1.0))
+
+   # Weighted:   x = 2, y = 8  (a unit of y removes 20 units of gy's deviation,
+   #                            2,000,000 against 1,000,000 for a unit of x)
+   # Sequential: x = 8, y = 2  (priority 1 is met first)
+
+When goals have very different scales, or priorities must hold exactly, use
+:doc:`sequential-mode`, or rescale the goal expressions.
 
 Basic Usage
 -----------
@@ -111,6 +149,7 @@ Single-Priority Goals
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Build and solve
@@ -148,6 +187,7 @@ Multi-Priority Goals
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Priority 2: Maintain quality
@@ -235,6 +275,7 @@ Asymmetric Deviation Costs
        .rhs(lambda p: p.target_inventory)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Note: EQ goals minimize BOTH pos and neg deviations equally
@@ -248,6 +289,7 @@ Asymmetric Deviation Costs
        .rhs(lambda p: p.target_inventory)
        .as_goal(priority=1, weight=3.0)  # Higher penalty
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Penalize over-stock less
@@ -258,15 +300,51 @@ Asymmetric Deviation Costs
        .rhs(lambda p: p.target_inventory)
        .as_goal(priority=1, weight=1.0)  # Lower penalty
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
 Combining with Custom Objectives
 ---------------------------------
 
+The Model Objective
+~~~~~~~~~~~~~~~~~~~
+
+An objective set on the model with ``minimize()`` / ``maximize()`` (with an
+expression, or without an argument to use the variables' costs) is kept as the
+**lowest priority**. In weighted mode it is added to the goal objective in
+minimization form (a maximized objective is subtracted) with weight
+``priority_to_weight(0) = 1``:
+
+.. code-block:: python
+
+   model.maximize(profit_expr)       # lowest priority
+   model.add_constraint(demand_goal)  # priority 1
+
+   solution = optimizer.solve(model)
+   # Solved objective: 10^6 * demand deviations - profit
+   print(solution.objective_value)    # the combined value, not the profit
+
+``solution.objective_value`` is the value of this combined objective. Compute the
+value of your own objective from the variable values when you need it, or use
+:doc:`sequential-mode`, whose final stage reports it directly.
+
+A nonlinear (``LXNonLinearExpression``) objective cannot be combined with goals
+and raises ``ValueError``; write the nonlinear terms in a goal instead. A
+quadratic objective works on solvers that support it (Gurobi, CPLEX).
+
+.. versionchanged:: 0.3.0
+
+   The model's objective is kept as the lowest priority. Before 0.3.0 it was
+   silently replaced by the goal objective.
+
 Priority 0 for Custom Objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use **priority 0** to include a traditional objective alongside goals:
+Use **priority 0** to include a traditional objective alongside goals. A priority
+0 goal is an objective term, not a goal: the expression of a ``.ge()`` goal is
+maximized and the expression of a ``.le()`` goal minimized, times its weight. Its
+right-hand side is not used and it has no deviation variables. Priority 0 goals
+are combined with the model's objective, with weight ``1``:
 
 .. code-block:: python
 
@@ -277,10 +355,9 @@ Use **priority 0** to include a traditional objective alongside goals:
            LXLinearExpression()
            .add_term(production, lambda p: p.profit_margin)
        )
-       .ge()
-       .rhs(0)
+       .ge()   # maximize the expression
+       .rhs(0)  # not used for priority 0
        .as_goal(priority=0, weight=1.0)  # Priority 0!
-       .from_data(products)
    )
 
    # Regular goals (priority 1+)
@@ -291,6 +368,7 @@ Use **priority 0** to include a traditional objective alongside goals:
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    quality_goal = (
@@ -302,9 +380,18 @@ Use **priority 0** to include a traditional objective alongside goals:
    )
 
    # Result:
-   #   Priority 1 (demand) will be optimized first
-   #   Then priority 2 (quality)
-   #   Finally, profit will be maximized without hurting higher priorities
+   #   Priority 1 (demand) has the largest weight (10^6)
+   #   Then priority 2 (quality, 10^5)
+   #   Profit is maximized with weight 1, after the goals
+
+Priority 0 goals must use ``.ge()`` or ``.le()`` and must not be indexed or contain
+nonlinear terms; otherwise ``ValueError`` is raised. ``get_goal_deviations()``
+returns ``None`` for them.
+
+.. versionchanged:: 0.3.0
+
+   Priority 0 goals are optimized. Before 0.3.0 they were relaxed like other goals
+   with weight 1, so they optimized nothing.
 
 Practical Example
 -----------------
@@ -369,6 +456,7 @@ Production Planning with Multiple Goals
        .le()
        .rhs(lambda r: r.capacity)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
 
    # Priority 0: Maximize profit (custom objective)
@@ -394,6 +482,7 @@ Production Planning with Multiple Goals
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Priority 2: Efficient resource utilization (lower priority)
@@ -408,6 +497,7 @@ Production Planning with Multiple Goals
        .rhs(lambda r: r.capacity * 0.8)
        .as_goal(priority=2, weight=1.0)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
 
    # Build model
@@ -431,6 +521,7 @@ Production Planning with Multiple Goals
    print("=" * 80)
 
    if solution.is_optimal():
+       # Combined value: weighted goal deviations minus profit
        print(f"\nObjective Value: {solution.objective_value:.2f}")
        print(f"Solve Time: {solution.solve_time:.3f}s")
 
@@ -454,8 +545,8 @@ Production Planning with Multiple Goals
        print("\nGoal Achievement:")
        print("-" * 80)
 
+       # The priority 0 "profit" term has no deviations, so it is not listed
        goals = [
-           ("profit", "Maximize Profit", 0),
            ("demand", "Meet Demand", 1),
            ("utilization", "Target Utilization", 2),
        ]
@@ -472,12 +563,8 @@ Production Planning with Multiple Goals
                print(f"  Total Deviation: {total_dev:.2f}")
 
                deviations = solution.get_goal_deviations(goal_name)
-               if isinstance(deviations['pos'], dict):
-                   total_pos = sum(deviations['pos'].values())
-                   total_neg = sum(deviations['neg'].values())
-               else:
-                   total_pos = deviations['pos']
-                   total_neg = deviations['neg']
+               total_pos = sum(deviations['pos'].values())
+               total_neg = sum(deviations['neg'].values())
 
                if total_pos > 1e-6:
                    print(f"  Over-achievement: {total_pos:.2f}")
@@ -510,6 +597,7 @@ Dynamic Weight Calculation
            weight=1.0  # Could use lambda here if API supported it
        )
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
 Conditional Goals
@@ -528,6 +616,7 @@ Conditional Goals
        .where(lambda p: p.is_active)  # Filter
        .as_goal(priority=1, weight=1.0)
        .from_data(active_products)
+       .indexed_by(lambda p: p.id)
    )
 
 Best Practices
@@ -590,6 +679,7 @@ Best Practices
           # Weight 1.0: All customers equally important
           .as_goal(priority=1, weight=1.0)
           .from_data(products)
+          .indexed_by(lambda p: p.id)
       )
 
 Troubleshooting
@@ -658,16 +748,16 @@ Unexpected Deviations
        deviations = solution.get_goal_deviations(goal_name)
 
        print(f"\n{goal_name}:")
-       print(f"  Positive deviation: {deviations['pos']}")
-       print(f"  Negative deviation: {deviations['neg']}")
+       print(f"  Positive deviation: {sum(deviations['pos'].values()):.2f}")
+       print(f"  Negative deviation: {sum(deviations['neg'].values()):.2f}")
+       print(f"  Undesired total: {solution.get_total_deviation(goal_name):.2f}")
 
-       # For indexed goals, show breakdown
-       if isinstance(deviations['pos'], dict):
-           for key in deviations['pos'].keys():
-               pos = deviations['pos'][key]
-               neg = deviations['neg'][key]
-               if pos > 1e-6 or neg > 1e-6:
-                   print(f"    {key}: pos={pos:.2f}, neg={neg:.2f}")
+       # Per-row breakdown: keys are the goal name for a single goal,
+       # "<goal>_<key>" for an indexed goal
+       for row, pos in deviations['pos'].items():
+           neg = deviations['neg'][row]
+           if pos > 1e-6 or neg > 1e-6:
+               print(f"    {row}: pos={pos:.2f}, neg={neg:.2f}")
 
 Next Steps
 ----------

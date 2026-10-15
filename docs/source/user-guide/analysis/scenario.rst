@@ -52,13 +52,18 @@ A **modification** specifies how to change a model parameter.
 
 - **Constraint RHS**: Set, add, or multiply right-hand side values
 - **Variable Bounds**: Modify lower or upper bounds
-- **Objective Coefficients**: Change objective function coefficients (future)
+- **Objective Coefficients**: Not supported yet. A modification with any other target or
+  modification type raises ``ValueError`` when the scenario is applied.
 
 **Operations:**
 
 - ``set_value``: Replace current value
 - ``add``: Add to current value
 - ``multiply``: Multiply current value by factor
+
+``add`` and ``multiply`` work both on a scalar right-hand side (``.rhs(1000)``) and on a
+per-row right-hand side (``.rhs(lambda row: row.capacity)``), where they apply to every row.
+See `Per-Row Right-Hand Sides`_.
 
 Scenario Comparison
 ~~~~~~~~~~~~~~~~~~~
@@ -109,6 +114,15 @@ Creating the Analyzer
        optimizer=optimizer,
        include_baseline=True  # Include unmodified model as "baseline"
    )
+
+.. versionchanged:: 0.3.0
+   ``LXScenarioAnalyzer`` and ``LXWhatIfAnalyzer`` accept the model and optimizer as
+   keyword arguments (``base_model=`` / ``model=``, ``optimizer=``).
+
+The analyzer never changes ``model``. Each scenario runs on a copy made with
+``copy.deepcopy``: the copy has its own families and constraints, but shares every data
+instance and every lambda with ``model`` (see :doc:`/user-guide/utils/model-copying`).
+Instead of a model you can pass a ``model_factory``; see `Building Models with a Factory`_.
 
 Adding Scenarios
 ~~~~~~~~~~~~~~~~
@@ -171,12 +185,21 @@ Finding Best Scenario
 
 .. code-block:: python
 
-   # For maximization
-   best = analyzer.get_best_scenario(maximize=True)
+   # Follows the base model's objective sense (largest objective when it
+   # maximizes, smallest when it minimizes)
+   best = analyzer.get_best_scenario()
    print(f"Best scenario: {best}")
 
-   # For minimization
-   best = analyzer.get_best_scenario(maximize=False)
+   # Force a direction: largest / smallest objective
+   largest = analyzer.get_best_scenario(maximize=True)
+   smallest = analyzer.get_best_scenario(maximize=False)
+
+Only feasible results are considered; if no result is feasible,
+``get_best_scenario`` returns ``None``.
+
+.. versionchanged:: 0.3.0
+   ``maximize`` defaults to ``None`` and follows the base model's objective sense
+   (it used to always maximize), and infeasible results are skipped.
 
 Modification Types
 ------------------
@@ -197,6 +220,47 @@ Constraint RHS Modifications
    # Multiply by factor
    scenario.modify_constraint_rhs("max_capacity", multiply=1.25)
 
+Several modifications of the same constraint are applied in the order they were added.
+``multiply=m`` followed by ``add=a`` turns a right-hand side ``b`` into ``b * m + a``.
+
+Per-Row Right-Hand Sides
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionchanged:: 0.3.0
+   ``add`` and ``multiply`` apply row by row to constraints whose right-hand side is a
+   function; they used to be silently ignored.
+
+For an indexed constraint family whose right-hand side comes from the data, the
+modifications act on every row:
+
+.. code-block:: python
+
+   # One row per machine: production on m <= m.hours
+   model.add_constraint(
+       LXConstraint[Machine]("capacity")
+       .expression(hours_used)
+       .le()
+       .rhs(lambda m: m.hours)
+       .from_data(machines)
+       .indexed_by(lambda m: m.id)
+   )
+
+   # Every row: m.hours * 1.2
+   LXScenario("overtime").modify_constraint_rhs("capacity", multiply=1.2)
+
+   # Every row: m.hours - 8
+   LXScenario("maintenance").modify_constraint_rhs("capacity", add=-8)
+
+   # Every row: 40 (the same value for all rows)
+   LXScenario("flat").modify_constraint_rhs("capacity", set_value=40)
+
+   # Composed in order: m.hours * 0.5 - 1
+   (LXScenario("half_minus_one")
+    .modify_constraint_rhs("capacity", multiply=0.5)
+    .modify_constraint_rhs("capacity", add=-1))
+
+If a constraint has both a scalar right-hand side and a right-hand-side function, the
+scalar wins, as it does when the model is solved.
 Variable Bound Modifications
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -230,6 +294,104 @@ Custom Modifications
    )
 
    scenario = LXScenario("custom").add_custom_modification(mod)
+
+Supported combinations:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 40
+
+   * - ``target_type``
+     - ``modification_type``
+   * - ``"constraint"``
+     - ``"rhs_set"``, ``"rhs_add"``, ``"rhs_multiply"``
+   * - ``"variable"``
+     - ``"bound_lower"``, ``"bound_upper"``
+
+.. versionchanged:: 0.3.0
+   Any other target type (for example ``"objective"``) or modification type (for
+   example ``"coeff_multiply"``) raises ``ValueError`` when the scenario runs; such
+   modifications used to be ignored without notice.
+
+Building Models with a Factory
+------------------------------
+
+.. versionadded:: 0.3.0
+
+Instead of a base model you can give the analyzer a function that builds the model:
+
+.. code-block:: python
+
+   def build_model():
+       products = load_products()
+       return build_production_model(products)   # a new LXModel on every call
+
+   analyzer = LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model)
+   analyzer.add_scenario(LXScenario("high_capacity").modify_constraint_rhs("capacity", multiply=1.5))
+   results = analyzer.run_all_scenarios()
+
+How it works:
+
+- The factory is called once for the base model (``analyzer.base_model``) and once for
+  every scenario (and every ``sensitivity_to_parameter`` value). Nothing is copied.
+- It must return a **new** model on every call. Returning a model it already returned
+  raises ``ValueError``.
+- Pass exactly one of ``base_model`` and ``model_factory`` (``ValueError`` otherwise);
+  a missing ``optimizer`` raises ``TypeError``.
+- A model built for a scenario is freed once its run is over (the analyzer keeps only
+  the base model).
+
+A factory is the recommended way to analyze an ORM-backed model whose session may be
+closed before the analysis runs: open a fresh session inside the factory.
+
+.. code-block:: python
+
+   from sqlalchemy.orm import Session, selectinload
+
+   def build_model():
+       with Session(engine) as session:     # fresh session, closed after loading
+           products = (session.query(Product)
+                       .options(selectinload(Product.category))   # what lambdas read
+                       .all())
+       production = (
+           LXVariable[Product, float]("production")
+           .continuous().bounds(lower=0)
+           .indexed_by(lambda p: p.id)
+           .from_data(products)
+       )
+       model = LXModel("plan").add_variable(production)
+       # ... constraints and objective; lambdas may read p.category.factor,
+       # which was loaded before the session closed
+       return model
+
+   analyzer = LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model)
+   analyzer.add_scenario(LXScenario("half").modify_constraint_rhs("capacity", set_value=500))
+   results = analyzer.run_all_scenarios()
+
+.. important::
+
+   Close the session inside the factory, after eager-loading every relationship your
+   lambdas read (``selectinload`` / ``joinedload``). Loaded attributes stay readable on
+   the instances after the session closes, and the connection goes back to the pool.
+   A session left open per model holds one pooled connection each, so with SQLAlchemy's
+   default pool (5 + 10 overflow) the 16th run would wait for a connection and fail.
+
+Recording Results
+-----------------
+
+.. versionadded:: 0.3.0
+
+Pass ``result_store=`` to write every solve (the baseline, each scenario and every
+``sensitivity_to_parameter`` run) to the database:
+
+.. code-block:: python
+
+   from lumix import LXResultStore
+
+   store = LXResultStore(session, analysis="q3-capacity")
+   analyzer = LXScenarioAnalyzer(model, optimizer, result_store=store)
+
+See :doc:`result-store`.
 
 Practical Examples
 ------------------
@@ -271,9 +433,9 @@ Example 1: Demand Scenarios
    # Compare
    print(analyzer.compare_scenarios())
 
-   # Decision making
-   best = analyzer.get_best_scenario()
-   worst = analyzer.get_best_scenario(maximize=False)
+   # Decision making (profit model: maximization)
+   best = analyzer.get_best_scenario()                # follows the model's sense
+   worst = analyzer.get_best_scenario(maximize=False)  # smallest feasible profit
 
    print(f"\nBest case ({best}):")
    print(f"  Objective: ${results[best].objective_value:,.2f}")
@@ -527,8 +689,12 @@ Best Practices
       sens = LXSensitivityAnalyzer(model, baseline_solution)
       bottlenecks = sens.identify_bottlenecks()
 
+      # Bottlenecks are constraint rows ("capacity[3]" for an indexed family);
+      # scenarios modify whole constraint families, so map rows to families
+      families = dict.fromkeys(name.split("[", 1)[0] for name in bottlenecks)
+
       # Create scenarios around bottlenecks
-      for constraint in bottlenecks:
+      for constraint in families:
           scenario = LXScenario(f"{constraint}_relaxed")
           scenario.modify_constraint_rhs(constraint, multiply=1.2)
           analyzer.add_scenario(scenario)
@@ -562,5 +728,6 @@ Next Steps
 
 - :doc:`sensitivity` - Understand shadow prices and reduced costs
 - :doc:`whatif` - Interactive exploration of changes
+- :doc:`result-store` - Persist scenario results
 - :doc:`/api/analysis/index` - Complete API reference
 - :doc:`/development/analysis-architecture` - Architecture details

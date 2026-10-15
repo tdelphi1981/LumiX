@@ -87,6 +87,7 @@ def build_production_model() -> LXModel:
         model automatically adapt to changes in the data.
     """
 
+    # [docs:define-variables]
     # Decision Variable: Production quantity for each product
     # KEY: LXVariable family that auto-expands to one var per product!
     production = (
@@ -96,10 +97,12 @@ def build_production_model() -> LXModel:
         .indexed_by(lambda p: p.id)  # Index by product ID
         .from_data(PRODUCTS)  # Provide data directly - NO manual loops!
     )
+    # [docs:define-variables-end]
 
     # Create model
     model = LXModel[Product]("production_planning").add_variable(production)
 
+    # [docs:objective]
     # Objective: Maximize total profit
     # The expression automatically sums over ALL products in the variable family
     profit_expr = (
@@ -110,7 +113,9 @@ def build_production_model() -> LXModel:
         )
     )
     model.maximize(profit_expr)
+    # [docs:objective-end]
 
+    # [docs:capacity-constraint]
     # Constraints: Resource capacity limits
     # For each resource, sum(usage * production) <= capacity
     for resource in RESOURCES:
@@ -130,7 +135,9 @@ def build_production_model() -> LXModel:
             .le()
             .rhs(resource.capacity)
         )
+    # [docs:capacity-constraint-end]
 
+    # [docs:min-production-constraint]
     # Constraints: Minimum production requirements
     # For each product, production[product] >= min_production
     # Create constraint family indexed by Product
@@ -144,6 +151,7 @@ def build_production_model() -> LXModel:
         .from_data(PRODUCTS)  # One constraint per product
         .indexed_by(lambda p: p.name)
     )
+    # [docs:min-production-constraint-end]
 
     return model
 

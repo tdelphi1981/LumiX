@@ -349,15 +349,20 @@ For decisions indexed by multiple dimensions:
 
 .. code-block:: python
 
-   from lumix import LXCartesianProduct
+   from lumix import LXIndexDimension
 
    # Assignment of drivers to shifts on dates
    assignment = (
        LXVariable[tuple[Driver, Date, Shift], int]("assignment")
        .binary()
-       .indexed_by(lambda item: (item[0].id, item[1].id, item[2].id))
-       .from_data(LXCartesianProduct(drivers, dates, shifts))
+       .indexed_by_product(
+           LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
+           LXIndexDimension(Date, lambda dt: dt.id).from_data(dates),
+           LXIndexDimension(Shift, lambda s: s.id).from_data(shifts),
+       )
    )
+
+The index key of each variable is the tuple ``(driver.id, date.id, shift.id)``.
 
 Getting Help
 ------------

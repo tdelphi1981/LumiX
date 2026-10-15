@@ -24,7 +24,11 @@ Bilinear terms are products of two variables:
 Linearization Methods
 ---------------------
 
-LumiX automatically selects the appropriate linearization based on variable types:
+LumiX automatically selects the appropriate linearization based on variable types.
+On variable families the product is taken per instance and summed:
+``add_product(x, y)`` is :math:`\sum_k x_k y_k` for families over the same keys
+(``LXQuadraticExpression.add_quadratic`` multiplies all pairs instead; see
+:ref:`product-vs-quadratic`).
 
 Binary × Binary (AND Logic)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -38,10 +42,12 @@ For binary variables x, y ∈ {0, 1}, introduce z with constraints:
    z \geq x + y - 1
 
 **Properties:**
+
 - Exact linearization
 - 3 constraints
 - No auxiliary variables beyond z
 - Very efficient
+- ``x · x`` of one binary is ``x`` itself (no variable added)
 
 Binary × Continuous (Big-M)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,10 +62,30 @@ For binary x ∈ {0, 1} and continuous y ∈ [L, U] (with finite bounds L and U)
    z \geq y - U \cdot (1-x)
 
 **Properties:**
+
+- Exact linearization
 - 4 constraints
-- Requires finite bounds on y
-- M = max(\|L\|, \|U\|)
+- The constants are the bounds L and U of y
+- Without finite bounds, ``big_m_value`` (``LXLinearizerConfig``) replaces the
+  missing bound and a ``UserWarning`` is issued
 - Tighter bounds → better performance
+- Also used for a binary times an integer variable
+
+Integer × Integer or Continuous (Binary Expansion)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For an integer x ∈ [L, U], LumiX writes :math:`x = L + \sum_k 2^k d_k` with binary
+digits :math:`d_k` and replaces :math:`x \cdot y` by
+:math:`L y + \sum_k 2^k (d_k \cdot y)`, each :math:`d_k \cdot y` a binary product.
+
+**Properties:**
+
+- Exact linearization
+- Requires finite bounds on the integer factor (fractional bounds are rounded
+  inward, ``[0.5, 3.7]`` → ``[1, 3]``)
+- The number of digits is limited by ``LXLinearizerConfig.binary_expansion_bits``
+  (default 10); a wider range raises ``ValueError``
+- When both factors are integer, the one with the smaller range is expanded
 
 Continuous × Continuous (McCormick Envelopes)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -74,10 +100,18 @@ For continuous x ∈ [xL, xU] and y ∈ [yL, yU], introduce z with:
    z \leq xU \cdot y + yL \cdot x - xU \cdot yL
 
 **Properties:**
+
 - 4 constraints (convex and concave envelopes)
-- Relaxation (not exact unless at vertices)
+- Relaxation (not exact unless at vertices): the reported optimum is a bound and
+  may not be attainable
+- LumiX issues a ``UserWarning`` containing "McCormick" and sets
+  ``solution.relaxation`` to ``True``
 - REQUIRES finite bounds on both variables
 - Tighter bounds → tighter relaxation
+
+.. versionchanged:: 0.3.0
+   A McCormick relaxation used to be reported as an optimal solution without any
+   warning, and integer products were relaxed the same way; they are exact now.
 
 Basic Usage
 -----------
@@ -282,15 +316,12 @@ Advanced Patterns
 Multiple Products in Single Expression
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sum multiple bilinear terms:
+One term on two families over the same keys sums the per-instance products:
 
 .. code-block:: python
 
    # Total revenue = sum of (price_i * quantity_i)
-   total_revenue_terms = [
-       LXBilinearTerm(var1=price, var2=quantity, coefficient=1.0)
-       for price, quantity in zip(prices, quantities)
-   ]
+   total_revenue = LXNonLinearExpression().add_product(price, quantity)
 
 Weighted Products
 ~~~~~~~~~~~~~~~~~
@@ -388,6 +419,10 @@ Linearization Overhead
      - 1
      - 4
      - Exact
+   * - Integer × Integer or Continuous (K digits)
+     - 2K + 1
+     - 4K + 2
+     - Exact
    * - Continuous × Continuous
      - 1
      - 4
@@ -411,14 +446,14 @@ Model Size Impact
 Solver Performance
 ~~~~~~~~~~~~~~~~~~
 
-**Binary × Continuous** and **Binary × Binary**: Exact, solves efficiently
+**Binary × Continuous**, **Binary × Binary** and **Integer** products: Exact
 
-**Continuous × Continuous**: Relaxation, may need branching
+**Continuous × Continuous**: Relaxation; ``solution.relaxation`` is ``True``
 
 .. code-block:: python
 
-   # For cont × cont, consider tightening bounds or using SOS2 variables
-   # if the problem structure allows
+   # For cont × cont, tighten the bounds, make one factor integer or binary,
+   # or solve a quadratic objective (LXQuadraticExpression) on Gurobi or CPLEX
 
 Common Pitfalls
 ---------------
@@ -432,7 +467,7 @@ Missing Bounds
    x = LXVariable("x").continuous()  # No bounds!
    y = LXVariable("y").continuous()  # No bounds!
    product = LXBilinearTerm(var1=x, var2=y)
-   # → Linearization fails or uses bad default bounds
+   # → ValueError: McCormick envelopes require bounds on both variables
 
 Unbounded Variables
 ~~~~~~~~~~~~~~~~~~~
@@ -448,12 +483,14 @@ Unbounded Variables
 Wrong Variable Order
 ~~~~~~~~~~~~~~~~~~~~
 
-For Binary × Continuous, put binary first (though LumiX should handle automatically):
+The order of the factors does not matter; LumiX detects which one is binary or
+integer:
 
 .. code-block:: python
 
-   # Preferred order
+   # Both are the same product
    product = LXBilinearTerm(var1=binary_var, var2=continuous_var)
+   product = LXBilinearTerm(var1=continuous_var, var2=binary_var)
 
 Integration with Expressions
 -----------------------------

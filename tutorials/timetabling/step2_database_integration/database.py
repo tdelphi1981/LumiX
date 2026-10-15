@@ -49,6 +49,7 @@ from sqlalchemy.orm import sessionmaker, Session
 Base = declarative_base()
 
 
+# [docs:orm-models]
 class Teacher(Base):
     """Teacher ORM model.
 
@@ -81,6 +82,7 @@ class Classroom(Base):
 
     def __repr__(self):
         return f"<Classroom(id={self.id}, name='{self.name}', capacity={self.capacity})>"
+# [docs:orm-models-end]
 
 
 class SchoolClass(Base):

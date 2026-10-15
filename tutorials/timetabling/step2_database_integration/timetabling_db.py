@@ -82,6 +82,7 @@ def build_timetabling_model(session) -> LXModel:
     # Create cached checker for efficient lookups (avoids redundant DB queries)
     fits_checker = create_cached_class_fits_checker(session)
 
+    # [docs:assignment-variable]
     # Decision variable: assignment[lecture, timeslot, classroom]
     # LumiX queries the database directly using from_model()
     assignment = (
@@ -97,6 +98,7 @@ def build_timetabling_model(session) -> LXModel:
             lambda lec, ts, room: fits_checker(lec.class_id, room.id)
         )
     )
+    # [docs:assignment-variable-end]
 
     # Create model
     model = LXModel("high_school_timetabling_orm")
@@ -396,9 +398,11 @@ def main():
     print("  ✓ Type-safe ORM operations with IDE support")
     print("  ✓ Saving solutions using ORM session")
 
+    # [docs:init-database]
     # Initialize database and create session
     engine = init_database("sqlite:///school.db")
     session = get_session(engine)
+    # [docs:init-database-end]
 
     try:
         # Verify database is populated

@@ -34,7 +34,6 @@ Example:
 
         # Configure linearization
         config = LXLinearizerConfig(
-            default_method=LXLinearizationMethod.MCCORMICK,
             pwl_num_segments=30,
             adaptive_breakpoints=True
         )

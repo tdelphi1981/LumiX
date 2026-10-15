@@ -23,6 +23,14 @@ Every constraint has three parts:
 
 **Mathematical Form**: ``LHS {<=, >=, ==} RHS``
 
+Constraint names must be unique within a model; duals, row activity and the
+analysis tools look rows up by name.
+
+.. versionchanged:: 0.3.0
+   ``LXModel.add_constraint`` raises ``ValueError`` for a second constraint with
+   an existing name (before, the second one hid the first from duals, activity
+   and analysis).
+
 Constraint Senses
 -----------------
 
@@ -122,6 +130,33 @@ One constraint per data instance:
 
 This creates one constraint per resource.
 
+.. versionchanged:: 0.3.0
+   A constraint with data (``from_data`` / ``from_model``) must also call
+   ``indexed_by``; without it LumiX raises ``ValueError`` instead of silently
+   building one combined row.
+
+.. versionchanged:: 0.3.0
+   When a constraint family is defined over the same data as a variable, a term
+   on that variable is narrowed to the row's own instance only if its coefficient
+   and filter take one argument. Give the coefficient two arguments
+   (``lambda var_instance, row_instance: ...``) to reach other instances, for
+   example ``inv[t-1]`` in an inventory balance. See :doc:`/development/canonical-model`.
+
+.. note::
+   Narrowing applies to terms whose variable family has the row's own data type.
+   In a row, a term on a multi-part variable (``indexed_by_product`` or
+   ``indexed_by_join``) is **not** narrowed to the row's part: it covers every
+   instance unless you select them. Give ``where`` two arguments, the instance
+   (a tuple of its parts) and the row, for example
+
+   .. code-block:: python
+
+      # supply[s]: the flows that leave supplier s
+      LXLinearExpression().add_term(flow, 1.0, where=lambda f, s: f[0].id == s.id)
+
+   or pick the instances with ``keys=`` (see :doc:`/user-guide/performance`).
+
+
 Right-Hand Side (RHS)
 ---------------------
 
@@ -145,6 +180,10 @@ Expression RHS
 .. code-block:: python
 
    .rhs(lambda r: r.base_capacity * r.efficiency_factor)
+
+.. versionchanged:: 0.3.0
+   When ``rhs`` is called more than once, the last call wins, whether it gives a
+   value or a function.
 
 Multi-Model Constraints
 -----------------------

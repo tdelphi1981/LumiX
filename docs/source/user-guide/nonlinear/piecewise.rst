@@ -20,11 +20,26 @@ Approximate any univariate nonlinear function f(x) with a piecewise-linear funct
 Linearization Methods
 ---------------------
 
-Three formulation methods available:
+Three formulation methods available, all exact for the piecewise-linear function
+through the breakpoints:
 
-1. **SOS2**: Special Ordered Set Type 2 (best when solver supports)
+1. **SOS2**: Convex-combination weights, adjacency enforced with segment binaries
 2. **Incremental**: Binary selection variables
-3. **Logarithmic**: Gray code encoding (efficient for many segments)
+3. **Logarithmic**: Gray code encoding (log₂ binaries, efficient for many segments)
+
+Pass ``breakpoints=[...]`` to use your own breakpoints (for a function given by
+data points), and note that the domain constrains the variable; see
+:doc:`/user-guide/linearization/piecewise`.
+
+``num_segments``, ``adaptive`` and ``method`` default to ``None``: the values of
+:class:`~lumix.linearization.config.LXLinearizerConfig` apply (``pwl_num_segments``
+20, ``adaptive_breakpoints`` ``True``, ``pwl_method`` ``"sos2"``), and a value given
+on the term wins. Adaptive breakpoints are deterministic. On a variable family the
+term applies to every instance: ``add_piecewise(x, f)`` is :math:`\sum_i f(x_i)`.
+
+.. versionchanged:: 0.3.0
+   The term defaults are ``None`` (taken from the configuration), adaptive
+   breakpoints are deterministic, and a term on a family applies per instance.
 
 Basic Usage
 -----------

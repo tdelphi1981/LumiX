@@ -173,12 +173,17 @@ Automatically linearize nonlinear terms:
 
 **Parameters:**
 
-- ``big_m``: Big-M constant for conditional constraints (default: 1e6)
+- ``big_m``: Bound for indicators and binary products whose variables or expression
+  have no finite bound (default: 1e6)
 - ``pwl_segments``: Number of segments for piecewise-linear approximations (default: 20)
 - ``pwl_method``: Method for PWL ("sos2", "incremental", "logarithmic")
-- ``prefer_sos2``: Use SOS2 when solver supports it (default: True)
+- ``prefer_sos2``: No effect (deprecated in 0.3.0, removed in 0.4.0)
 - ``adaptive_breakpoints``: Use adaptive breakpoint generation (default: True)
-- ``mccormick_tighten_bounds``: Apply bound tightening for McCormick envelopes (default: True)
+- ``mccormick_tighten_bounds``: No effect (deprecated in 0.3.0, removed in 0.4.0)
+- ``**kwargs``: Other :class:`~lumix.linearization.config.LXLinearizerConfig` fields,
+  such as ``binary_expansion_bits``
+
+See :doc:`/user-guide/linearization/config`.
 
 **Example:**
 
@@ -193,7 +198,9 @@ Automatically linearize nonlinear terms:
        .enable_linearization(big_m=1e5, pwl_segments=30)
    )
 
-   # Automatically linearizes x*y using McCormick envelopes
+   # Automatically linearizes x*y: exact when a factor is binary or integer,
+   # McCormick envelopes (a relaxation, solution.relaxation is True) when both
+   # are continuous
    solution = optimizer.solve(model)
 
 enable_sensitivity()
@@ -253,7 +260,7 @@ Solve the optimization model:
        MIPFocus=1,             # 1=feasibility, 2=optimality, 3=bound
        Presolve=2,             # -1=auto, 0=off, 1=conservative, 2=aggressive
        Method=-1,              # -1=auto, 0=primal, 1=dual, 2=barrier
-       LogToConsole=1,         # 0=off, 1=on
+       verbose=True,           # print the Gurobi log
    )
 
 **CPLEX:**
@@ -263,8 +270,9 @@ Solve the optimization model:
    solution = optimizer.solve(
        model,
        threads=4,
-       mip_emphasis=1,         # 0=balanced, 1=feasibility, 2=optimality, 3=bound, 4=hidden
+       emphasis_mip=1,         # 0=balanced, 1=feasibility, 2=optimality, 3=bound, 4=hidden
        preprocessing_presolve=1,  # 0=off, 1=on
+       verbose=True,              # print the CPLEX log
    )
 
 **OR-Tools:**
@@ -273,8 +281,7 @@ Solve the optimization model:
 
    solution = optimizer.solve(
        model,
-       num_search_workers=4,   # Parallel workers
-       log_search_progress=True,
+       threads=4,              # the only extra OR-Tools parameter; others are ignored with a warning
    )
 
 **Returns:**
@@ -283,7 +290,7 @@ Solve the optimization model:
 
 - ``status``: Solution status ("optimal", "feasible", "infeasible", etc.)
 - ``objective_value``: Optimal objective value
-- ``variable_values``: Dictionary of variable values
+- ``variables``: Variable values by name (a dict of index key to value for an indexed family)
 - ``solve_time``: Time taken to solve
 - ``shadow_prices``: Shadow prices (if sensitivity enabled)
 - ``reduced_costs``: Reduced costs (if sensitivity enabled)
@@ -321,14 +328,14 @@ Example 1: Production Planning with Gurobi
    if solution.is_optimal():
        print(f"Maximum profit: ${solution.objective_value:,.2f}")
 
-       # Show production quantities
+       # Show production quantities (keyed by the variable's index key)
+       quantities = solution.get_mapped(production)
        for product in products:
-           value = solution.get_value(production, product)
-           print(f"Produce {value:.0f} units of {product.name}")
+           print(f"Produce {quantities[product.id]:.0f} units of {product.name}")
 
-       # Show shadow prices (resource values)
+       # Show shadow prices (resource values); rows are named "<constraint>[<key>]"
        for resource in resources:
-           price = solution.get_shadow_price(capacity, resource)
+           price = solution.get_shadow_price(f"capacity[{resource.id}]")
            print(f"{resource.name} shadow price: ${price:.2f}")
 
 Example 2: Scheduling with CP-SAT
@@ -351,12 +358,11 @@ Example 2: Scheduling with CP-SAT
    # Solve
    solution = optimizer.solve(model, time_limit=60)
 
-   # Show assignments
-   for task in tasks:
-       for worker in workers:
-           for day in days:
-               if solution.get_value(assignment, (task, worker, day)) > 0.5:
-                   print(f"{task.name} assigned to {worker.name} on {day}")
+   # Show assignments: the keys of an indexed_by_product family are tuples
+   # of the dimension keys, here (task.id, worker.id, day)
+   for (task_id, worker_id, day), value in solution.get_mapped(assignment).items():
+       if value > 0.5:
+           print(f"Task {task_id} assigned to worker {worker_id} on day {day}")
 
 Example 3: Nonlinear Model with Linearization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -374,8 +380,7 @@ Example 3: Nonlinear Model with Linearization
        .use_solver("ortools")
        .enable_linearization(
            big_m=1e6,
-           pwl_segments=30,
-           mccormick_tighten_bounds=True
+           pwl_segments=30
        )
    )
 
@@ -383,9 +388,11 @@ Example 3: Nonlinear Model with Linearization
    solution = optimizer.solve(model)
 
    # Results
+   prices = solution.get_mapped(price_var)
+   quantities = solution.get_mapped(quantity_var)
    for product in products:
-       price = solution.get_value(price_var, product)
-       quantity = solution.get_value(quantity_var, product)
+       price = prices[product.id]
+       quantity = quantities[product.id]
        revenue = price * quantity
        print(f"{product.name}: price=${price:.2f}, qty={quantity:.0f}, revenue=${revenue:,.2f}")
 
@@ -406,7 +413,8 @@ Best Practices
 
 3. **Linearization**
 
-   - Enable only when needed (solver lacks native support)
+   - Enable it for models with nonlinear terms; every solver needs it, because
+     adapters do not translate nonlinear terms natively
    - Tune ``big_m`` based on your problem's value ranges
    - Increase ``pwl_segments`` for better nonlinear function approximations
 
@@ -463,9 +471,17 @@ Time Limit Exceeded
 
    solution = optimizer.solve(model, time_limit=60)
 
-   if solution.status == "time_limit":
-       print(f"Time limit reached. Best objective: {solution.objective_value}")
-       # Use best solution found so far (if available)
+   if solution.status == "feasible":
+       # Stopped by the limit with a solution: the best one found so far
+       print(f"Best objective found: {solution.objective_value}, gap: {solution.gap}")
+   elif solution.status == "time_limit":
+       # Stopped by the limit before any solution was found
+       print("Time limit reached without a solution")
+
+.. versionchanged:: 0.3.0
+   OR-Tools and CP-SAT report ``"time_limit"`` when the limit stops the search
+   before any solution (they reported ``"not_solved"`` and ``"unknown"``), as
+   Gurobi, CPLEX and GLPK do. ``solution.variables`` is then empty.
 
 Next Steps
 ----------

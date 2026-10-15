@@ -30,6 +30,7 @@ Notes:
 from dataclasses import dataclass
 
 
+# [docs:data-models]
 @dataclass
 class Product:
     """Represents a product that can be manufactured.
@@ -95,6 +96,7 @@ class Resource:
     id: int
     name: str
     capacity: float  # maximum available per week
+# [docs:data-models-end]
 
 
 # Sample products

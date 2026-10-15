@@ -214,12 +214,14 @@ def run_scenario_analysis():
     print("=" * 80)
 
     # Build base model
+    # [docs:create-analyzer]
     print("\nBuilding base optimization model...")
     model = build_production_model()
     optimizer = LXOptimizer().use_solver(solver_to_use).enable_rational_conversion()
 
     # Create scenario analyzer
     analyzer = LXScenarioAnalyzer(model, optimizer, include_baseline=True)
+    # [docs:create-analyzer-end]
 
     print("\n" + "-" * 80)
     print("CREATING BUSINESS SCENARIOS")
@@ -231,6 +233,7 @@ def run_scenario_analysis():
     print("   - Purchase new machines (+20% machine capacity)")
     print("   - Increase material procurement (+25% materials)")
 
+    # [docs:optimistic-scenario]
     optimistic = (
         LXScenario[Product]("market_expansion")
         .modify_constraint_rhs("capacity_Labor Hours", multiply=1.30)
@@ -239,7 +242,9 @@ def run_scenario_analysis():
         .describe("Market expansion: increase all resource capacities")
     )
     analyzer.add_scenario(optimistic)
+    # [docs:optimistic-scenario-end]
 
+    # [docs:more-scenarios]
     # Scenario 2: Pessimistic - Resource Constraints
     print("\n2. PESSIMISTIC SCENARIO: Resource Constraints")
     print("   - Labor shortage (-20% labor capacity)")
@@ -302,15 +307,19 @@ def run_scenario_analysis():
         .describe("Increase material supply through better procurement")
     )
     analyzer.add_scenario(material_procurement)
+    # [docs:more-scenarios-end]
 
     # Run all scenarios
     print("\n" + "-" * 80)
     print("SOLVING ALL SCENARIOS...")
     print("-" * 80)
 
+    # [docs:run-all]
     results = analyzer.run_all_scenarios()
+    # [docs:run-all-end]
 
     # Display results
+    # [docs:compare-scenarios]
     print("\n" + "=" * 80)
     print("SCENARIO COMPARISON RESULTS")
     print("=" * 80)
@@ -331,6 +340,7 @@ def run_scenario_analysis():
                 improvement_pct = (improvement / baseline.objective_value) * 100
                 print(f"Objective Value: ${best_solution.objective_value:,.2f}")
                 print(f"Improvement over baseline: ${improvement:,.2f} ({improvement_pct:.1f}%)")
+    # [docs:compare-scenarios-end]
 
     # Sensitivity analysis - varying labor capacity
     print("\n" + "=" * 80)
@@ -338,6 +348,7 @@ def run_scenario_analysis():
     print("=" * 80)
     print("\nTesting different labor capacity multipliers...")
 
+    # [docs:labor-sensitivity]
     labor_multipliers = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
     labor_sensitivity = analyzer.sensitivity_to_parameter(
         "capacity_Labor Hours",
@@ -359,6 +370,7 @@ def run_scenario_analysis():
             f"{multiplier:<12.1f} {labor_hours:<15.0f} ${obj_value:<18,.2f} "
             f"{delta_pct:+.1f}%"
         )
+    # [docs:labor-sensitivity-end]
 
     # Visualize scenarios
     visualize_scenarios(analyzer)

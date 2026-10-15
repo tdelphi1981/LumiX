@@ -100,22 +100,34 @@ LumiX automatically relaxes constraints when you use ``.as_goal()``:
        .ge()
        .rhs(lambda p: p.demand_target)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
-   # Mark as goal - automatic relaxation happens!
+   # Mark as goal - relaxed automatically when the model is solved
    demand_goal = (
        LXConstraint[Product]("demand")
        .expression(production_expr)
        .ge()
        .rhs(lambda p: p.demand_target)
-       .as_goal(priority=1, weight=1.0)  # This triggers relaxation
+       .as_goal(priority=1, weight=1.0)  # Marks the constraint as a goal
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
-   # Behind the scenes, LumiX:
+   # When the model is solved (or converted with to_canonical()), LumiX:
    # 1. Creates pos_dev and neg_dev variables
    # 2. Converts to equality: production + neg_dev - pos_dev = demand_target
    # 3. Adds neg_dev to objective (since GE constraint)
+
+The relaxation is applied to a shallow copy of the model, so the model you built
+keeps its original goal constraints. Call ``model.prepare_goal_programming()`` to
+relax the goals in the model itself, for example to inspect the relaxed
+constraints and deviation variables.
+
+.. versionchanged:: 0.3.0
+
+   ``optimizer.solve()`` and ``model.to_canonical()`` relax the goals themselves;
+   ``prepare_goal_programming()`` is optional.
 
 What Happens Internally
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,6 +179,7 @@ You can manually relax constraints using the relaxation API:
        .ge()
        .rhs(lambda p: p.demand_target)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Manually relax
@@ -241,6 +254,39 @@ This provides semantic meaning to deviations:
    #   - neg_dev[Goal("demand_product_A")]
    #   - neg_dev[Goal("demand_product_B")]
 
+Each Row Has Its Own Deviations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In an indexed goal, the row for one data instance contains only the deviations of
+its own goal instance: row ``demand[A]`` uses ``neg_dev[demand_A]`` and
+``pos_dev[demand_A]``, and no other deviation. The deviation terms of the relaxed
+expression use a :class:`~lumix.core.expressions.LXRowKeyFilter`, a row-aware
+filter that keeps the instance whose key is ``<goal name>_<index key of the row>``.
+The canonical builder looks that instance up by key, so building the relaxed rows
+takes time linear in the number of rows.
+
+``LXRowKeyFilter(var, row_key)`` can also be used in your own indexed constraints
+whose rows each use one instance of another family:
+
+.. code-block:: python
+
+   from lumix.core.expressions import LXRowKeyFilter
+
+   # Row for order o uses only the instance of `ship` keyed by o.route_id
+   expr = LXLinearExpression().add_term(
+       ship, coeff=1.0, where=LXRowKeyFilter(ship, lambda o: o.route_id)
+   )
+
+Called with an instance only (without a row), the filter keeps every instance;
+a coefficient that takes ``(instance, row)`` then has to select the row's
+instance, as the goal relaxation does.
+
+.. versionchanged:: 0.3.0
+
+   Every row of an indexed goal has its own pair of deviations. Before 0.3.0 each
+   row contained the deviations of all rows, so one row's deviation could absorb
+   another row's shortfall.
+
 Business Value
 ~~~~~~~~~~~~~~
 
@@ -297,12 +343,15 @@ Production Planning
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # When relaxed, creates:
    #   - Goal instances: [Goal("demand_A", ...), Goal("demand_B", ...)]
    #   - Variables: pos_dev[Goal], neg_dev[Goal] for each goal
-   #   - Constraint: production[p] + neg_dev - pos_dev = p.demand_target
+   #   - Constraints, one per product, each with its own deviations:
+   #       production[A] + neg_dev[demand_A] - pos_dev[demand_A] = 100
+   #       production[B] + neg_dev[demand_B] - pos_dev[demand_B] = 150
 
 Resource Constraints with Goals
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -322,6 +371,7 @@ Resource Constraints with Goals
        .le()
        .rhs(lambda r: r.capacity)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
        # No .as_goal() - stays hard constraint
    )
 
@@ -333,6 +383,7 @@ Resource Constraints with Goals
        .rhs(lambda r: r.capacity * r.target_utilization)
        .as_goal(priority=2, weight=1.0)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
 
    # Result:
@@ -381,13 +432,42 @@ Deviation values are available in the solution:
    solution = optimizer.solve(model)
 
    # Via goal deviations
+   # {"pos": {"demand_<id>": value}, "neg": {"demand_<id>": value}}
    deviations = solution.get_goal_deviations("demand")
-   print(f"Positive deviations: {deviations['pos']}")
-   print(f"Negative deviations: {deviations['neg']}")
+   print(f"Positive deviations: {sum(deviations['pos'].values()):.2f}")
+   print(f"Negative deviations: {sum(deviations['neg'].values()):.2f}")
 
    # Via variable access
    pos_dev_values = solution.get_variable(relaxed.pos_deviation)
    neg_dev_values = solution.get_variable(relaxed.neg_deviation)
+
+Goals with Nonlinear Expressions
+--------------------------------
+
+A goal's expression may be an
+:class:`~lumix.core.expressions.LXNonLinearExpression` (for example ``add_abs``).
+The deviations are added to its linear part and the nonlinear terms are
+linearized, so solve such a model with linearization enabled:
+
+.. code-block:: python
+
+   from lumix import LXNonLinearExpression
+
+   distance_goal = (
+       LXConstraint("distance")
+       .expression(LXNonLinearExpression().add_abs(x))
+       .ge()
+       .rhs(4)
+       .as_goal(priority=1, weight=1.0)
+   )
+
+   model.add_constraint(distance_goal)
+   solution = LXOptimizer().use_solver("ortools").enable_linearization().solve(model)
+
+Priority 0 goals cannot have nonlinear terms (they are objective terms, not rows);
+such a goal raises ``ValueError``.
+
+.. versionadded:: 0.3.0
 
 Understanding Undesired Deviations
 -----------------------------------

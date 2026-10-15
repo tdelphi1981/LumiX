@@ -174,9 +174,9 @@ Goals that become hard constraints at threshold:
        hard_constraint = (
            LXConstraint[TModel](f"{constraint.name}_hard_limit")
            .expression(constraint.lhs)
-           .sense(hard_sense)
            .rhs(hard_limit)
        )
+       hard_constraint.sense = hard_sense
 
        if constraint._data:
            hard_constraint._data = constraint._data
@@ -196,6 +196,7 @@ Goals that become hard constraints at threshold:
        .ge()
        .rhs(lambda p: p.demand_target)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    metadata = LXGoalMetadata(
@@ -211,6 +212,8 @@ Goals that become hard constraints at threshold:
        hard_sense=LXConstraintSense.GE
    )
 
+   model.add_variable(relaxed.pos_deviation)
+   model.add_variable(relaxed.neg_deviation)
    model.add_constraint(relaxed.constraint)
    model.add_constraint(hard)  # Hard minimum
 
@@ -328,7 +331,18 @@ Custom Solving Modes
 Hybrid Mode
 ~~~~~~~~~~~
 
-Weighted within priorities, sequential across priorities:
+Weighted within priorities, sequential across priorities.
+
+.. note::
+
+   Since 0.3.0 the built-in sequential mode already works this way (goal weights
+   within a priority, each solved priority bounded by its optimum, then the model's
+   own objective as the final stage; see
+   :class:`~lumix.goal_programming.solver.LXGoalProgrammingSolver`). The example
+   shows the structure of a custom mode. ``optimizer.solve(model)`` relaxes the goals
+   itself and dispatches on ``model.goal_mode``, so a custom loop like this one
+   should solve a model relaxed with ``prepare_goal_programming()`` in weighted mode,
+   whose objective it then replaces.
 
 .. code-block:: python
 
@@ -348,7 +362,7 @@ Weighted within priorities, sequential across priorities:
 
            1. Group goals by priority
            2. For each priority, build weighted objective for that priority
-           3. Solve sequentially, fixing higher priority deviations
+           3. Solve sequentially, bounding higher priority deviations
            """
            # Group by priority
            from collections import defaultdict
@@ -363,7 +377,7 @@ Weighted within priorities, sequential across priorities:
 
            for priority in sorted(priority_groups.keys()):
                if priority == 0:
-                   continue  # Skip custom objectives
+                   continue  # Priority 0 goals are not relaxed (objective terms)
 
                # Build weighted objective for this priority only
                priority_relaxed = priority_groups[priority]
@@ -383,8 +397,9 @@ Weighted within priorities, sequential across priorities:
                if not solution.is_optimal():
                    return solution
 
-               # Fix deviations for next priority
-               # (implementation similar to sequential solver)
+               # Bound this priority by its optimum for the next one:
+               #   objective <= solution.objective_value
+               # (implementation similar to the sequential solver)
 
                final_solution = solution
 
@@ -413,6 +428,9 @@ Epsilon-Constraint Method
        Returns:
            Solution optimizing primary goal subject to epsilon constraints
        """
+       # Relax the goals in the model itself (solve() would relax a copy)
+       model.prepare_goal_programming()
+
        # Add epsilon constraints for secondary goals
        for goal_name, epsilon in secondary_goals:
            # Find relaxed constraint for this goal

@@ -17,6 +17,7 @@
       ~LXGoalMetadata.is_custom_objective
       ~LXGoalMetadata.is_neg_undesired
       ~LXGoalMetadata.is_pos_undesired
+      ~LXGoalMetadata.update_sense
    
    
 

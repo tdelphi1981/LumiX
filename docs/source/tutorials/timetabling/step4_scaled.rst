@@ -98,15 +98,13 @@ Updated Models
 
 .. literalinclude:: ../../../../tutorials/timetabling/step4_scaled_up/database.py
    :language: python
-   :lines: 86-113
-   :dedent: 0
+   :pyobject: Classroom
 
 **Subject** with ``requires_lab``:
 
 .. literalinclude:: ../../../../tutorials/timetabling/step4_scaled_up/database.py
    :language: python
-   :lines: 133-151
-   :dedent: 0
+   :pyobject: Subject
 
 Cached Compatibility Checker
 -----------------------------
@@ -201,7 +199,8 @@ Code Walkthrough
 
 .. literalinclude:: ../../../../tutorials/timetabling/step4_scaled_up/timetabling_scaled.py
    :language: python
-   :lines: 89-92
+   :start-after: # [docs:compatibility-checker]
+   :end-before: # [docs:compatibility-checker-end]
    :dedent: 4
 
 2. Use in Variable Filtering
@@ -209,7 +208,8 @@ Code Walkthrough
 
 .. literalinclude:: ../../../../tutorials/timetabling/step4_scaled_up/timetabling_scaled.py
    :language: python
-   :lines: 95-109
+   :start-after: # [docs:assignment-variable]
+   :end-before: # [docs:assignment-variable-end]
    :dedent: 4
 
 3. Same Constraint Logic

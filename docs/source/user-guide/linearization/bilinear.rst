@@ -19,40 +19,96 @@ automatically selects the appropriate linearization technique based on variable 
 Variable Type Combinations
 ---------------------------
 
-The linearization method depends on the types of the two variables:
+The linearization method depends on the types of the two variables. Every
+product is exact except the product of two continuous variables:
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 25 25 25
+   :widths: 18 22 25 15 20
 
    * - Type 1
      - Type 2
      - Method
+     - Result
      - Complexity
    * - Binary
      - Binary
-     - AND logic
-     - 3 constraints
+     - AND logic (``b · b = b``)
+     - Exact
+     - 1 binary, 3 constraints
    * - Binary
-     - Continuous
-     - Big-M
-     - 4 constraints
+     - Continuous or integer, bounded
+     - Bound constraints
+     - Exact
+     - 1 variable, 4 constraints
    * - Binary
-     - Integer
-     - Big-M
-     - 4 constraints
-   * - Continuous
-     - Continuous
-     - McCormick
-     - 4 constraints
-   * - Continuous
-     - Integer
-     - McCormick
-     - 4 constraints
+     - Unbounded
+     - Bound constraints with ``big_m_value``; ``UserWarning``
+     - Exact if ``|y| <= big_m_value``
+     - 1 variable, 4 constraints
    * - Integer
-     - Integer
-     - McCormick
-     - 4 constraints
+     - Integer or continuous
+     - Binary expansion of the integer factor
+     - Exact
+     - k binaries + k products with a binary
+   * - Continuous
+     - Continuous
+     - McCormick envelopes; ``UserWarning``
+     - **Relaxation** (``solution.relaxation``)
+     - 1 variable, 4 constraints
+
+.. versionchanged:: 0.3.0
+   Products with an integer factor are exact (binary expansion); they used McCormick
+   envelopes before. A product of two continuous variables issues a ``UserWarning``
+   and sets ``solution.relaxation``; before 0.3.0 its bound was reported as the
+   optimum. Two of the four binary × continuous constraints had wrong signs.
+
+.. _product-vs-quadratic:
+
+Products on Variable Families
+-----------------------------
+
+``add_product(x, y)`` on two variable families multiplies the instances **with the
+same index key** and sums the results, like the other terms of an
+``LXNonLinearExpression`` (see :doc:`engine`). The families must have the same
+index keys; a single variable is broadcast to every instance. A quadratic
+objective (:class:`~lumix.core.expressions.LXQuadraticExpression`) multiplies
+all pairs instead:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * -
+     - ``LXNonLinearExpression().add_product(x, y)``
+     - ``LXQuadraticExpression().add_quadratic(x, y)``
+   * - Meaning
+     - :math:`\sum_k c \, x_k y_k` (per instance)
+     - :math:`\sum_i \sum_j c \, x_i y_j` (all pairs)
+   * - Families
+     - same index keys (or a single variable)
+     - any two families
+   * - Coefficient
+     - a number
+     - a number or ``coeff(a, b)`` per pair
+   * - x, y over keys ``A``, ``B``
+     - ``x[A]·y[A] + x[B]·y[B]``
+     - ``x[A]·y[A] + x[A]·y[B] + x[B]·y[A] + x[B]·y[B]``
+   * - Solvers
+     - linearized on every solver (needs ``enable_linearization()``)
+     - native on Gurobi and CPLEX; linearized with ``enable_linearization()`` on
+       the others
+
+For the per-instance square use ``add_squared(x)`` (:math:`\sum_i x_i^2`) in a
+quadratic expression, or ``add_product(x, x)`` in a nonlinear one.
+
+.. code-block:: python
+
+   # Revenue of each product: sum over p of price[p] * quantity[p]
+   revenue = LXNonLinearExpression().add_product(price, quantity)
+
+   # Interaction of every pair (i, j): sum over i, j of w[i] * w[j]
+   risk = LXQuadraticExpression().add_quadratic(w, w)
 
 Binary × Binary (AND Logic)
 ----------------------------
@@ -84,7 +140,7 @@ Example
    from lumix.linearization.config import LXLinearizerConfig
    from lumix.nonlinear.terms import LXBilinearTerm
 
-   # Define binary variables
+   # Define binary variables (linearize_bilinear takes single variables)
    is_open = LXVariable[Facility, int]("is_open").binary()
    is_served = LXVariable[Customer, int]("is_served").binary()
 
@@ -119,13 +175,15 @@ For z = b × x where b ∈ {0, 1}, x ∈ [L, U]:
 
 .. math::
 
-   z \leq M \cdot b \\
-   z \geq m \cdot b \\
-   z \leq x - m(1 - b) \\
-   z \geq x - M(1 - b) \\
-   z \in [m, M]
+   z \leq U \cdot b \\
+   z \geq L \cdot b \\
+   z \leq x - L(1 - b) \\
+   z \geq x - U(1 - b) \\
+   z \in [\min(L, 0), \max(U, 0)]
 
-where M = upper bound of x, m = lower bound of x.
+where L and U are the bounds of x. When x has no finite bound, ``big_m_value``
+(:doc:`config`) replaces the missing bound and a ``UserWarning`` is issued; the
+product is then exact only if ``|x|`` stays within ``big_m_value``.
 
 **Behavior:**
 
@@ -137,12 +195,12 @@ Example
 
 .. code-block:: python
 
-   # Binary variable: is facility open?
+   # Binary variable: is the route open?
    is_open = (
-       LXVariable[Facility, int]("is_open")
+       LXVariable[Route, int]("is_open")
        .binary()
-       .indexed_by(lambda f: f.id)
-       .from_data(facilities)
+       .indexed_by(lambda r: r.id)
+       .from_data(routes)
    )
 
    # Continuous variable: flow amount
@@ -154,56 +212,27 @@ Example
        .from_data(routes)
    )
 
-   # Product: flow only if facility is open
-   # z = is_open × flow
-   term = LXBilinearTerm(var1=is_open, var2=flow, coefficient=1.0)
-
-   config = LXLinearizerConfig(big_m_value=1000)
-   linearizer = LXBilinearLinearizer(config)
-   z = linearizer.linearize_bilinear(term)
+   # Product per route: flow[r] counts only if route r is open
+   expr = LXNonLinearExpression().add_product(is_open, flow)
 
 Choosing Big-M Value
 ~~~~~~~~~~~~~~~~~~~~~
 
-**Critical:** M must be large enough but not too large.
-
-**Guidelines:**
-
-1. **Use Variable Bounds:**
-
-   .. code-block:: python
-
-      flow = LXVariable[Route, float]("flow").bounds(lower=0, upper=1000)
-      # M = 1000 (upper bound)
-
-2. **Problem Knowledge:**
-
-   .. code-block:: python
-
-      # For normalized probabilities [0, 1]
-      config = LXLinearizerConfig(big_m_value=1.0)
-
-      # For prices up to $10,000
-      config = LXLinearizerConfig(big_m_value=10000)
-
-3. **Conservative Multiplier:**
-
-   .. code-block:: python
-
-      max_flow = 1000
-      config = LXLinearizerConfig(big_m_value=10 * max_flow)
-
-**Validation:**
+The constants come from the variable's bounds, so the best Big-M is a tight bound
+on the variable:
 
 .. code-block:: python
 
-   # After solving, check that auxiliary variable doesn't hit M
-   solution = optimizer.solve(linearized_model)
+   flow = LXVariable[Route, float]("flow").continuous().bounds(lower=0, upper=1000)
+   # z <= 1000 b, z >= flow - 1000 (1 - b): no big_m_value needed
 
-   for var_name, value in solution.variables.items():
-       if "aux_prod" in var_name:
-           assert value < 0.99 * config.big_m_value, \
-               f"Variable {var_name} hit Big-M bound!"
+``big_m_value`` is used only when the variable has no finite bound. It must then be
+at least the largest ``|x|`` of any solution, but not much larger (numerics):
+
+.. code-block:: python
+
+   # For an unbounded flow that never exceeds 10,000
+   config = LXLinearizerConfig(big_m_value=1e4)
 
 Use Cases
 ~~~~~~~~~
@@ -232,10 +261,21 @@ For z = x × y where x ∈ [xL, xU], y ∈ [yL, yU]:
 These four constraints form the convex hull of the bilinear function
 over the box [xL, xU] × [yL, yU].
 
-.. note::
+.. warning::
 
-   McCormick envelopes provide the **tightest possible linear relaxation**
-   of the bilinear term over the given bounds.
+   McCormick envelopes are a **relaxation**: they are the tightest linear
+   relaxation of the product over the given bounds, but ``z`` can differ from
+   ``x · y`` inside the box. The reported optimum is a bound (an upper bound when
+   maximizing, a lower bound when minimizing) and may not be attainable. LumiX
+   issues a ``UserWarning`` containing "McCormick" and sets
+   ``solution.relaxation`` to ``True`` (see
+   :doc:`/user-guide/solution/accessing-solutions`).
+
+   For an exact result, make one factor integer or binary, or use a quadratic
+   objective (:class:`~lumix.core.expressions.LXQuadraticExpression`) on Gurobi
+   or CPLEX, which solve it natively.
+
+Both variables need finite bounds; otherwise ``ValueError`` is raised.
 
 Example
 ~~~~~~~
@@ -260,14 +300,9 @@ Example
        .from_data(products)
    )
 
-   # Product: revenue = price × quantity
-   term = LXBilinearTerm(var1=price, var2=quantity, coefficient=1.0)
-
-   config = LXLinearizerConfig(
-       mccormick_tighten_bounds=True  # Improve relaxation
-   )
-   linearizer = LXBilinearLinearizer(config)
-   revenue = linearizer.linearize_bilinear(term)
+   # Product per product p: revenue = price[p] × quantity[p]
+   revenue = LXNonLinearExpression().add_product(price, quantity)
+   # UserWarning: ... McCormick envelopes, a relaxation ...
 
 Importance of Tight Bounds
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -288,16 +323,9 @@ Example of bound impact:
    y = LXVariable[Model, float]("y").bounds(lower=5, upper=20)
    # McCormick creates tight convex hull
 
-**Bound Tightening:**
-
-Enable automatic bound tightening:
-
-.. code-block:: python
-
-   config = LXLinearizerConfig(
-       mccormick_tighten_bounds=True,  # Apply preprocessing
-       auto_detect_bounds=True  # Use variable bounds
-   )
+LumiX uses the bounds as given; it does not tighten them (the
+``mccormick_tighten_bounds`` and ``auto_detect_bounds`` settings have no effect and
+are deprecated, see :doc:`config`).
 
 Use Cases
 ~~~~~~~~~
@@ -306,6 +334,46 @@ Use Cases
 - **Energy**: power × time
 - **Economics**: elasticity × demand
 - **Engineering**: force × displacement
+
+Integer × Integer or Continuous (Binary Expansion)
+---------------------------------------------------
+
+.. versionadded:: 0.3.0
+
+Mathematical Formulation
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+An integer variable x ∈ [L, U] is written in binary digits,
+
+.. math::
+
+   x = L + \sum_{k=0}^{K-1} 2^k d_k, \qquad d_k \in \{0, 1\}
+
+so that
+
+.. math::
+
+   x \cdot y = L \cdot y + \sum_{k=0}^{K-1} 2^k (d_k \cdot y)
+
+and each :math:`d_k \cdot y` is an exact binary × variable product. K is the number
+of bits of U − L. When both factors are integer, the one with the smaller range is
+expanded.
+
+**Requirements:**
+
+- The integer factor needs finite bounds; fractional bounds are rounded inward
+  (``[0.5, 3.7]`` becomes ``[1, 3]``).
+- K must not exceed ``LXLinearizerConfig.binary_expansion_bits`` (default 10, that
+  is at most 1024 values); otherwise ``ValueError`` is raised. Raise the setting, or
+  use Gurobi or CPLEX for a quadratic objective.
+- The other factor should be bounded; it is multiplied by binaries (see above).
+
+.. code-block:: python
+
+   units = LXVariable[Product, int]("units").integer().bounds(lower=0, upper=3)
+   price = LXVariable[Product, float]("price").continuous().bounds(lower=0, upper=4)
+   # Exact: units = d0 + 2 d1, units * price = d0 * price + 2 (d1 * price)
+   revenue = LXNonLinearExpression().add_product(units, price)
 
 Advanced: Multi-dimensional Products
 -------------------------------------
@@ -345,9 +413,12 @@ Production Planning with Revenue Maximization
 
 .. code-block:: python
 
-   from lumix import LXModel, LXVariable, LXConstraint
+   from dataclasses import dataclass
+
+   from lumix import (LXConstraint, LXLinearExpression, LXModel,
+                      LXNonLinearExpression, LXVariable)
    from lumix.linearization import LXLinearizer, LXLinearizerConfig
-   from lumix.solvers import LXOptimizer
+   from lumix.solvers import GLPK_CAPABILITIES, LXOptimizer
 
    # Define data
    @dataclass
@@ -364,51 +435,43 @@ Production Planning with Revenue Maximization
    ]
 
    # Define variables
+   # Integer quantity: the product with a continuous price is exact
    quantity = (
-       LXVariable[Product, float]("quantity")
-       .continuous()
+       LXVariable[Product, int]("quantity")
+       .integer()
+       .bounds(lower=0, upper=1000)
        .indexed_by(lambda p: p.id)
-       .bounds_func(lambda p: (p.min_quantity, p.max_quantity))
        .from_data(products)
    )
 
    price = (
        LXVariable[Product, float]("price")
        .continuous()
+       .bounds(lower=10, upper=150)
        .indexed_by(lambda p: p.id)
-       .bounds_func(lambda p: (p.min_price, p.max_price))
        .from_data(products)
    )
 
    # Build model
-   model = LXModel("production")
+   model = LXModel("production").add_variables(quantity, price)
 
-   # Objective: maximize revenue (bilinear: price × quantity)
+   # Objective: maximize revenue, sum over p of price[p] × quantity[p]
    # This will be automatically linearized
-   revenue_expr = price * quantity  # Nonlinear!
-   model.maximize(revenue_expr)
+   model.maximize(LXNonLinearExpression().add_product(price, quantity))
 
    # Constraints
    # Total quantity constraint
    model.add_constraint(
        LXConstraint("total_quantity")
-       .expression(quantity)
+       .expression(LXLinearExpression().add_term(quantity, 1.0))
        .le()
        .rhs(1200)
    )
 
-   # Configure linearization
-   config = LXLinearizerConfig(
-       default_method=LXLinearizationMethod.MCCORMICK,
-       mccormick_tighten_bounds=True,
-       verbose_logging=True
-   )
-
    # Solve with linearization
    optimizer = LXOptimizer().use_solver("glpk")
-   solver_capability = optimizer.get_capability()
 
-   linearizer = LXLinearizer(model, solver_capability, config)
+   linearizer = LXLinearizer(model, GLPK_CAPABILITIES, LXLinearizerConfig())
    linearized_model = linearizer.linearize_model()
 
    # Get statistics
@@ -434,25 +497,27 @@ Performance Tips
       # Bad: Wide default bounds, weak relaxation
       x = LXVariable[Model, float]("x")  # No bounds!
 
-2. **Enable Bound Tightening**
+2. **Use Appropriate Big-M**
 
-   .. code-block:: python
-
-      config = LXLinearizerConfig(mccormick_tighten_bounds=True)
-
-3. **Use Appropriate Big-M**
+   Only needed for binary × unbounded products:
 
    .. code-block:: python
 
       # Problem-specific, not default
       config = LXLinearizerConfig(big_m_value=1000)  # Not 1e6!
 
-4. **Prefer Native Quadratic When Available**
+3. **McCormick Envelopes Are a Relaxation**
 
-   .. code-block:: python
+   A continuous × continuous product of an ``LXNonLinearExpression`` is replaced by
+   its McCormick envelope on every solver, so the linearized optimum is a bound, not
+   necessarily the true optimum; check ``solution.relaxation``. Tight variable
+   bounds make the envelope tighter. A quadratic objective
+   (``LXQuadraticExpression``) is solved natively by Gurobi and CPLEX.
 
-      # For Gurobi/CPLEX with quadratic support,
-      # solver may handle bilinear natively without linearization
+4. **Keep Integer Ranges Small**
+
+   The binary expansion adds one binary and one binary product per bit of the
+   integer range; ``binary_expansion_bits`` caps it.
 
 See Also
 --------

@@ -12,6 +12,7 @@ and extend its functionality.
    extending-core
    solvers-architecture
    extending-solvers
+   canonical-model
    indexing-architecture
    extending-indexing
    nonlinear-architecture

@@ -116,6 +116,7 @@ def build_facility_location_model() -> LXModel:
         numerical issues. Here, M = total_demand is a safe upper bound.
     """
 
+    # [docs:open-variables]
     # Decision Variable 1: Binary - Open warehouse or not
     open_warehouse = (
         LXVariable[Warehouse, int]("open_warehouse")
@@ -123,7 +124,9 @@ def build_facility_location_model() -> LXModel:
         .indexed_by(lambda w: w.id)
         .from_data(WAREHOUSES)
     )
+    # [docs:open-variables-end]
 
+    # [docs:ship-variables]
     # Decision Variable 2: Continuous - Shipping quantities
     # Multi-indexed by (Warehouse, Customer) using cartesian product
     ship = (
@@ -135,10 +138,12 @@ def build_facility_location_model() -> LXModel:
         )
         .bounds(lower=0, upper=max(c.demand for c in CUSTOMERS))  # Upper bound needed for CP-SAT
     )
+    # [docs:ship-variables-end]
 
     # Create model
     model = LXModel("facility_location").add_variables(open_warehouse, ship)
 
+    # [docs:objective]
     # Objective: Minimize total cost (fixed + shipping)
     cost_expr = (
         LXLinearExpression()
@@ -146,7 +151,9 @@ def build_facility_location_model() -> LXModel:
         .add_multi_term(ship, coeff=lambda w, c: shipping_cost(w, c))  # Shipping costs
     )
     model.minimize(cost_expr)
+    # [docs:objective-end]
 
+    # [docs:demand-constraint]
     # Constraint 1: Satisfy customer demand
     # For each customer: sum(ship[w, c] over all w) >= demand[c]
     for customer in CUSTOMERS:
@@ -161,7 +168,9 @@ def build_facility_location_model() -> LXModel:
             .ge()
             .rhs(customer.demand)
         )
+    # [docs:demand-constraint-end]
 
+    # [docs:capacity-constraint]
     # Constraint 2: Warehouse capacity
     # For each warehouse: sum(ship[w, c] over all c) <= capacity[w] * open[w]
     # This is a conditional constraint: can't ship if not open
@@ -181,7 +190,9 @@ def build_facility_location_model() -> LXModel:
         model.add_constraint(
             LXConstraint(f"capacity_{warehouse.name}").expression(capacity_expr).le().rhs(0)
         )
+    # [docs:capacity-constraint-end]
 
+    # [docs:bigm-constraint]
     # Constraint 3: Big-M - Can only ship from open warehouses
     # ship[w, c] <= M * open[w]
     for warehouse in WAREHOUSES:
@@ -204,6 +215,7 @@ def build_facility_location_model() -> LXModel:
                 .le()
                 .rhs(0)
             )
+    # [docs:bigm-constraint-end]
 
     return model
 

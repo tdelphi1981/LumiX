@@ -113,8 +113,9 @@ Mark constraints as goals:
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 105-112
-   :dedent: 8
+   :start-after: # [docs:goal-constraints]
+   :end-before: # Goal 2: Limit overtime
+   :dedent: 4
 
 **Key Points**:
 
@@ -154,8 +155,10 @@ Weighted vs Sequential Mode
    model.set_goal_mode("sequential")
    # Solve priorities lexicographically:
    # 1. Minimize P1 deviations
-   # 2. Fix P1, minimize P2 deviations
-   # 3. Fix P2, minimize P3 deviations
+   # 2. Bound P1 by its optimum, minimize P2 deviations
+   # 3. Bound P1 and P2, minimize P3 deviations
+   # 4. Finally optimize the model's own objective (if any)
+   # solution.goal_stages reports each solve
 
 Solution Analysis
 ~~~~~~~~~~~~~~~~~
@@ -164,7 +167,8 @@ Check goal satisfaction:
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 187-204
+   :start-after: # [docs:goal-satisfaction]
+   :end-before: # [docs:goal-satisfaction-end]
    :dedent: 4
 
 Running the Example
@@ -239,7 +243,8 @@ Step 1: Define Variables
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 66-82
+   :start-after: # [docs:define-variables]
+   :end-before: # [docs:define-variables-end]
    :dedent: 4
 
 Step 2: Add Hard Constraints
@@ -247,7 +252,8 @@ Step 2: Add Hard Constraints
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 88-95
+   :start-after: # [docs:hard-constraint]
+   :end-before: # [docs:hard-constraint-end]
    :dedent: 4
 
 Step 3: Add Goal Constraints
@@ -255,7 +261,8 @@ Step 3: Add Goal Constraints
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 99-137
+   :start-after: # [docs:goal-constraints]
+   :end-before: # [docs:goal-constraints-end]
    :dedent: 4
 
 Step 4: Configure Goal Mode
@@ -263,7 +270,8 @@ Step 4: Configure Goal Mode
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 140-143
+   :start-after: # [docs:goal-mode]
+   :end-before: # [docs:goal-mode-end]
    :dedent: 4
 
 Step 5: Solve and Analyze Goals
@@ -271,7 +279,8 @@ Step 5: Solve and Analyze Goals
 
 .. literalinclude:: ../../../examples/11_goal_programming/01_basic_goal_programming.py
    :language: python
-   :lines: 149-157
+   :start-after: # [docs:solve]
+   :end-before: # [docs:solve-end]
    :dedent: 4
 
 Learning Objectives
@@ -321,7 +330,8 @@ Pattern 3: Custom Objective (Priority 0)
 
 .. code-block:: python
 
-   # Use priority 0 to incorporate custom objective
+   # Use priority 0 to incorporate custom objective, optimized after all goals
+   # (.ge() maximizes the expression, .le() minimizes it; rhs is not used)
    model.add_constraint(
        LXConstraint("maximize_profit")
        .expression(profit_expr)
@@ -329,6 +339,9 @@ Pattern 3: Custom Objective (Priority 0)
        .rhs(0)
        .as_goal(priority=0, weight=1.0)
    )
+
+   # Equivalent: the model's own objective is the lowest priority
+   model.maximize(profit_expr)
 
 Pattern 4: Indexed Goals
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -356,7 +369,7 @@ Weighted Mode Calculation
 .. code-block:: python
 
    # Automatic weight calculation
-   priority_weight = 10 ** (6 - priority)
+   priority_weight = 10 ** (7 - priority)
    combined_weight = priority_weight * goal_weight
 
    # Examples:
@@ -365,6 +378,11 @@ Weighted Mode Calculation
    # P3, w=2.0: 10^4 × 2.0 =    20,000
 
 This ensures higher priorities dominate in the objective function.
+
+.. note::
+   Priority 7 weighs 1, the same as the model objective, and priority 8 weighs 0.1, so
+   goals at priority 7 or higher do **not** dominate the objective. Keep goals that must
+   win at priorities 1–6, or use sequential mode, which is lexicographic.
 
 Custom Weights Within Priority
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -388,26 +406,24 @@ Check Individual Goals
    satisfied = solution.is_goal_satisfied("goal_name", tolerance=1e-6)
 
    # Get deviation values
+   # Dicts {row name: value}, also for a single goal
    deviations = solution.get_goal_deviations("goal_name")
-   pos_dev = deviations["pos"]  # Over-achievement
-   neg_dev = deviations["neg"]  # Under-achievement
+   pos_dev = sum(deviations["pos"].values())  # Over-achievement
+   neg_dev = sum(deviations["neg"].values())  # Under-achievement
 
 Indexed Goals
 ~~~~~~~~~~~~~
 
 .. code-block:: python
 
+   # One goal "goal" indexed by entity: its rows are keyed "goal_<id>"
+   deviations = solution.get_goal_deviations("goal")
+
    for entity in ENTITIES:
-       goal_name = f"goal_{entity.id}"
-       deviations = solution.get_goal_deviations(goal_name)
-
-       # Deviations are dictionaries for indexed goals
-       neg_dev_dict = deviations["neg"]
-       pos_dev_dict = deviations["pos"]
-
+       row = f"goal_{entity.id}"
        print(f"{entity.name}:")
-       print(f"  Shortfall: {neg_dev_dict.get(entity.id, 0):.2f}")
-       print(f"  Excess: {pos_dev_dict.get(entity.id, 0):.2f}")
+       print(f"  Shortfall: {deviations['neg'].get(row, 0.0):.2f}")
+       print(f"  Excess: {deviations['pos'].get(row, 0.0):.2f}")
 
 Use Cases
 ---------
@@ -444,7 +460,7 @@ Try These Modifications
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **More Priorities**: Add 4th and 5th priority levels
-2. **Sequential Mode**: Enable true preemptive GP (when available)
+2. **Sequential Mode**: Enable true preemptive GP with ``model.set_goal_mode("sequential")``
 3. **Dynamic Weights**: Adjust weights based on context
 4. **Conditional Goals**: Goals that activate under conditions
 5. **Interactive**: Allow user to set priorities dynamically

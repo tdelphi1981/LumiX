@@ -140,10 +140,12 @@ Model Logging
 
 Quick example of using the model logger::
 
-    from lumix.utils import LXModelLogger
     import logging
+    import lumix
+    from lumix.utils import LXModelLogger
 
-    logger = LXModelLogger(name="production_model", level=logging.INFO)
+    lumix.enable_logging()  # handles the "lumix" logger and its children
+    logger = LXModelLogger(name="lumix.production_model", level=logging.INFO)
     logger.log_model_creation("ProductionPlan", num_vars=100, num_constraints=50)
     logger.log_solve_start("Gurobi")
     # ... solving happens ...

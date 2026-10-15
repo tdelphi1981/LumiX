@@ -18,6 +18,18 @@ using piecewise-linear (PWL) segments:
 The :class:`~lumix.linearization.techniques.piecewise.LXPiecewiseLinearizer` class
 provides multiple formulation methods for PWL approximation.
 
+There are two ways to use them:
+
+- ``LXNonLinearExpression().add_piecewise(x, f, ...)`` (or an
+  :class:`~lumix.nonlinear.terms.LXPiecewiseLinearTerm`) in the objective or in a
+  constraint. On a variable family it applies to every instance:
+  ``add_piecewise(x, f)`` is :math:`\sum_i f(x_i)`. It is linearized by
+  ``enable_linearization()`` or :class:`~lumix.linearization.engine.LXLinearizer`.
+- ``LXPiecewiseLinearizer(config).approximate_function(f, x, ...)`` builds the
+  auxiliary variables and constraints directly and returns the output variable. It
+  takes a **single variable** (a scalar, or a family with one instance); a family
+  with several instances raises ``ValueError``.
+
 Basic Concept
 -------------
 
@@ -45,7 +57,9 @@ Approximating f(x) with Linear Segments
 Formulation Methods
 -------------------
 
-LumiX supports three PWL formulation methods:
+LumiX supports three PWL formulation methods. All three are exact for the
+piecewise-linear function through the breakpoints, also when it is nonconvex
+(n = number of segments):
 
 .. list-table::
    :header-rows: 1
@@ -56,17 +70,23 @@ LumiX supports three PWL formulation methods:
      - Constraints
      - Best For
    * - SOS2
-     - n+1 continuous
-     - 3
-     - Solvers with SOS2 support
+     - n+1 continuous + n binary
+     - n+5
+     - Default; general use
    * - Incremental
      - n binary + n continuous
-     - 3n+1
+     - n+3
      - Standard MILP solvers
    * - Logarithmic
-     - log₂(n) binary
-     - Complex
-     - Many segments (>100)
+     - n'+1 continuous + log₂(n') binary (n' = n rounded up to a power of two)
+     - 2·log₂(n')+3
+     - Many segments
+
+.. versionchanged:: 0.2.1
+   SOS2 enforces adjacency with segment binaries and is exact. Earlier versions
+   added no SOS2 condition at all, so the model was only the convex hull of the
+   function: maximizing a convex function could return a value above it. The
+   logarithmic method is implemented (it raised ``NotImplementedError``).
 
 SOS2 Formulation
 ----------------
@@ -103,8 +123,7 @@ At most 2 adjacent λ variables can be non-zero.
    # Configure for SOS2
    config = LXLinearizerConfig(
        pwl_method="sos2",
-       pwl_num_segments=30,
-       prefer_sos2=True
+       pwl_num_segments=30
    )
 
    linearizer = LXPiecewiseLinearizer(config)
@@ -119,16 +138,11 @@ At most 2 adjacent λ variables can be non-zero.
        method="sos2"
    )
 
-**Advantages:**
+**Adjacency:**
 
-- Fewest variables (n+1 continuous)
-- Fastest when solver has native SOS2 support
-- Recommended for Gurobi, CPLEX
-
-**Disadvantages:**
-
-- Requires SOS2 support in solver
-- Not available in GLPK
+No solver adapter passes SOS2 sets to the solver yet, so LumiX enforces the SOS2
+property with one binary z per segment: Σz = 1, λ₀ ≤ z₀, λᵢ ≤ zᵢ₋₁ + zᵢ,
+λₙ ≤ zₙ₋₁. The formulation works on every MILP solver.
 
 Incremental Formulation
 -----------------------
@@ -181,7 +195,7 @@ Binary Selection Variable Formulation
 **Disadvantages:**
 
 - Many variables (2n binary/continuous + 1 output)
-- Many constraints (3n+1)
+- n+3 constraints
 - Slower than SOS2 when available
 
 Logarithmic Formulation
@@ -196,25 +210,49 @@ Use log₂(n) binary variables to encode which segment is active.
 
 **Variables:**
 
-- b₀, b₁, ..., b_{log₂(n)-1}: Binary encoding variables
-- y: Output variable
+- λ₀, ..., λₙ': Convex-combination weights (as in SOS2)
+- y₀, ..., y_{log₂(n')-1}: Binary Gray-code variables
+- Output variable
 
-**Status in LumiX:**
+Segment s gets the Gray code g(s) = s XOR (s >> 1). For every bit l, the λ of
+breakpoints whose adjacent segments all have bit l set sum to at most yₗ, and those
+whose adjacent segments all have it clear sum to at most 1 − yₗ (Vielma and
+Nemhauser, 2011). The segment count is padded to a power of two with zero-width
+segments at the last breakpoint.
 
-.. note::
+**When to Use:**
 
-   Logarithmic formulation is **not yet implemented**. Use SOS2 or incremental instead.
-
-   See :class:`lumix.linearization.techniques.piecewise.LXPiecewiseLinearizer._logarithmic_formulation`
-
-**When to Use (Future):**
-
-- Very many segments (>100)
-- Memory-constrained environments
-- Balanced variable/constraint trade-off
+- Many segments (the binary count grows with log₂ of the segment count)
 
 Breakpoint Generation
 ---------------------
+
+Explicit Breakpoints
+~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 0.2.1
+
+Pass ``breakpoints`` to use your own x-coordinates instead of generated ones. For a
+function defined by data points this makes the term exact:
+
+.. code-block:: python
+
+   points = [(0, 10), (5, 2), (20, 30)]
+   f = lambda x: np.interp(x, [p[0] for p in points], [p[1] for p in points])
+   expr.add_piecewise(x, f, breakpoints=[0, 5, 20])
+
+``breakpoints`` must contain at least two strictly increasing values and replaces
+``num_segments``, ``adaptive``, ``x_min`` and ``x_max`` (combining it with
+``x_min``/``x_max`` raises ``ValueError``).
+
+The Domain Constrains the Variable
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The input variable is written as a combination of the breakpoints, so it cannot
+leave ``[x_min, x_max]`` (or ``[breakpoints[0], breakpoints[-1]]``). When that range
+is narrower than the variable's bounds, LumiX issues a ``UserWarning``. Cover the
+variable's whole range unless you mean to restrict it.
+
 
 Uniform Breakpoints
 ~~~~~~~~~~~~~~~~~~~
@@ -255,9 +293,34 @@ Breakpoints concentrated where function curves sharply:
 
 **How It Works:**
 
-1. Sample function at many points (10× num_segments)
-2. Compute second derivative (curvature measure)
-3. Place more breakpoints where curvature is high
+1. Sample the function at 10 × ``num_segments`` + 1 evenly spaced points
+2. Use the absolute second differences as a curvature density, mixed half and
+   half with a uniform density (so flat regions keep some breakpoints)
+3. Place the inner breakpoints at equally spaced quantiles of that density
+
+The result is deterministic (the same model gives the same breakpoints on every
+run) and has exactly ``num_segments + 1`` strictly increasing points, including
+both ends of the domain. A linear function (no curvature) gets uniform
+breakpoints, and ``num_segments=1`` gives the two end points.
+
+.. versionchanged:: 0.3.0
+   Breakpoints were drawn at random from the curvature, so two runs could give
+   different models, and one breakpoint short of ``num_segments + 1``.
+
+The same procedure is available as a function:
+
+.. code-block:: python
+
+   import math
+   from lumix.linearization.techniques.piecewise import adaptive_breakpoints
+
+   adaptive_breakpoints(math.exp, 0.0, 3.0, 6)
+   # [0.0, 0.808, 1.47, 1.99, 2.396, 2.718, 3.0] (rounded): denser where e^x bends
+
+``piecewise_points(func, lower, upper, config, name=..., num_segments=None,
+x_min=None, x_max=None, adaptive=None, breakpoints=None)`` in the same module
+returns the breakpoints and function values of a term, with the settings left as
+``None`` taken from ``config``.
 
 **Example:**
 
@@ -280,6 +343,48 @@ Breakpoints concentrated where function curves sharply:
 - Curved functions (exp, log, sigmoid)
 - Functions with varying curvature
 - High-accuracy requirements
+
+Defaults from the Configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionchanged:: 0.3.0
+   ``num_segments``, ``adaptive`` and ``method`` of ``add_piecewise``,
+   ``LXPiecewiseLinearTerm`` and ``approximate_function`` default to ``None``.
+   Before 0.3.0 the terms had fixed defaults (20, ``True``, ``"sos2"``), so the
+   configuration was never applied.
+
+A setting left as ``None`` is taken from
+:class:`~lumix.linearization.config.LXLinearizerConfig`; a value given on the term
+wins:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 40 30
+
+   * - Term argument
+     - Configuration field
+     - Default
+   * - ``num_segments``
+     - ``pwl_num_segments``
+     - 20
+   * - ``adaptive``
+     - ``adaptive_breakpoints``
+     - ``True``
+   * - ``method``
+     - ``pwl_method``
+     - ``"sos2"``
+
+.. code-block:: python
+
+   expr = (
+       LXNonLinearExpression()
+       .add_piecewise(x, math.exp)                  # 8 segments, incremental
+       .add_piecewise(y, math.log, num_segments=4)  # 4 segments, incremental
+   )
+
+   optimizer = LXOptimizer().use_solver("ortools").enable_linearization(
+       pwl_segments=8, pwl_method="incremental"
+   )
 
 Accuracy Considerations
 -----------------------
@@ -362,23 +467,24 @@ Domain Selection
 Complete Examples
 -----------------
 
+The examples call ``approximate_function`` on a single (scalar) variable. For a
+variable family, use ``add_piecewise`` on the family instead.
+
 Example 1: Exponential Growth Model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   from lumix import LXModel, LXVariable
+   from lumix import LXLinearExpression, LXModel, LXVariable
    from lumix.linearization.techniques import LXPiecewiseLinearizer
    from lumix.linearization.config import LXLinearizerConfig
    import math
 
-   # Time variable
+   # Time variable (a single variable)
    time = (
        LXVariable[Period, float]("time")
        .continuous()
        .bounds(lower=0, upper=10)
-       .indexed_by(lambda p: p.id)
-       .from_data(periods)
    )
 
    # Configure linearizer
@@ -402,14 +508,14 @@ Example 1: Exponential Growth Model
    )
 
    # Add to model
-   model = LXModel("growth")
+   model = LXModel("growth").add_variable(time)
    for var in linearizer.auxiliary_vars:
        model.add_variable(var)
    for constraint in linearizer.auxiliary_constraints:
        model.add_constraint(constraint)
 
    # Use growth_output in objective or constraints
-   model.maximize(growth_output)
+   model.maximize(LXLinearExpression().add_term(growth_output, 1.0))
 
 Example 2: Logarithmic Utility
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -421,8 +527,6 @@ Example 2: Logarithmic Utility
        LXVariable[Agent, float]("consumption")
        .continuous()
        .bounds(lower=1, upper=1000)  # log undefined at 0
-       .indexed_by(lambda a: a.id)
-       .from_data(agents)
    )
 
    # Logarithmic utility function
@@ -444,8 +548,9 @@ Example 2: Logarithmic Utility
        adaptive=True
    )
 
-   # Maximize total utility
-   model.maximize(utility_output)
+   # Maximize utility (add consumption and the auxiliary elements to the model
+   # as in Example 1)
+   model.maximize(LXLinearExpression().add_term(utility_output, 1.0))
 
 Example 3: Custom Piecewise Cost Function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -466,8 +571,6 @@ Example 3: Custom Piecewise Cost Function
        LXVariable[Product, float]("quantity")
        .continuous()
        .bounds(lower=0, upper=1000)
-       .indexed_by(lambda p: p.id)
-       .from_data(products)
    )
 
    config = LXLinearizerConfig(
@@ -487,21 +590,28 @@ Example 3: Custom Piecewise Cost Function
        method="incremental"
    )
 
-   # Minimize total cost
-   model.minimize(cost_output)
+   # Minimize cost (add quantity and the auxiliary elements to the model as in
+   # Example 1)
+   model.minimize(LXLinearExpression().add_term(cost_output, 1.0))
 
 Performance Tips
 ----------------
 
-1. **Choose Method Based on Solver**
+1. **Choose a Method**
+
+   All three methods are exact for the piecewise-linear function and work on every
+   MILP solver; they differ in size. Try another one if a model solves slowly:
 
    .. code-block:: python
 
-      # For Gurobi/CPLEX
-      config = LXLinearizerConfig(pwl_method="sos2", prefer_sos2=True)
+      # Default
+      config = LXLinearizerConfig(pwl_method="sos2")
 
-      # For GLPK
+      # Explicit segment selection
       config = LXLinearizerConfig(pwl_method="incremental")
+
+      # Fewest binaries for many segments
+      config = LXLinearizerConfig(pwl_method="logarithmic")
 
 2. **Use Adaptive for Curved Functions**
 

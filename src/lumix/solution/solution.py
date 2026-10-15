@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Generic, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, TypeVar, Union
 
 from ..core.variables import LXVariable
 
 if TYPE_CHECKING:
     from ..core.model import LXModel
+    from ..goal_programming.goal import LXGoalStage
     from ..visualization.solution import LXSolutionVisualizer
 
 TModel = TypeVar("TModel")
@@ -70,9 +71,23 @@ class LXSolution(Generic[TModel]):
     nodes: Optional[int] = None
 
     # Goal programming information
-    goal_deviations: Dict[str, Dict[str, Union[float, Dict[Any, float]]]] = field(
+    goal_deviations: Dict[str, Dict[str, Dict[Any, float]]] = field(
         default_factory=dict
     )
+    #: True when the model was linearized with a relaxation (McCormick envelopes for a
+    #: product of two continuous variables): the objective value is a bound, and the
+    #: values may not attain it. .. versionadded:: 0.3.0
+    relaxation: bool = False
+
+    #: Sequential goal programming: one entry per solve, in order (see LXGoalStage).
+    #: .. versionadded:: 0.3.0
+    goal_stages: List["LXGoalStage"] = field(default_factory=list)
+
+    # Deviation sides each goal minimizes ("pos", "neg"), set with goal_deviations;
+    # is_goal_satisfied and get_total_deviation use only these. Private, so it is
+    # last. .. versionadded:: 0.3.0
+    _undesired_deviations: Dict[str, frozenset] = field(
+        default_factory=dict, repr=False, compare=False)
 
     def get_variable(self, var: LXVariable[TModel, TValue]) -> Union[TValue, Dict[Any, TValue]]:
         """
@@ -137,7 +152,7 @@ class LXSolution(Generic[TModel]):
 
     def get_goal_deviations(
         self, goal_name: str
-    ) -> Optional[Dict[str, Union[float, Dict[Any, float]]]]:
+    ) -> Optional[Dict[str, Dict[Any, float]]]:
         """
         Get deviation values for a goal constraint.
 
@@ -163,8 +178,14 @@ class LXSolution(Generic[TModel]):
         """
         Check if a goal is satisfied within tolerance.
 
-        A goal is satisfied if both positive and negative deviations are
-        within the specified tolerance.
+        A goal is satisfied if its undesired deviations are within the
+        specified tolerance: the shortfall of a ``>=`` goal, the excess of a
+        ``<=`` goal, both for an ``==`` goal. A goal whose senses are unknown
+        (deviations set by hand) needs both deviations within tolerance.
+
+        .. versionchanged:: 0.3.0
+           Exceeding a ``>=`` goal or staying below a ``<=`` goal no longer counts
+           as unsatisfied.
 
         Args:
             goal_name: Name of the goal constraint
@@ -181,8 +202,9 @@ class LXSolution(Generic[TModel]):
         if deviations is None:
             return None
 
-        pos_dev = deviations.get("pos", 0)
-        neg_dev = deviations.get("neg", 0)
+        undesired = self._undesired_deviations.get(goal_name, frozenset(("pos", "neg")))
+        pos_dev = deviations.get("pos", 0) if "pos" in undesired else 0
+        neg_dev = deviations.get("neg", 0) if "neg" in undesired else 0
 
         # Handle both scalar and dict values
         if isinstance(pos_dev, dict):
@@ -199,32 +221,37 @@ class LXSolution(Generic[TModel]):
 
     def get_total_deviation(self, goal_name: str) -> Optional[float]:
         """
-        Get total absolute deviation for a goal.
+        Get the total undesired deviation of a goal.
 
-        Sum of absolute values of all positive and negative deviations.
+        Sum of the undesired deviations, the ones the goal minimizes: ``neg`` for a
+        ``>=`` goal, ``pos`` for a ``<=`` goal, both for an ``==`` goal (over every
+        row of an indexed goal).
 
         Args:
             goal_name: Name of the goal constraint
 
         Returns:
-            Total deviation, or None if goal not found
+            Total undesired deviation, or None if goal not found
 
         Example:
             >>> total_dev = solution.get_total_deviation("production_target")
             >>> print(f"Total deviation: {total_dev}")
+
+        .. versionchanged:: 0.3.0
+           Only the undesired side is counted; it used to add the desired side too, so
+           an over-achieved ``>=`` goal reported a deviation.
         """
         deviations = self.get_goal_deviations(goal_name)
         if deviations is None:
             return None
 
+        undesired = self._undesired_deviations.get(goal_name, frozenset(("pos", "neg")))
         total = 0.0
-
-        for dev_type in ["pos", "neg"]:
+        for dev_type in ("pos", "neg"):
+            if dev_type not in undesired:
+                continue
             dev = deviations.get(dev_type, 0)
-            if isinstance(dev, dict):
-                total += sum(abs(v) for v in dev.values())
-            else:
-                total += abs(dev)
+            total += sum(abs(v) for v in dev.values()) if isinstance(dev, dict) else abs(dev)
 
         return total
 

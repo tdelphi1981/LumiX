@@ -112,6 +112,7 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
         can be passed when calling optimizer.solve().
     """
 
+    # [docs:assignment-variable]
     # Decision Variable: Binary assignment (worker i assigned to task j)
     # This creates a variable for each (worker, task) pair
     assignment = (
@@ -122,10 +123,12 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
             LXIndexDimension(Task, lambda t: t.id).from_data(TASKS),
         )
     )
+    # [docs:assignment-variable-end]
 
     # Create model
     model = LXModel("worker_task_assignment").add_variable(assignment)
 
+    # [docs:objective]
     # Objective: Minimize total assignment cost
     # Sum over all (worker, task) pairs: cost[w,t] * assignment[w,t]
     cost_expr = LXLinearExpression().add_multi_term(
@@ -133,7 +136,9 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
         coeff=lambda w, t: get_assignment_cost(w, t),
     )
     model.minimize(cost_expr)
+    # [docs:objective-end]
 
+    # [docs:task-coverage]
     # Constraint 1: Each task must be assigned to exactly one worker
     # For each task t: sum over workers(assignment[w,t]) == 1
     for task in TASKS:
@@ -150,7 +155,9 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
             .eq()
             .rhs(1)
         )
+    # [docs:task-coverage-end]
 
+    # [docs:worker-capacity]
     # Constraint 2: Each worker cannot exceed their maximum task capacity
     # For each worker w: sum over tasks(assignment[w,t]) <= max_tasks[w]
     for worker in WORKERS:
@@ -167,6 +174,7 @@ def build_assignment_model() -> Tuple[LXModel, LXVariable]:
             .le()
             .rhs(worker.max_tasks)
         )
+    # [docs:worker-capacity-end]
 
     # Constraint 3: Each worker must be assigned at least one task
     # For each worker w: sum over tasks(assignment[w,t]) >= 1

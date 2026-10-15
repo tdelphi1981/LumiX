@@ -70,7 +70,9 @@ Variables are indexed directly by ``Product`` instances:
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 33-39
+   :start-after: # [docs:define-variables]
+   :end-before: # [docs:define-variables-end]
+   :dedent: 4
 
 **Key Points**:
 
@@ -86,7 +88,9 @@ Coefficients are extracted from data using lambda functions:
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 46-51
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
+   :dedent: 4
 
 The ``lambda p: p.selling_price - p.unit_cost`` extracts profit per unit directly
 from each Product instance.
@@ -98,7 +102,9 @@ Expressions automatically sum over all indexed data:
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 60-66
+   :start-after: # [docs:capacity-constraint]
+   :end-before: # [docs:capacity-constraint-end]
+   :dedent: 4
 
 The expression sums resource usage across all products automatically.
 
@@ -109,7 +115,8 @@ Similar constraints can be created as families indexed by data:
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 78-86
+   :start-after: # [docs:min-production-constraint]
+   :end-before: # [docs:min-production-constraint-end]
    :dedent: 4
 
 This creates one minimum production constraint per product.
@@ -168,22 +175,26 @@ Step 1: Define Data Models
 
 .. literalinclude:: ../../../examples/01_production_planning/sample_data.py
    :language: python
-   :lines: 33-70
-   :dedent: 0
+   :start-after: # [docs:data-models]
+   :end-before: # [docs:data-models-end]
 
 Step 2: Create Variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 33-39
+   :start-after: # [docs:define-variables]
+   :end-before: # [docs:define-variables-end]
+   :dedent: 4
 
 Step 3: Set Objective
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 45-52
+   :start-after: # [docs:objective]
+   :end-before: # [docs:objective-end]
+   :dedent: 4
 
 Step 4: Add Constraints
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -192,13 +203,17 @@ Step 4: Add Constraints
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 56-73
+   :start-after: # [docs:capacity-constraint]
+   :end-before: # [docs:capacity-constraint-end]
+   :dedent: 4
 
 **Minimum Production**:
 
 .. literalinclude:: ../../../examples/01_production_planning/production_planning.py
    :language: python
-   :lines: 78-87
+   :start-after: # [docs:min-production-constraint]
+   :end-before: # [docs:min-production-constraint-end]
+   :dedent: 4
 
 Step 5: Solve and Access Solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

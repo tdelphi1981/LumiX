@@ -105,6 +105,7 @@ def build_timetabling_model() -> LXModel:
     """
     print("\nBuilding course timetabling model...")
 
+    # [docs:assignment-variable]
     # Decision variable: assignment[lecture, timeslot, classroom]
     # Binary: 1 if lecture is assigned to timeslot in classroom, 0 otherwise
     assignment = (
@@ -120,6 +121,7 @@ def build_timetabling_model() -> LXModel:
             lambda lec, ts, room: check_class_fits_classroom(lec.class_id, room.id)
         )
     )
+    # [docs:assignment-variable-end]
 
     # Create model
     model = LXModel("high_school_timetabling")
@@ -127,6 +129,7 @@ def build_timetabling_model() -> LXModel:
 
     # ========== CONSTRAINTS ==========
 
+    # [docs:lecture-coverage]
     # Constraint 1: Each lecture must be assigned to exactly one timeslot and classroom
     print("  Adding lecture coverage constraints...")
     for lecture in LECTURES:
@@ -140,7 +143,9 @@ def build_timetabling_model() -> LXModel:
         model.add_constraint(
             LXConstraint(f"lecture_{lecture.id}_assigned").expression(expr).eq().rhs(1)
         )
+    # [docs:lecture-coverage-end]
 
+    # [docs:classroom-conflict]
     # Constraint 2: No classroom conflicts (max one lecture per classroom per timeslot)
     print("  Adding classroom conflict constraints...")
     for timeslot in TIMESLOTS:
@@ -159,7 +164,9 @@ def build_timetabling_model() -> LXModel:
                 .le()
                 .rhs(1)
             )
+    # [docs:classroom-conflict-end]
 
+    # [docs:teacher-conflict]
     # Constraint 3: No teacher conflicts (teacher can't teach multiple lectures at same time)
     print("  Adding teacher conflict constraints...")
     for teacher in TEACHERS:
@@ -181,7 +188,9 @@ def build_timetabling_model() -> LXModel:
                 .le()
                 .rhs(1)
             )
+    # [docs:teacher-conflict-end]
 
+    # [docs:class-conflict]
     # Constraint 4: No class conflicts (class can't attend multiple lectures at same time)
     print("  Adding class conflict constraints...")
     for school_class in CLASSES:
@@ -203,6 +212,7 @@ def build_timetabling_model() -> LXModel:
                 .le()
                 .rhs(1)
             )
+    # [docs:class-conflict-end]
 
     print(f"\nModel built successfully!")
     print(f"  Variables: {len(LECTURES)} lectures × {len(TIMESLOTS)} timeslots × {len(CLASSROOMS)} classrooms")

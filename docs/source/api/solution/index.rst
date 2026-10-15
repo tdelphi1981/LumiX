@@ -44,7 +44,8 @@ The :class:`~lumix.solution.solution.LXSolution` class provides comprehensive ac
 - Variable values (direct and mapped)
 - Solution metadata (status, objective, solve time)
 - Sensitivity analysis data (shadow prices, reduced costs)
-- Goal programming information (deviations, satisfaction)
+- Goal programming information (deviations, satisfaction, sequential stages in
+  ``goal_stages``)
 
 Solution Mapper
 ~~~~~~~~~~~~~~~
@@ -88,6 +89,7 @@ LXSolution
 - ``iterations``: Number of solver iterations
 - ``nodes``: Number of branch-and-bound nodes
 - ``goal_deviations``: Deviation values for goal programming
+- ``goal_stages``: Sequential goal programming stages (list of ``LXGoalStage``)
 
 **Key Methods:**
 
@@ -96,7 +98,8 @@ LXSolution
 - ``get_shadow_price(constraint_name)``: Get shadow price for constraint
 - ``get_reduced_cost(var_name)``: Get reduced cost for variable
 - ``get_goal_deviations(goal_name)``: Get goal deviation values
-- ``is_goal_satisfied(goal_name, tolerance)``: Check if goal is achieved
+- ``is_goal_satisfied(goal_name, tolerance)``: Check if goal is achieved (only undesired
+  deviations count)
 - ``get_total_deviation(goal_name)``: Get total absolute deviation
 - ``is_optimal()``: Check if solution is optimal
 - ``is_feasible()``: Check if solution is feasible
@@ -164,10 +167,11 @@ Goal Programming
        print("Demand goal achieved!")
    else:
        deviations = solution.get_goal_deviations("demand_target")
-       print(f"Positive deviation: {deviations['pos']}")
-       print(f"Negative deviation: {deviations['neg']}")
+       # {"pos": {row: value}, "neg": {row: value}}, also for a single goal
+       print(f"Positive deviation: {sum(deviations['pos'].values()):.2f}")
+       print(f"Negative deviation: {sum(deviations['neg'].values()):.2f}")
 
-   # Get total deviation
+   # Total undesired deviation (the shortfall of a >= goal), over all rows
    total_dev = solution.get_total_deviation("demand_target")
    print(f"Total deviation: {total_dev:.2f}")
 

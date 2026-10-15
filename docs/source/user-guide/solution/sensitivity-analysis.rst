@@ -308,29 +308,28 @@ For more accurate analysis, re-solve:
 
 .. code-block:: python
 
-   def compare_scenarios(base_model, resource, capacity_increases):
+   from lumix import LXWhatIfAnalyzer
+
+   def compare_scenarios(base_model, optimizer, constraint_name, capacity_increases):
        """Compare multiple capacity scenarios."""
 
+       analyzer = LXWhatIfAnalyzer(base_model, optimizer)
        results = []
 
        for increase in capacity_increases:
-           # Clone model and modify capacity
-           scenario_model = base_model.copy()  # Implement model cloning
-           # Modify constraint RHS...
-
-           # Solve scenario
-           scenario_solution = optimizer.solve(scenario_model)
+           # Solves a copy of the model with the right-hand side raised
+           result = analyzer.increase_constraint_rhs(constraint_name, by=increase)
 
            results.append({
                'increase': increase,
-               'objective': scenario_solution.objective_value,
-               'solve_time': scenario_solution.solve_time,
+               'objective': result.new_objective,
+               'solve_time': result.new_solution.solve_time,
            })
 
        # Compare results
        base_objective = results[0]['objective']
 
-       print(f"Scenario Analysis: {resource.name} Capacity")
+       print(f"Scenario Analysis: {constraint_name} Capacity")
        print(f"{'Increase':<10} {'Objective':<15} {'Improvement':<15} {'Time':<10}")
        print("-" * 60)
 

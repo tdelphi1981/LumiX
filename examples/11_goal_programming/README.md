@@ -76,8 +76,7 @@ model.add_constraint(
 # Set goal programming mode
 model.set_goal_mode("weighted")  # or "sequential"
 
-# Prepare and solve
-model.prepare_goal_programming()
+# Solve: the goals are relaxed automatically, on a copy of the model
 optimizer = LXOptimizer().use_solver("ortools")
 solution = optimizer.solve(model)
 
@@ -85,8 +84,9 @@ solution = optimizer.solve(model)
 deviations = solution.get_goal_deviations("production_target")
 satisfied = solution.is_goal_satisfied("production_target")
 print(f"Goal satisfied: {satisfied}")
-print(f"Negative deviation: {deviations['neg']}")  # Under-production
-print(f"Positive deviation: {deviations['pos']}")  # Over-production
+# Deviations are dicts {row name: value}; a single goal has one row, named after it
+print(f"Negative deviation: {sum(deviations['neg'].values()):.2f}")  # Under-production
+print(f"Positive deviation: {sum(deviations['pos'].values()):.2f}")  # Over-production
 ```
 
 ## Constraint Type Handling
@@ -151,8 +151,11 @@ Priorities are converted to exponentially different weights:
 - Priority 2: weight = 10^5
 - Priority 3: weight = 10^4
 - ...
+- Priority 7: weight = 1 (the same as the model objective)
 
 This ensures higher priorities dominate lower priorities in a single objective function.
+Goals at priority 7 or higher do **not** dominate the model objective (priority 8 weighs
+0.1); keep goals that must win at priorities 1–6, or use sequential mode.
 
 ```python
 # Priority 1 goals (most important)
@@ -187,19 +190,29 @@ model.set_goal_mode("weighted")
 
 ### Sequential Mode (Multiple Solves)
 
-**Note**: Sequential mode is planned but not yet fully implemented. It will solve priorities lexicographically:
-1. Solve Priority 1, get optimal d1*
-2. Fix d1 = d1*, solve Priority 2, get optimal d2*
-3. Fix d2 = d2*, solve Priority 3, etc.
+Sequential mode solves the priorities lexicographically:
+1. Solve Priority 1, get its optimal weighted deviation d1*
+2. Keep Priority 1 at d1* and solve Priority 2, get d2*
+3. Keep d1*, d2* and solve Priority 3, etc.
+4. Finally optimize the model's own objective and the priority 0 goals
 
 ```python
 model.set_goal_mode("sequential")
-# This will perform true preemptive goal programming
+solution = optimizer.solve(model)
+for stage in solution.goal_stages:
+    print(stage.priority, stage.status, stage.objective_value)
 ```
+
+Use it when goals have very different scales: the weights of weighted mode then
+no longer guarantee that a higher priority wins.
 
 ## Custom Objectives (Priority 0)
 
-Use priority 0 to incorporate custom objective terms alongside goal deviations:
+Use priority 0 to incorporate custom objective terms alongside goal deviations.
+A priority 0 goal is not a relaxed row: the expression of a `.ge()` goal is
+maximized and that of a `.le()` goal minimized, times its weight, after all
+goals (it has no deviations). A model objective set with `minimize()` /
+`maximize()` is kept the same way, as the lowest priority:
 
 ```python
 # Maximize profit (priority 0 = custom objective)
@@ -255,30 +268,29 @@ for product in PRODUCTS:
 # Check if goal is satisfied
 satisfied = solution.is_goal_satisfied("demand_goal", tolerance=1e-6)
 
-# Get deviation values
+# Get deviation values: {"pos": {row: value}, "neg": {row: value}}
 deviations = solution.get_goal_deviations("demand_goal")
-pos_dev = deviations["pos"]  # Over-achievement
-neg_dev = deviations["neg"]  # Under-achievement
+pos_dev = sum(deviations["pos"].values())  # Over-achievement
+neg_dev = sum(deviations["neg"].values())  # Under-achievement
 
-# Get total deviation
+# Total undesired deviation (the shortfall of a >= goal)
 total = solution.get_total_deviation("demand_goal")
 ```
 
 ### Indexed Goals
 
 ```python
-# For indexed goals, deviations are dictionaries
+# An indexed goal (.indexed_by(lambda p: p.id)) has one row per product,
+# keyed "<goal name>_<id>"
+deviations = solution.get_goal_deviations("demand_goal")
+neg_dev = deviations["neg"]  # {"demand_goal_<id>": value}
+pos_dev = deviations["pos"]
+
 for product in PRODUCTS:
-    goal_name = f"production_goal_{product.id}"
-    deviations = solution.get_goal_deviations(goal_name)
-
-    # Access by index
-    neg_dev = deviations["neg"]  # Dict[product_id, value]
-    pos_dev = deviations["pos"]  # Dict[product_id, value]
-
+    row = f"demand_goal_{product.id}"
     print(f"Product {product.name}:")
-    print(f"  Shortfall: {neg_dev.get(product.id, 0):.2f}")
-    print(f"  Excess: {pos_dev.get(product.id, 0):.2f}")
+    print(f"  Shortfall: {neg_dev.get(row, 0.0):.2f}")
+    print(f"  Excess: {pos_dev.get(row, 0.0):.2f}")
 ```
 
 ## Examples
@@ -325,7 +337,7 @@ Set goal programming mode ("weighted" or "sequential").
 ```python
 .prepare_goal_programming() -> Self
 ```
-Prepare model for goal programming (relax goals, add deviation variables, build objective). Called automatically by solver.
+Relax the goals in the model itself (add deviation variables, build the objective). Optional: `optimizer.solve(model)` relaxes the goals on a copy and leaves the model unchanged; call this to inspect the relaxed model.
 
 ```python
 .has_goals() -> bool
@@ -335,25 +347,25 @@ Check if model has any goal constraints.
 ### LXSolution Methods
 
 ```python
-.get_goal_deviations(goal_name: str) -> Dict[str, Union[float, Dict[Any, float]]]
+.get_goal_deviations(goal_name: str) -> Optional[Dict[str, Dict[Any, float]]]
 ```
-Get deviation values for a goal (returns dict with 'pos' and 'neg' keys).
+Get deviation values for a goal: `{"pos": {row: value}, "neg": {row: value}}`. The values are always dicts, keyed by the goal name for a single goal and `"<goal>_<key>"` for each row of an indexed goal.
 
 ```python
-.is_goal_satisfied(goal_name: str, tolerance: float = 1e-6) -> bool
+.is_goal_satisfied(goal_name: str, tolerance: float = 1e-6) -> Optional[bool]
 ```
-Check if goal is satisfied within tolerance.
+Check if the goal's undesired deviations are within tolerance (the shortfall of a `>=` goal, the excess of a `<=` goal, both for `==`).
 
 ```python
-.get_total_deviation(goal_name: str) -> float
+.get_total_deviation(goal_name: str) -> Optional[float]
 ```
-Get total absolute deviation for a goal.
+Get the total undesired deviation of a goal: `neg` for `>=`, `pos` for `<=`, both for `==`, summed over all rows (`None` if the goal is not found). Changed in 0.3.0: it used to add the desired side too, so an over-achieved `>=` goal reported a deviation.
 
 ## Implementation Details
 
 ### Automatic Relaxation
 
-When you call `.prepare_goal_programming()`:
+When you solve a model with goals (or call `.prepare_goal_programming()`):
 
 1. **Identify Goals**: Find all constraints marked with `.as_goal()`
 2. **Create Deviation Variables**: For each goal, create `pos_dev` and `neg_dev`
@@ -374,7 +386,7 @@ Deviation variables are automatically named:
 
 For weighted mode:
 ```python
-priority_weight = 10 ** (6 - priority)
+priority_weight = 10 ** (7 - priority)  # P1 = 10^6, P2 = 10^5, ...
 combined_weight = priority_weight * goal_weight
 ```
 
@@ -394,13 +406,11 @@ Example:
 
 ## Limitations
 
-1. **Sequential Mode**: Not yet fully implemented (use weighted mode)
-2. **Quadratic Objectives**: Goal programming currently supports linear objectives only
-3. **Manual Combination**: Combining custom objectives with goals requires priority 0
+1. **Priority 0 goals**: must be `.ge()` or `.le()`, linear and not indexed
+2. **Model objective**: a nonlinear objective cannot be combined with goals (quadratic objectives need Gurobi or CPLEX)
 
 ## Future Enhancements
 
-- [ ] Full sequential/lexicographic solver
 - [ ] Automatic priority inference
 - [ ] Goal relaxation tolerance settings
 - [ ] Interactive goal adjustment

@@ -87,29 +87,20 @@ Cartesian Products
 Creating Products
 ~~~~~~~~~~~~~~~~~
 
+Pass one :class:`LXIndexDimension` per data model to ``indexed_by_product``;
+the family has one variable for every combination of their instances:
+
 .. code-block:: python
 
-   from lumix import LXCartesianProduct, LXIndexDimension
-
-   # Method 1: Via variable definition
-   duty = (
-       LXVariable[Tuple[Driver, Date], int]("duty")
-       .indexed_by_product(
-           LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
-           LXIndexDimension(Date, lambda dt: dt.date).from_data(dates)
-       )
-   )
-
-   # Method 2: Explicit cartesian product
-   product = LXCartesianProduct(
-       LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
-       LXIndexDimension(Date, lambda dt: dt.date).from_data(dates)
-   )
+   from lumix import LXIndexDimension
 
    duty = (
        LXVariable[Tuple[Driver, Date], int]("duty")
        .binary()
-       .from_data(product)
+       .indexed_by_product(
+           LXIndexDimension(Driver, lambda d: d.id).from_data(drivers),
+           LXIndexDimension(Date, lambda dt: dt.date).from_data(dates)
+       )
    )
 
 Cross-Dimension Filtering
@@ -170,14 +161,15 @@ In Constraints
                .add_multi_term(
                    duty,
                    coeff=lambda d, dt: 1.0,
-                   where=lambda d, dt: d.id == driver.id  # Fix driver dimension
+                   # Fix the driver dimension; did=driver.id binds this driver
+                   where=lambda d, dt, did=driver.id: d.id == did
                )
            )
            .le()
            .rhs(5.0)
        )
 
-   # Each date needs at least 3 drivers
+   # Each date needs at least its minimum number of drivers
    for date in dates:
        model.add_constraint(
            LXConstraint(f"coverage_{date.date}")
@@ -186,12 +178,22 @@ In Constraints
                .add_multi_term(
                    duty,
                    coeff=lambda d, dt: 1.0,
-                   where=lambda d, dt: dt.date == date.date  # Fix date dimension
+                   # Fix the date dimension
+                   where=lambda d, dt, day=date.date: dt.date == day
                )
            )
            .ge()
            .rhs(float(date.min_drivers))
        )
+
+.. warning::
+
+   LumiX calls ``coeff`` and ``where`` when the model is built, after the
+   loop has finished. A lambda that reads the loop variable directly
+   (``where=lambda d, dt: d.id == driver.id``) sees only the last driver, so
+   every row would use the same driver. Bind the current value with a default
+   argument, as above. Parameters with a default value are not passed by
+   LumiX.
 
 .. note::
 
@@ -234,8 +236,8 @@ Complete Example: Driver Scheduling
    # Sample data
    drivers = [
        Driver("D1", "Alice", 200, 5, [5, 6], True),
-       Driver("D2", "Bob", 180, 6, [6], True),
-       Driver("D3", "Carol", 220, 4, [0, 6], True),
+       Driver("D2", "Bob", 180, 6, [2], True),
+       Driver("D3", "Carol", 220, 4, [0, 1], True),
    ]
 
    start_date = date(2024, 1, 1)
@@ -284,7 +286,7 @@ Complete Example: Driver Scheduling
                .add_multi_term(
                    duty,
                    coeff=lambda d, dt: 1.0,
-                   where=lambda d, dt: d.id == driver.id
+                   where=lambda d, dt, did=driver.id: d.id == did
                )
            )
            .le()
@@ -300,7 +302,7 @@ Complete Example: Driver Scheduling
                .add_multi_term(
                    duty,
                    coeff=lambda d, date: 1.0,
-                   where=lambda d, date: date.date == dt.date
+                   where=lambda d, date, day=dt.date: date.date == day
                )
            )
            .ge()

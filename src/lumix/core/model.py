@@ -91,6 +91,8 @@ See Also:
 
 from __future__ import annotations
 
+import numbers
+
 from typing import TYPE_CHECKING, Generic, List, Optional, TypeVar
 
 from typing_extensions import Self
@@ -101,6 +103,7 @@ from .expressions import LXLinearExpression, LXQuadraticExpression
 from .variables import LXVariable
 
 if TYPE_CHECKING:
+    from .canonical import LXCanonicalModel
     from ..goal_programming.goal import LXGoalMode
     from ..goal_programming.relaxation import RelaxedConstraint
     from ..solution.solution import LXSolution
@@ -151,8 +154,9 @@ class LXModel(Generic[TModel]):
         # multiple families (e.g., production, inventory, transportation).
         self.variables: List[LXVariable] = []
         self.constraints: List[LXConstraint] = []
-        self.objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
+        self._objective_expr: Optional[LXLinearExpression | LXQuadraticExpression] = None
         self.objective_sense: LXObjectiveSense = LXObjectiveSense.MAXIMIZE
+        self._objective_from_costs = False
 
         # Goal programming support
         self.goal_mode: Optional[str] = None  # "weighted" or "sequential"
@@ -160,11 +164,11 @@ class LXModel(Generic[TModel]):
         self._goal_programming_prepared: bool = False
 
     def __deepcopy__(self, memo):
-        """Custom deepcopy that enables what-if analysis with ORM data sources.
+        """Copy the model structure for what-if and scenario analysis.
 
-        This method orchestrates deep copying of the entire model including:
-        1. All variable families (with ORM data materialization)
-        2. All constraint families (with ORM data materialization)
+        This method orchestrates copying of the entire model including:
+        1. All variable families (an ORM query is materialized once)
+        2. All constraint families (an ORM query is materialized once)
         3. Objective expression
         4. Goal programming metadata
 
@@ -175,12 +179,16 @@ class LXModel(Generic[TModel]):
             memo: Dictionary for tracking circular references during deepcopy
 
         Returns:
-            Deep copy of this model with all ORM dependencies resolved
+            Copy of this model whose families, constraints and expressions are new
+            objects
 
         Note:
-            After copying, all variables and constraints will have their ORM sessions
-            detached and data materialized. The copy is completely independent and safe
-            for serialization/pickling.
+            Data instances (plain and ORM objects) and callables are shared with the
+            original, so closures behave the same in the copy. ORM objects are not
+            detached; pickling a model detaches them.
+
+        .. versionchanged:: 0.3.0
+           Data instances are shared instead of deep-copied/detached (catalog A23, B15).
 
         Example:
             >>> original_model = build_model_with_orm(session)
@@ -199,13 +207,14 @@ class LXModel(Generic[TModel]):
         result.objective_sense = self.objective_sense
         result.goal_mode = self.goal_mode
         result._goal_programming_prepared = self._goal_programming_prepared
+        result._goal_prepared_mode = getattr(self, "_goal_prepared_mode", None)
 
         # Deep copy all variable families
-        # Each variable's __deepcopy__ will materialize and detach ORM data
+        # Each variable's __deepcopy__ shares its data instances and callables
         result.variables = [deepcopy(var, memo) for var in self.variables]
 
         # Deep copy all constraint families
-        # Each constraint's __deepcopy__ will materialize and detach ORM data
+        # Each constraint's __deepcopy__ shares its data instances and callables
         result.constraints = [deepcopy(constr, memo) for constr in self.constraints]
 
         # Deep copy objective expression (if present)
@@ -214,6 +223,7 @@ class LXModel(Generic[TModel]):
             if self.objective_expr is not None
             else None
         )
+        result._objective_from_costs = self._objective_from_costs
 
         # Deep copy relaxed constraints (for goal programming)
         result._relaxed_constraints = [
@@ -251,6 +261,9 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
         """
+        if any(v.name == var.name for v in self.variables):
+            raise ValueError(f"Model '{self.name}' already has a variable family named "
+                             f"'{var.name}'")
         self.variables.append(var)
         return self
 
@@ -264,7 +277,8 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
         """
-        self.variables.extend(variables)
+        for var in variables:
+            self.add_variable(var)
         return self
 
     def add_constraint(self, constraint: LXConstraint) -> Self:
@@ -276,9 +290,31 @@ class LXModel(Generic[TModel]):
 
         Returns:
             Self for chaining
+
+        Raises:
+            ValueError: If the model already has a constraint with this name.
+
+        .. versionchanged:: 0.3.0
+           A second constraint with the same name raises ``ValueError``; it used to be
+           accepted and then hid the first one from duals, activity and analysis.
         """
+        names = self._constraint_name_set()
+        if constraint.name in names and any(c.name == constraint.name for c in self.constraints):
+            raise ValueError(f"Model '{self.name}' already has a constraint named "
+                             f"'{constraint.name}'")
         self.constraints.append(constraint)
+        names.add(constraint.name)
         return self
+
+    def _constraint_name_set(self) -> set:
+        """Names of ``self.constraints``, cached for this list object (rebuilt when the
+        list is replaced or changed outside ``add_constraint``)."""
+        cache = self.__dict__.get("_constraint_names")
+        if (cache is None or cache[0] is not self.constraints
+                or len(cache[1]) != len(self.constraints)):
+            cache = (self.constraints, {c.name for c in self.constraints})
+            self.__dict__["_constraint_names"] = cache
+        return cache[1]
 
     def add_constraints(self, *constraints: LXConstraint) -> Self:
         """
@@ -290,36 +326,88 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
         """
-        self.constraints.extend(constraints)
+        for constraint in constraints:
+            self.add_constraint(constraint)
         return self
 
-    def minimize(self, expr: LXLinearExpression | LXQuadraticExpression) -> Self:
+    def to_canonical(self) -> "LXCanonicalModel":
+        """Solver-independent canonical form of this model (variable instances,
+        rows with summed coefficients, objective). Solver adapters build from
+        it; external engines can read it instead of LumiX internals. Goals are
+        relaxed in the canonical form without changing this model.
+
+        .. versionadded:: 0.3.0
+        """
+        from ..goal_programming.view import goal_form
+        from .canonical import LXCanonicalBuilder
+
+        return LXCanonicalBuilder(goal_form(self)).build()
+
+    def minimize(self, expr: Optional[LXLinearExpression | LXQuadraticExpression] = None) -> Self:
         """
         Set objective to minimize.
 
         Args:
-            expr: Objective expression (linear or quadratic)
+            expr: Objective expression (linear or quadratic). Without it, the
+                objective is the sum of the variables' costs (``.cost()`` /
+                ``.cost_multi()``), taken from the variables in the model when
+                it is solved.
 
         Returns:
             Self for chaining
+
+        .. versionchanged:: 0.3.0
+           ``expr`` is optional.
         """
         self.objective_sense = LXObjectiveSense.MINIMIZE
-        self.objective_expr = expr
+        self.objective_expr = self.cost_objective() if expr is None else expr
+        self._objective_from_costs = expr is None
         return self
 
-    def maximize(self, expr: LXLinearExpression | LXQuadraticExpression) -> Self:
+    def maximize(self, expr: Optional[LXLinearExpression | LXQuadraticExpression] = None) -> Self:
         """
         Set objective to maximize.
 
         Args:
-            expr: Objective expression (linear or quadratic)
+            expr: Objective expression (linear or quadratic). Without it, the
+                objective is the sum of the variables' costs (``.cost()`` /
+                ``.cost_multi()``), taken from the variables in the model when
+                it is solved.
 
         Returns:
             Self for chaining
+
+        .. versionchanged:: 0.3.0
+           ``expr`` is optional.
         """
         self.objective_sense = LXObjectiveSense.MAXIMIZE
-        self.objective_expr = expr
+        self.objective_expr = self.cost_objective() if expr is None else expr
+        self._objective_from_costs = expr is None
         return self
+
+    @property
+    def objective_expr(self) -> Optional[LXLinearExpression | LXQuadraticExpression]:
+        """The objective expression. Assigning one replaces an objective taken from
+        the variables' costs (``minimize()`` / ``maximize()`` without an argument)."""
+        return self._objective_expr
+
+    @objective_expr.setter
+    def objective_expr(self, expr: Optional[LXLinearExpression | LXQuadraticExpression]) -> None:
+        self._objective_expr = expr
+        self._objective_from_costs = False
+
+    def cost_objective(self) -> Optional[LXLinearExpression]:
+        """Sum of the cost expressions of all variable families (``None`` if no
+        variable defines a cost).
+
+        .. versionadded:: 0.3.0
+        """
+        total: Optional[LXLinearExpression] = None
+        for var in self.variables:
+            part = var.cost_expression()
+            if part is not None:
+                total = part if total is None else total + part
+        return total
 
     def get_variable(self, name: str) -> Optional[LXVariable]:
         """
@@ -389,78 +477,82 @@ class LXModel(Generic[TModel]):
         4. Adds deviation variables to the model
         5. Replaces goal constraints with relaxed versions
 
-        This is automatically called by the solver, but can be called
-        manually for inspection or debugging.
+        Priority 0 goals are not relaxed rows but objective terms: a ``.ge()``
+        goal's expression is maximized and a ``.le()`` goal's expression is
+        minimized, times its weight. The model's own objective
+        (``minimize``/``maximize``) is kept as the lowest priority, together with
+        the priority 0 goals: in weighted mode it is added in minimization form
+        with weight ``priority_to_weight(0) = 1``; in sequential mode it is solved
+        in the last stage.
+
+        Solving a model with goals relaxes them on a copy automatically; call
+        this method to relax them in the model itself (to inspect it, or for
+        tools that read the model).
 
         Returns:
             Self for chaining
+
+        Raises:
+            ValueError: If a goal priority is not an integer >= 0, a priority 0
+                goal is indexed, uses ``.eq()`` or has nonlinear terms, or the
+                model's objective is nonlinear
 
         Example:
             >>> model.set_goal_mode("weighted")
             >>> model.prepare_goal_programming()
             >>> # Model now has deviation variables and goal objective
+
+        .. versionchanged:: 0.3.0
+           Priority 0 goals and the model's own objective are optimized after the
+           goals instead of being dropped.
         """
         if self._goal_programming_prepared:
-            # Already prepared, skip
             return self
-
-        # Import here to avoid circular dependencies
-        from ..goal_programming.goal import LXGoalMode
-        from ..goal_programming.objective_builder import build_weighted_objective
+        from ..goal_programming.objective_builder import build_weighted_objective, final_objective
         from ..goal_programming.relaxation import relax_constraint
+        from ..goal_programming.view import goal_mode_value
 
-        # Collect goal constraints
-        goal_constraints = [c for c in self.constraints if c.is_goal()]
-
-        if not goal_constraints:
-            # No goals, nothing to do
+        goals = [c for c in self.constraints if c.is_goal()]
+        if not goals:
             return self
-
-        # Determine mode (default to weighted if not set)
+        for c in goals:
+            p = c.goal_metadata.priority
+            integral = (isinstance(p, numbers.Integral) and not isinstance(p, bool)) or (
+                isinstance(p, numbers.Real) and not isinstance(p, bool) and float(p).is_integer())
+            if not integral or p < 0:
+                raise ValueError(f"Goal '{c.name}' has priority {p!r}; priorities are integers >= 0")
+            c.goal_metadata.priority = int(p)
         if self.goal_mode is None:
             self.goal_mode = "weighted"
+        final = final_objective(self, [c for c in goals if c.goal_metadata.priority == 0])
 
-        # Relax each goal constraint
         self._relaxed_constraints = []
-        regular_constraints = []
-
+        constraints = []
         for constraint in self.constraints:
-            if constraint.is_goal():
-                # Relax this constraint
+            if not constraint.is_goal():
+                constraints.append(constraint)
+            elif constraint.goal_metadata.priority > 0:
                 relaxed = relax_constraint(constraint, constraint.goal_metadata)
                 self._relaxed_constraints.append(relaxed)
-
-                # Add deviation variables to model
                 self.add_variable(relaxed.pos_deviation)
                 self.add_variable(relaxed.neg_deviation)
+                constraints.append(relaxed.constraint)
+            # priority 0 goals are objective terms (final_objective), not rows
+        self.constraints = constraints
 
-                # Add relaxed constraint (equality with deviations)
-                regular_constraints.append(relaxed.constraint)
-            else:
-                # Keep regular constraint as-is
-                regular_constraints.append(constraint)
-
-        # Replace constraints with relaxed versions
-        self.constraints = regular_constraints
-
-        # Build objective based on mode
-        if self.goal_mode == "weighted":
-            # Build weighted objective
-            goal_objective = build_weighted_objective(self._relaxed_constraints)
-
-            # Set as objective (or combine with existing if present)
-            if self.objective_expr is None:
-                # No existing objective, use goal objective
-                self.minimize(goal_objective)
-            else:
-                # Combine with existing objective
-                # For now, we'll just replace it (user can handle this manually)
-                # Future enhancement: provide combine_objectives helper
-                self.minimize(goal_objective)
-
-        # For sequential mode, objective will be set during solving
-        # (handled by LXGoalProgrammingSolver)
-
+        if goal_mode_value(self.goal_mode) == "weighted":
+            objective = build_weighted_objective(self._relaxed_constraints)
+            if final is not None:
+                expr, sense = final
+                objective = objective + (expr if sense == LXObjectiveSense.MINIMIZE else -expr)
+            self.minimize(objective)
+        elif final is not None:
+            expr, sense = final
+            self.minimize(expr) if sense == LXObjectiveSense.MINIMIZE else self.maximize(expr)
+        else:
+            self.objective_expr = None      # the stages minimize the deviations
+            self.objective_sense = LXObjectiveSense.MINIMIZE
+        self._goal_prepared_mode = goal_mode_value(self.goal_mode)
         self._goal_programming_prepared = True
         return self
 
@@ -480,7 +572,7 @@ class LXModel(Generic[TModel]):
         Extracts deviation variable values from the solution and organizes
         them by goal name for easy access via solution.get_goal_deviations().
 
-        This method is automatically called after solving if the model has goals.
+        ``LXOptimizer.solve`` calls this method on the model it relaxed.
 
         Args:
             solution: Solution object to populate
@@ -490,6 +582,8 @@ class LXModel(Generic[TModel]):
         """
         if not self._goal_programming_prepared or not self._relaxed_constraints:
             return solution
+        if not solution.variables:
+            return solution     # no solution (infeasible, unbounded, stopped): no deviations
 
         # Import here to avoid circular dependency
         from ..solution.solution import LXSolution
@@ -507,6 +601,10 @@ class LXModel(Generic[TModel]):
                 "pos": pos_dev_values,
                 "neg": neg_dev_values,
             }
+            meta = relaxed.goal_metadata
+            solution._undesired_deviations[constraint_name] = frozenset(
+                side for side, bad in (("pos", meta.is_pos_undesired()),
+                                       ("neg", meta.is_neg_undesired())) if bad)
 
         return solution
 
