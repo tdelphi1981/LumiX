@@ -458,3 +458,48 @@ def test_mode_change_after_explicit_prepare_raises(prepared, switched):
     m.set_goal_mode(switched)
     with pytest.raises(ValueError, match="prepared for"):
         LXOptimizer().use_solver("ortools").solve(m)
+
+
+# --- Final review fixes ---------------------------------------------------------------
+def test_integer_like_priorities_are_accepted():
+    np = pytest.importorskip("numpy")
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(goal("g", lin((x, 1.0)), "<=", 3, priority=np.int64(1)))
+    m.add_constraint(goal("h", lin((x, 1.0)), ">=", 5, priority=2.0))
+    assert solve_with("ortools", m).variables["x"]["k"] == pytest.approx(3)
+    for bad in (True, 1.5):
+        m2 = LXModel("m").add_variable(x)
+        m2.add_constraint(goal("g", lin((x, 1.0)), "<=", 3, priority=bad))
+        with pytest.raises(ValueError, match="priorit"):
+            solve_with("ortools", m2)
+
+
+def test_solve_sequential_directly_ignores_the_model_mode():
+    from lumix.goal_programming.solver import LXGoalProgrammingSolver
+    m = _lex_model(scale=20.0)
+    m.goal_mode = None
+    s = LXGoalProgrammingSolver(LXOptimizer().use_solver("ortools")).solve_sequential(m)
+    assert [(st.priority, st.objective_value) for st in s.goal_stages] == pytest.approx(
+        [(1, 0.0), (2, 120.0)])
+    assert s.objective_value == pytest.approx(120.0) and m.goal_mode is None
+    w = LXGoalProgrammingSolver(LXOptimizer().use_solver("ortools")).solve_weighted(
+        _lex_model(scale=20.0))
+    assert w.goal_stages == [] and w.variables["x"]["k"] == pytest.approx(2)
+
+
+def test_solve_sequential_on_a_model_prepared_weighted_raises():
+    from lumix.goal_programming.solver import LXGoalProgrammingSolver
+    m = _lex_model().set_goal_mode("weighted")
+    m.prepare_goal_programming()
+    with pytest.raises(ValueError, match="prepared for"):
+        LXGoalProgrammingSolver(LXOptimizer().use_solver("ortools")).solve_sequential(m)
+
+
+def test_mode_guard_survives_deepcopy():
+    m = _lex_model().set_goal_mode("sequential")
+    m.prepare_goal_programming()
+    d = copy.deepcopy(m)
+    d.set_goal_mode("weighted")
+    with pytest.raises(ValueError, match="prepared for"):
+        LXOptimizer().use_solver("ortools").solve(d)

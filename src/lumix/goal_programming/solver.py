@@ -27,6 +27,20 @@ logger = logging.getLogger(__name__)
 SEQUENTIAL_TOLERANCE = 0.0
 
 
+def _in_mode(model: LXModel, mode: str) -> LXModel:
+    """``model`` to be solved in ``mode``: a shallow copy set to that mode when its goals
+    are not relaxed yet; ``model`` itself when it was prepared for that mode."""
+    if model._goal_programming_prepared:
+        prepared = getattr(model, "_goal_prepared_mode", None) or goal_mode_value(model.goal_mode)
+        if prepared != mode:
+            raise ValueError(f"The model was prepared for {prepared} goal programming; "
+                             f"it cannot be solved in {mode} mode")
+        return model
+    view = copy.copy(model)
+    view.goal_mode = mode
+    return view
+
+
 def _stage_model(model: LXModel, bounds: List[LXConstraint], expr: Any,
                  sense: LXObjectiveSense) -> LXModel:
     """A shallow copy of ``model`` with the stage bounds added and the stage objective."""
@@ -70,7 +84,9 @@ class LXGoalProgrammingSolver:
         priority-0 goals. ``solution.goal_stages`` reports each solve. A stage that
         does not solve to optimality ends the sequence; its solution is returned.
 
-        ``model`` is not changed; one with unprepared goals is relaxed on a copy.
+        ``model`` is not changed; one with unprepared goals is relaxed on a copy in
+        sequential mode, whatever its goal mode. A model prepared for weighted mode
+        raises ``ValueError``.
 
         Args:
             model: LXModel with goals (prepared or not)
@@ -86,7 +102,7 @@ class LXGoalProgrammingSolver:
         .. versionchanged:: 0.3.0
            Earlier stages are kept at their optimum; the final objective is solved last.
         """
-        model = goal_form(model)
+        model = goal_form(_in_mode(model, "sequential"))
         relaxed = model._relaxed_constraints if relaxed_constraints is None else relaxed_constraints
         stage_exprs = build_sequential_objectives(relaxed)
         final = None
@@ -132,13 +148,14 @@ class LXGoalProgrammingSolver:
         needed, and the weighted objective is built there.
 
         Args:
-            model: LXModel with goals (relaxed on a copy when not prepared)
+            model: LXModel with goals (relaxed on a copy in weighted mode when not
+                prepared; a model prepared for sequential mode raises ValueError)
             **solver_params: Additional solver parameters
 
         Returns:
             Solution from single optimization
         """
-        return self.optimizer.solve(model, **solver_params)
+        return self.optimizer.solve(_in_mode(model, "weighted"), **solver_params)
 
 
 def solve_goal_programming(
@@ -172,14 +189,9 @@ def solve_goal_programming(
         >>> solution = solve_goal_programming(model, optimizer, mode=LXGoalMode.WEIGHTED)
     """
     gp_solver = LXGoalProgrammingSolver(optimizer)
-    if model._goal_programming_prepared and goal_mode_value(model.goal_mode) != mode.value:
-        raise ValueError(f"The model was prepared for {model.goal_mode} goal programming; "
-                         f"it cannot be solved in {mode.value} mode")
-    view = copy.copy(model)
-    view.goal_mode = mode.value
     if mode == LXGoalMode.WEIGHTED:
-        return gp_solver.solve_weighted(view, **solver_params)
-    return gp_solver.optimizer.solve(view, **solver_params)
+        return gp_solver.solve_weighted(model, **solver_params)
+    return gp_solver.solve_sequential(model, **solver_params)
 
 
 __all__ = [

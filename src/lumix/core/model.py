@@ -91,6 +91,8 @@ See Also:
 
 from __future__ import annotations
 
+import numbers
+
 from typing import TYPE_CHECKING, Generic, List, Optional, TypeVar
 
 from typing_extensions import Self
@@ -201,6 +203,7 @@ class LXModel(Generic[TModel]):
         result.objective_sense = self.objective_sense
         result.goal_mode = self.goal_mode
         result._goal_programming_prepared = self._goal_programming_prepared
+        result._goal_prepared_mode = getattr(self, "_goal_prepared_mode", None)
 
         # Deep copy all variable families
         # Each variable's __deepcopy__ will materialize and detach ORM data
@@ -487,8 +490,11 @@ class LXModel(Generic[TModel]):
             return self
         for c in goals:
             p = c.goal_metadata.priority
-            if not isinstance(p, int) or p < 0:
+            integral = (isinstance(p, numbers.Integral) and not isinstance(p, bool)) or (
+                isinstance(p, numbers.Real) and not isinstance(p, bool) and float(p).is_integer())
+            if not integral or p < 0:
                 raise ValueError(f"Goal '{c.name}' has priority {p!r}; priorities are integers >= 0")
+            c.goal_metadata.priority = int(p)
         if self.goal_mode is None:
             self.goal_mode = "weighted"
         final = final_objective(self, [c for c in goals if c.goal_metadata.priority == 0])
