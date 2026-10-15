@@ -564,3 +564,117 @@ def test_quadratic_callable_takes_parts_on_product_families():
     assert (m.minimize(spread).to_canonical().objective_quadratic
             == m.minimize(whole).to_canonical().objective_quadratic
             == {(0, 0): 2.0, (1, 1): 2.0, (2, 2): 3.0, (3, 3): 3.0})
+
+
+# --- Görev 8: nonlinear models against brute force (spec §6) -----------------------
+from hypothesis import HealthCheck, given, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+SMALL = list(range(-3, 4))
+
+
+@st.composite
+def nonlinear_cases(draw):
+    n = draw(st.integers(2, 3))
+    kinds = [draw(st.sampled_from(["integer", "integer", "binary"])) for _ in range(n)]
+    terms = []
+    for _ in range(draw(st.integers(1, 3))):
+        kind = draw(st.sampled_from(["abs", "min", "max", "product", "piecewise", "fabs", "fpwl"]))
+        i, j = draw(st.integers(0, n - 1)), draw(st.integers(0, n - 1))
+        if kind == "piecewise" and kinds[i] == "binary":
+            kind = "abs"          # breakpoints span [-3, 3]; a binary would narrow the domain
+        c = draw(st.sampled_from([-2.0, -1.0, 1.0, 2.0]))
+        values = tuple(draw(st.integers(-5, 5)) for _ in SMALL)
+        terms.append((kind, i, j, c, values))
+    linear = [draw(st.integers(-2, 2)) for _ in range(n)]
+    rows = [([draw(st.integers(-2, 2)) for _ in range(n)], draw(st.integers(-3, 4)))
+            for _ in range(draw(st.integers(0, 2)))]
+    nl_row = draw(st.one_of(st.none(), st.tuples(st.sampled_from(["abs", "product"]),
+                                                 st.integers(0, n - 1), st.integers(0, n - 1),
+                                                 st.sampled_from(["<=", ">=", "=="]),
+                                                 st.integers(0, 4))))
+    return n, kinds, terms, linear, rows, nl_row, draw(st.sampled_from(["min", "max"]))
+
+
+def _domain(kind):
+    return (0, 1) if kind == "binary" else SMALL
+
+
+def _value(term, x, f):
+    kind, i, j, c, values = term
+    if kind == "abs":
+        return c * abs(x[i])
+    if kind == "min":
+        return min(x[i], c * x[j])
+    if kind == "max":
+        return max(x[i], c * x[j])
+    if kind == "product":
+        return c * x[i] * x[j]
+    if kind == "piecewise":
+        return values[SMALL.index(x[i])] if x[i] in SMALL else None
+    if kind == "fabs":
+        return c * sum(abs(v) for v in f)
+    return sum(values[SMALL.index(v)] for v in f)               # fpwl
+
+
+def nonlinear_oracle(n, kinds, terms, linear, rows, nl_row, sense):
+    best = None
+    for x in itertools.product(*[_domain(k) for k in kinds]):
+        for f in itertools.product(range(-2, 3), repeat=2):
+            if any(sum(a * v for a, v in zip(co, x)) > r for co, r in rows):
+                continue
+            if nl_row is not None:
+                kind, i, j, sense_, r = nl_row
+                lhs = abs(x[i]) if kind == "abs" else x[i] * x[j]
+                if not (lhs <= r if sense_ == "<=" else lhs >= r if sense_ == ">=" else lhs == r):
+                    continue
+            vals = [_value(t, x, f) for t in terms]
+            value = sum(a * v for a, v in zip(linear, x)) + sum(vals)
+            if best is None or (value > best if sense == "max" else value < best):
+                best = value
+    return best
+
+
+def build_nonlinear(n, kinds, terms, linear, rows, nl_row, sense):
+    xs = [fam(f"x{i}", ["k"], k, *((None, None) if k == "binary" else (-3, 3)))
+          for i, k in enumerate(kinds)]
+    f = fam("f", ["p", "q"], "integer", -2, 2)
+    e = LXNonLinearExpression().add_linear(lin(*[(x, float(a)) for x, a in zip(xs, linear)]))
+    for kind, i, j, c, values in terms:
+        if kind == "abs":
+            e.add_abs(xs[i], coeff=c)
+        elif kind in ("min", "max"):
+            getattr(e, "add_" + kind)(xs[i], xs[j], coefficients=[1.0, c])
+        elif kind == "product":
+            e.add_product(xs[i], xs[j], coeff=c)
+        elif kind == "piecewise":
+            table = dict(zip(SMALL, values))
+            e.add_piecewise(xs[i], lambda t, table=table: table[round(t)], breakpoints=SMALL)
+        elif kind == "fabs":
+            e.add_abs(f, coeff=c)
+        else:
+            table = dict(zip(SMALL, values))
+            e.add_piecewise(f, lambda t, table=table: table[round(t)], breakpoints=[-2, -1, 0, 1, 2])
+    cs = [cons(f"r{r}", lin(*[(x, float(a)) for x, a in zip(xs, co)]), "<=", rhs)
+          for r, (co, rhs) in enumerate(rows)]
+    if nl_row is not None:
+        kind, i, j, sense_, r = nl_row
+        ne = (LXNonLinearExpression().add_abs(xs[i]) if kind == "abs"
+              else LXNonLinearExpression().add_product(xs[i], xs[j]))
+        cs.append(cons("nl", ne, sense_, r))
+    return model(xs + [f], cs, sense, e)
+
+
+@settings(max_examples=60, derandomize=True, deadline=None,
+          suppress_health_check=[HealthCheck.too_slow])
+@given(nonlinear_cases())
+def test_linearized_models_match_brute_force(case):
+    expected = nonlinear_oracle(*case)
+    for solver in AVAILABLE:
+        s = LXOptimizer().use_solver(solver).enable_linearization().solve(build_nonlinear(*case))
+        if expected is None:
+            assert s.status == "infeasible", (solver, case)
+        else:
+            assert s.status == "optimal", (solver, case, s.status)
+            assert s.objective_value == pytest.approx(expected, abs=1e-6), (solver, case)
+            assert not s.relaxation
