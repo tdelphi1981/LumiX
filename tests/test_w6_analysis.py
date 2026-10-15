@@ -459,3 +459,23 @@ def test_w6_orm_factory_with_fresh_session():
     assert r["half"].objective_value == pytest.approx(30.0)
     for sess in sessions:
         sess.close()
+
+
+# ---- Final review: goal models are ranked in the sense the solver optimizes ---
+
+def _goal_model():
+    from test_w5_goals import _demand_model
+    return _demand_model()          # goals only, weighted: deviations are minimized
+
+
+def test_w6_get_best_scenario_on_goal_model_minimizes_deviation():
+    sa = LXScenarioAnalyzer(_goal_model(), opt())
+    sa.add_scenario(LXScenario("less_total").modify_constraint_rhs("total", set_value=15))
+    r = sa.run_all_scenarios()
+    assert r["less_total"].objective_value > r["baseline"].objective_value
+    assert sa.get_best_scenario() == "baseline"
+
+
+def test_w6_find_bottlenecks_on_goal_model_reports_improvement():
+    top = LXWhatIfAnalyzer(_goal_model(), opt()).find_bottlenecks(top_n=1)
+    assert top[0][0] == "demand" and top[0][1] > 0

@@ -15,6 +15,7 @@ from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
 from ._factory import ModelSource
 from ._rhs import set_rhs, shift_rhs
+from ._sense import solved_sense
 
 if TYPE_CHECKING:
     from .store import LXResultStore
@@ -466,7 +467,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         if not baseline.is_feasible():
             raise ValueError(
                 f"find_bottlenecks needs a feasible baseline (status '{baseline.status}')")
-        sign = -1.0 if self.model.objective_sense == LXObjectiveSense.MINIMIZE else 1.0
+        sign = -1.0 if solved_sense(self.model) == LXObjectiveSense.MINIMIZE else 1.0
 
         improvements = []
         for constraint in self.model.constraints:

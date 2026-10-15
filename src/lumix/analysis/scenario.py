@@ -15,6 +15,7 @@ from ..solvers.base import LXOptimizer
 from ..core.enums import LXObjectiveSense
 from ._factory import ModelSource
 from ._rhs import set_rhs, shift_rhs
+from ._sense import solved_sense
 
 if TYPE_CHECKING:
     from ..visualization.scenario import LXScenarioCompare
@@ -483,7 +484,8 @@ class LXScenarioAnalyzer(Generic[TModel]):
 
         Args:
             maximize: True to pick the largest objective, False the smallest; None (the
-                default) follows the base model's objective sense.
+                default) follows the sense the base model is solved in (for a model with
+            goals: minimized deviations, or its final stage in sequential mode).
 
         Returns:
             Name of the best scenario whose solution is feasible, or None if no result
@@ -497,7 +499,7 @@ class LXScenarioAnalyzer(Generic[TModel]):
         if not feasible:
             return None
         if maximize is None:
-            maximize = self.base_model.objective_sense == LXObjectiveSense.MAXIMIZE
+            maximize = solved_sense(self.base_model) == LXObjectiveSense.MAXIMIZE
         pick = max if maximize else min
         return pick(feasible.items(), key=lambda item: item[1].objective_value)[0]
 
