@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import math
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
 
 from typing_extensions import Self
 
+from ..core.enums import LXConstraintSense, LXObjectiveSense
 from ..core.model import LXModel
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
+from ._rhs import set_rhs, shift_rhs
 
 TModel = TypeVar("TModel")
 
@@ -236,8 +240,6 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         # For LE constraints, relaxing means increasing RHS
         # For GE constraints, relaxing means decreasing RHS
         # For EQ constraints, we increase (arbitrary choice)
-        from ..core.enums import LXConstraintSense
-
         if constraint.sense == LXConstraintSense.GE:
             # For >= constraints, relaxing means decreasing RHS
             if by is not None:
@@ -275,8 +277,6 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             raise ValueError(f"Constraint '{constraint_name}' not found")
 
         # Tightening is opposite of relaxing
-        from ..core.enums import LXConstraintSense
-
         if constraint.sense == LXConstraintSense.LE:
             # For <= constraints, tightening means decreasing RHS
             if by is not None:
@@ -318,7 +318,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         baseline = self.get_baseline_solution()
 
         # Clone model and modify
-        modified_model = deepcopy(self.model)
+        modified_model = self._new_model()
         variable = modified_model.get_variable(variable_name)
         if variable is None:
             raise ValueError(f"Variable '{variable_name}' not found")
@@ -412,7 +412,10 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             top_n: Number of top bottlenecks to return
 
         Returns:
-            List of (constraint_name, improvement) tuples sorted by improvement
+            List of (constraint_name, improvement per unit) sorted best first; improvement
+            is positive when relaxing the constraint makes the objective better (larger for
+            maximization, smaller for minimization). For an indexed constraint family every
+            row is relaxed by ``test_amount``.
 
         Examples:
             Find top bottlenecks::
@@ -421,18 +424,34 @@ class LXWhatIfAnalyzer(Generic[TModel]):
                 print("Top 5 bottlenecks:")
                 for name, improvement in bottlenecks:
                     print(f"  {name}: +${improvement:.2f} per unit relaxation")
+
+        .. versionchanged:: 0.3.0
+           Values are improvements in the objective's own direction (minimization used to
+           rank backwards) and constraints with a per-row RHS are supported (catalog B12).
         """
         baseline = self.get_baseline_solution()
-        improvements = []
+        if not baseline.is_feasible():
+            raise ValueError(
+                f"find_bottlenecks needs a feasible baseline (status '{baseline.status}')")
+        sign = -1.0 if self.model.objective_sense == LXObjectiveSense.MINIMIZE else 1.0
 
+        improvements = []
         for constraint in self.model.constraints:
             result = self.relax_constraint(constraint.name, by=test_amount)
-            improvement_per_unit = result.delta_objective / test_amount
-            improvements.append((constraint.name, improvement_per_unit))
+            solution = result.new_solution
+            if solution.is_feasible():
+                improvement = sign * result.delta_objective / test_amount
+            elif solution.status.lower() == "unbounded":
+                improvement = math.inf
+            else:
+                warnings.warn(
+                    f"find_bottlenecks: relaxing '{constraint.name}' gave status "
+                    f"'{solution.status}'; it is left out of the ranking",
+                    UserWarning, stacklevel=2)
+                continue
+            improvements.append((constraint.name, improvement))
 
-        # Sort by improvement (descending)
-        improvements.sort(key=lambda x: x[1], reverse=True)
-
+        improvements.sort(key=lambda item: item[1], reverse=True)
         return improvements[:top_n]
 
     def sensitivity_range(
@@ -495,45 +514,44 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         """
         baseline = self.get_baseline_solution()
 
-        # Get constraint
         constraint = self.model.get_constraint(constraint_name)
         if constraint is None:
             raise ValueError(f"Constraint '{constraint_name}' not found")
-
-        original_rhs = constraint.rhs_value
-        if original_rhs is None:
+        if constraint.rhs_value is None and constraint.rhs_func is None:
             raise ValueError(f"Constraint '{constraint_name}' has no RHS value")
+        original_rhs = constraint.rhs_value      # None: the RHS is a per-row function
 
-        # Calculate new RHS
         if to is not None:
-            new_rhs = to
-            description = f"{description_prefix} {constraint_name} RHS to {new_rhs}"
+            new_rhs: Optional[float] = to
+            description = f"{description_prefix} {constraint_name} RHS to {to}"
         elif by is not None:
-            new_rhs = original_rhs + by
+            new_rhs = None if original_rhs is None else original_rhs + by
             description = f"{description_prefix} {constraint_name} RHS by {by}"
         elif by_percent is not None:
-            new_rhs = original_rhs * (1 + by_percent)
+            new_rhs = None if original_rhs is None else original_rhs * (1 + by_percent)
             description = f"{description_prefix} {constraint_name} RHS by {by_percent*100:.1f}%"
         else:
             raise ValueError("Must specify one of: by, by_percent, or to")
 
-        # Clone model and modify
-        modified_model = deepcopy(self.model)
-        modified_constraint = modified_model.get_constraint(constraint_name)
-        if modified_constraint:
-            modified_constraint.rhs_value = new_rhs
+        modified_model = self._new_model()
+        modified = modified_model.get_constraint(constraint_name)
+        if to is not None:
+            set_rhs(modified, to)
+        elif by is not None:
+            shift_rhs(modified, add=by)
+        else:
+            shift_rhs(modified, multiply=1 + by_percent)
 
-        # Solve modified model
         new_solution = self.optimizer.solve(modified_model)
 
-        # Build change record
         change = LXWhatIfChange(
             change_type="constraint_rhs",
             target_name=constraint_name,
             description=description,
             original_value=original_rhs,
             new_value=new_rhs,
-            delta=new_rhs - original_rhs,
+            delta=(None if original_rhs is None or new_rhs is None
+                   else new_rhs - original_rhs),
         )
 
         return self._build_result(
@@ -542,6 +560,10 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             new_solution=new_solution,
             changes_applied=[change],
         )
+
+    def _new_model(self) -> LXModel[TModel]:
+        """A fresh, independent model to modify for one what-if run."""
+        return deepcopy(self.model)
 
     def _build_result(
         self,

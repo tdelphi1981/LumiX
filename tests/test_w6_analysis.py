@@ -243,3 +243,39 @@ def test_c_get_best_scenario_none_when_nothing_feasible():
     sa.add_scenario(LXScenario("infeasible").modify_variable_bound("x", upper=1))
     sa.run_all_scenarios()
     assert sa.get_best_scenario() is None
+
+
+# ---- Task 3: B12 -------------------------------------------------------------
+
+def test_b12_find_bottlenecks_minimize_ranks_by_improvement():
+    wa = LXWhatIfAnalyzer(mincost_model(), opt())
+    assert wa.find_bottlenecks(test_amount=1.0, top_n=2) == [
+        ("need_x", pytest.approx(10.0)), ("need_y", pytest.approx(1.0))]
+
+
+def test_b12_find_bottlenecks_with_rhs_func_constraint():
+    ps = [PlainP("a", 4, 3), PlainP("b", 6, 5)]
+    wa = LXWhatIfAnalyzer(capacity_model(ps, lambda p: p.profit), opt())
+    # total+1 -> a=3,b=6 -> 39 (+3); every cap row +1 -> a=1,b=7 -> 38 (+2)
+    assert wa.find_bottlenecks() == [("total", pytest.approx(3.0)),
+                                     ("cap", pytest.approx(2.0))]
+
+
+def test_b12_whatif_rhs_func_change_reports_per_row():
+    ps = [PlainP("a", 4, 3), PlainP("b", 6, 5)]
+    wa = LXWhatIfAnalyzer(capacity_model(ps, lambda p: p.profit), opt())
+    r = wa.increase_constraint_rhs("cap", by_percent=1.0)      # caps 8, 12; total 8
+    assert r.new_objective == pytest.approx(40.0)
+    ch = r.changes_applied[0]
+    assert ch.original_value is None and ch.new_value is None and ch.delta is None
+    r = wa.decrease_constraint_rhs("cap", by=3.0)              # caps 1, 3
+    assert r.new_objective == pytest.approx(18.0)
+    r = wa.increase_constraint_rhs("cap", to=2.0)              # every row 2
+    assert r.new_objective == pytest.approx(16.0)
+
+
+def test_b12_find_bottlenecks_needs_feasible_baseline():
+    m = mincost_model()
+    m.get_variable("x").upper_bound = 1                         # x >= 5 impossible
+    with pytest.raises(ValueError, match="feasible baseline"):
+        LXWhatIfAnalyzer(m, opt()).find_bottlenecks()
