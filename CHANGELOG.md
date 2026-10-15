@@ -183,6 +183,10 @@ Models that were solved wrongly before now give different (correct) results; eve
 - What-if `relax_constraint` / `tighten_constraint` / `increase_constraint_rhs` / `decrease_constraint_rhs` with `by_percent` moved a negative right-hand side the wrong way, and relaxing a prepared `>=` goal raised its target.
 - `add_abs`, `add_min`, `add_max`, `add_product`, `add_piecewise` and `add_indicator` accepted an expression where a variable is needed and failed at solve time with `AttributeError`; they now raise `TypeError` at once.
 - A variable with data but no `indexed_by` over unhashable instances (a plain `@dataclass`) failed with an internal `TypeError`; the error now says to add `indexed_by`.
+- Scenario charts: the comparison bar marked the largest objective as "Best" (the worst scenario when minimizing, or an infeasible one); the percentage, decision-variable and radar charts still drew infeasible scenarios, the radar ignored the objective sense, and `LXScenarioCompare.plot()` divided by zero on a zero baseline.
+- The dashboard's "Variable Values" panel looked only at the first five instances of each family and could stay empty for a solution with nonzero values.
+- The "Constraint Status" panel of `LXSolutionVisualizer.plot()` counted binding rows by nonzero dual; with the model it now uses the slack, as `is_binding` does.
+- `LXRationalConverter(method="stern_brocot")` never considered the upper starting bound and could be far less accurate than Farey (2.99999999 gave 29999/10000).
 
 ## [0.2.1] - 2026-10-14
 

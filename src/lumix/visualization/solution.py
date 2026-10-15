@@ -408,12 +408,21 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         """Add constraint status chart."""
         colors = self._get_colors()
 
-        if self.solution.shadow_prices:
+        activity: Dict[str, Any] = {}
+        if self.model is not None:
+            from ..solution.activity import row_activity
+
+            activity = row_activity(self.model, self.solution)
+        if activity:
+            # binding = zero slack, as LXConstraintSensitivity.is_binding
+            binding_count = sum(1 for act in activity.values() if act.binding)
+            non_binding_count = len(activity) - binding_count
+        elif self.solution.shadow_prices:
             binding_count = sum(
                 1 for sp in self.solution.shadow_prices.values() if abs(sp) > 1e-6
             )
-            total_count = len(self.solution.shadow_prices)
-            non_binding_count = total_count - binding_count
+            non_binding_count = len(self.solution.shadow_prices) - binding_count
+        if activity or self.solution.shadow_prices:
 
             fig.add_trace(
                 go.Bar(

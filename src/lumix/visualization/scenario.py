@@ -20,6 +20,13 @@ if TYPE_CHECKING:
 TModel = TypeVar("TModel")
 
 
+def _maximizes(analyzer: Any) -> bool:
+    from ..analysis._sense import solved_sense
+    from ..core.enums import LXObjectiveSense
+
+    return solved_sense(analyzer.base_model) == LXObjectiveSense.MAXIMIZE
+
+
 def _ranked_feasible(analyzer: Any) -> List[Tuple[str, Any]]:
     """Feasible scenario results, best first in the sense the base model is solved."""
     from ..analysis._sense import solved_sense
@@ -191,9 +198,10 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
             yaxis_title="Objective Value",
         )
 
-        # Highlight best scenario
-        if objectives:
-            best_idx = objectives.index(max(objectives))
+        # Highlight the best feasible scenario in the model's sense
+        best = next((n for n, _ in _ranked_feasible(self.analyzer) if n in names), None)
+        if best is not None:
+            best_idx = names.index(best)
             fig.add_annotation(
                 x=names[best_idx],
                 y=objectives[best_idx],
@@ -223,19 +231,18 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         fig = go.Figure()
         colors = self._get_colors()
 
-        # Get max values for normalization
-        max_obj = max(
-            (s.objective_value for s in self.analyzer.results.values()),
-            default=1,
-        )
-        max_time = max(
-            (s.solve_time for s in self.analyzer.results.values()),
-            default=1,
-        )
+        # Feasible results only; the objective axis is 1 for the best scenario and 0
+        # for the worst, in the sense the model is solved
+        results = [(n, s) for n, s in self.analyzer.results.items() if s.is_feasible()]
+        objs = [s.objective_value for _, s in results]
+        best_obj = (max if _maximizes(self.analyzer) else min)(objs, default=0.0)
+        worst_obj = (min if _maximizes(self.analyzer) else max)(objs, default=0.0)
+        max_time = max((s.solve_time for _, s in results), default=1)
 
-        for i, (name, solution) in enumerate(self.analyzer.results.items()):
+        for i, (name, solution) in enumerate(results):
+            spread = best_obj - worst_obj
             values = [
-                solution.objective_value / max_obj if max_obj else 0,
+                (solution.objective_value - worst_obj) / spread if spread else 1.0,
                 1 - (solution.solve_time / max_time if max_time else 0),
                 1 - (solution.gap or 0),
             ]
@@ -420,19 +427,20 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
     def _add_percentage_change(self, fig: Any, row: int, col: int) -> None:
         """Add percentage change from baseline chart."""
         baseline = self.analyzer.results.get("baseline")
-        if not baseline:
-            return
+        if not baseline or not baseline.is_feasible() or not baseline.objective_value:
+            return      # no percentage of an infeasible or zero baseline
 
         baseline_val = baseline.objective_value
         colors = self._get_colors()
+        sign = 1.0 if _maximizes(self.analyzer) else -1.0    # improvement is positive
 
         changes: List[float] = []
         names: List[str] = []
 
         for name, sol in self.analyzer.results.items():
-            if name == "baseline":
+            if name == "baseline" or not sol.is_feasible():
                 continue
-            pct = ((sol.objective_value - baseline_val) / baseline_val) * 100
+            pct = ((sol.objective_value - baseline_val) / abs(baseline_val)) * 100
             changes.append(pct)
             names.append(name)
 
@@ -441,7 +449,7 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
             sorted_pairs = sorted(zip(names, changes), key=lambda x: x[1], reverse=True)
             names, changes = map(list, zip(*sorted_pairs))
 
-        bar_colors = [colors[4] if c >= 0 else colors[3] for c in changes]
+        bar_colors = [colors[4] if sign * c >= 0 else colors[3] for c in changes]
 
         fig.add_trace(
             go.Bar(
@@ -457,11 +465,12 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         """Add variable comparison across scenarios."""
         colors = self._get_colors()
 
-        if not self.analyzer.results:
+        results = [(n, s) for n, s in self.analyzer.results.items() if s.is_feasible()]
+        if not results:
             return
 
         # Get first variable from first solution
-        first_solution = next(iter(self.analyzer.results.values()))
+        first_solution = results[0][1]
         first_var = next(iter(first_solution.variables.keys()), None)
 
         if first_var is None:
@@ -471,7 +480,7 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         names: List[str] = []
         values: List[float] = []
 
-        for name, sol in self.analyzer.results.items():
+        for name, sol in results:
             var_val = sol.variables.get(first_var, 0)
             if isinstance(var_val, dict):
                 var_val = sum(var_val.values())

@@ -356,6 +356,9 @@ class LXRationalConverter:
 
         best_n, best_d = left_n, left_d
         best_error = self._compute_error(best_n, best_d, x_abs)
+        right_error = self._compute_error(right_n, right_d, x_abs)
+        if right_error < best_error:       # the upper start bound can be the closest
+            best_n, best_d, best_error = right_n, right_d, right_error
 
         # Binary search through tree
         while True:

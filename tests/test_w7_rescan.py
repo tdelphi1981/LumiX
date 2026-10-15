@@ -381,3 +381,81 @@ def test_rescan_core_unhashable_instances_without_indexed_by_get_a_clear_error()
     m.maximize(LXLinearExpression().add_term(x, 1))
     with pytest.raises(ValueError, match="indexed_by"):
         m.to_canonical()
+
+
+# ---------------------------------------------------------------- visualization
+def _min_scenarios(baseline_demand=10):
+    """minimize 2x, x >= demand, x <= cap: baseline 20, low 10, high 100, impossible infeasible."""
+    from lumix import LXScenario, LXScenarioAnalyzer
+    x = _var("x")
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("demand", LXLinearExpression().add_term(x, 1), "ge", baseline_demand))
+    m.add_constraint(_row("cap", LXLinearExpression().add_term(x, 1), "le", 60))
+    m.minimize(LXLinearExpression().add_term(x, 2))
+    sa = LXScenarioAnalyzer(m, LXOptimizer().use_solver("ortools"))
+    sa.add_scenario(LXScenario("low").modify_constraint_rhs("demand", set_value=5))
+    sa.add_scenario(LXScenario("high").modify_constraint_rhs("demand", set_value=50))
+    sa.add_scenario(LXScenario("impossible").modify_constraint_rhs("cap", set_value=-1))
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        sa.run_all_scenarios()
+    return sa
+
+
+def test_rescan_viz_comparison_bar_marks_the_best_feasible_scenario_in_the_model_sense():
+    pytest.importorskip("plotly")
+    from lumix.visualization import LXScenarioCompare
+    fig = LXScenarioCompare(_min_scenarios()).plot_comparison_bar()
+    assert [a.text for a in fig.layout.annotations if a.text == "Best"] == ["Best"]
+    assert [a.x for a in fig.layout.annotations if a.text == "Best"] == ["low"]
+
+
+def test_rescan_viz_scenario_charts_leave_out_infeasible_scenarios():
+    pytest.importorskip("plotly")
+    from lumix.visualization import LXScenarioCompare
+    compare = LXScenarioCompare(_min_scenarios())
+    names = set()
+    for trace in list(compare.plot().data) + list(compare.plot_radar_comparison().data):
+        names |= set(getattr(trace, "x", None) or []) | ({trace.name} if trace.name else set())
+    assert "impossible" not in names
+
+
+def test_rescan_viz_scenario_plot_with_a_zero_baseline():
+    pytest.importorskip("plotly")
+    from lumix.visualization import LXScenarioCompare
+    assert LXScenarioCompare(_min_scenarios(baseline_demand=0)).plot() is not None
+
+
+def test_rescan_viz_dashboard_variable_panel_shows_nonzero_instances():
+    pytest.importorskip("plotly")
+    from lumix.visualization import LXDashboard
+    x = _var("x", upper=10, keys=range(8))
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("c", LXLinearExpression().add_term(x, 1), "le", 30))
+    m.maximize(LXLinearExpression().add_term(x, lambda k: k))
+    fig = LXDashboard(m, _solve("ortools", m)).plot()
+    bars = [t for t in fig.data if t.type == "bar" and t.x and any(str(v).startswith("x[") for v in t.x)]
+    assert bars and set(bars[0].x) == {"x[5]", "x[6]", "x[7]"}
+
+
+def test_rescan_viz_constraint_status_panel_counts_binding_rows_by_slack():
+    pytest.importorskip("plotly")
+    from lumix.visualization import LXSolutionVisualizer
+    x = _var("x")
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("a", LXLinearExpression().add_term(x, 1), "le", 4))
+    m.add_constraint(_row("b", LXLinearExpression().add_term(x, 1), "le", 4))   # degenerate: binding, dual 0
+    m.add_constraint(_row("c", LXLinearExpression().add_term(x, 1), "le", 9))
+    m.maximize(LXLinearExpression().add_term(x, 1))
+    s = LXOptimizer().use_solver("ortools").enable_sensitivity().solve(m)
+    fig = LXSolutionVisualizer(s, m).plot()
+    status = [t for t in fig.data if t.type == "bar" and list(t.x or []) == ["Binding", "Non-binding"]]
+    assert status and list(status[0].y) == [2, 1]
+
+
+@pytest.mark.parametrize("value, max_den", [(2.99999999, 10000), (0.99999999, 10000), (2.9, 2), (0.9, 1)])
+def test_rescan_utils_stern_brocot_matches_the_best_approximation(value, max_den):
+    got = LXRationalConverter(max_denominator=max_den, method="stern_brocot").to_rational(value)
+    best = Fraction(value).limit_denominator(max_den)
+    assert abs(float(got) - value) <= abs(float(best) - value) + 1e-15

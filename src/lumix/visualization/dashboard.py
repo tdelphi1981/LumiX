@@ -251,7 +251,7 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
 
         for var_name, var_value in self.solution.variables.items():
             if isinstance(var_value, dict):
-                for idx, val in list(var_value.items())[:5]:
+                for idx, val in var_value.items():
                     if abs(val) > 1e-6:
                         names.append(f"{var_name}[{idx}]")
                         values.append(float(val))
