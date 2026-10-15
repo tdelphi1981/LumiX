@@ -162,6 +162,8 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `LXSensitivityAnalyzer` did not see constraints added after its first lookup, and a lookup of a scalar constraint enumerated every indexed family.
 - `LXConstraintSensitivity.slack` was never filled.
 - Documentation pages called API that does not exist (`identify_binding_constraints`, `set_variable_bound`, `apply_change`, `get_non_binding_constraints`, `LXCustomLinearizer`, `lower_bound_func`), used goals with data but no `indexed_by`, treated a goal's deviations as a number, and described a linearization engine LumiX no longer has; code includes in the examples pages had drifted into docstrings.
+- `LXRationalConverter` reported an error of `2|x|` for exact negative values with `method="continued_fraction"`, and an error of 0 for any value it rounded to an integer.
+- The README's "Advanced Analysis" snippet used constraint names that the Simple Example does not define.
 
 ## [0.2.1] - 2026-10-14
 

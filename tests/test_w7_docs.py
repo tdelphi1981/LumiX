@@ -29,8 +29,6 @@ for p in products: p.usage = p.resource_usage
 x = LXVariable("x").continuous().bounds(lower=-5, upper=10)
 y = LXVariable("y").continuous().bounds(lower=0, upper=5)
 model.add_variable(x).add_variable(y)
-model.add_constraint(LXConstraint("capacity").expression(LXLinearExpression().add_term(x)).le().rhs(10))
-model.add_constraint(LXConstraint("demand").expression(LXLinearExpression().add_term(y)).le().rhs(100))
 profit_expr = LXLinearExpression().add_term(production, lambda p: p.profit)
 quality_expr = LXLinearExpression().add_term(production, 1.0)
 sensitivity_analyzer = LXSensitivityAnalyzer(model, solution)

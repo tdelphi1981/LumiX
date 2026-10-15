@@ -214,13 +214,13 @@ print(report)
 # Scenario analysis (the baseline is included automatically)
 scenario_analyzer = LXScenarioAnalyzer(model, optimizer)
 scenario_analyzer.add_scenario(
-    LXScenario("high_demand").modify_constraint_rhs("demand", set_value=150)
+    LXScenario("more_resources").modify_constraint_rhs("resource_limit", set_value=150)
 )
 results = scenario_analyzer.run_all_scenarios()
 
 # What-if analysis
 whatif = LXWhatIfAnalyzer(model, optimizer)
-result = whatif.increase_constraint_rhs("capacity", by=10)
+result = whatif.increase_constraint_rhs("resource_limit", by=10)
 print(f"Impact: ${result.delta_objective:,.2f}")
 ```
 
