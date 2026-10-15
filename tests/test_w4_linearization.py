@@ -258,3 +258,42 @@ def test_a17_two_terms_on_the_same_variables_do_not_collide():
     names = [v.name for v in lm.variables]
     rows = [c.name for c in lm.constraints]
     assert len(set(names)) == len(names) and len(set(rows)) == len(rows)
+
+
+# --- Görev 4: nonconvex abs/min/max are exact (A17) ---------------------------------
+@pytest.mark.parametrize("sense,op,expected", [("max", "max", 8), ("min", "max", 0),
+                                               ("max", "min", 4), ("min", "min", 0)])
+def test_a17_min_max_in_both_directions(sense, op, expected):
+    a, b = fam("a", ["k"], lower=0, upper=10), fam("b", ["k"], lower=0, upper=10)
+    e = getattr(LXNonLinearExpression(), "add_" + op)(a, b)
+    _, s = solve_lin(model([a, b], [cons("cap", lin((a, 1), (b, 1)), "<=", 8)], sense, e))
+    assert s.status == "optimal" and s.objective_value == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("sense,coeff,lower_x,expected", [
+    ("max", 1.0, None, 5), ("max", 1.0, 1, 2), ("min", -1.0, 1, -2)])
+def test_a17_nonconvex_abs(sense, coeff, lower_x, expected):
+    x = fam("x", ["k"], lower=-5, upper=2)
+    cs = [] if lower_x is None else [cons("c", lin((x, 1)), ">=", lower_x)]
+    _, s = solve_lin(model([x], cs, sense, LXNonLinearExpression().add_abs(x, coeff=coeff)))
+    assert s.objective_value == pytest.approx(expected)
+
+
+def test_a17_abs_twice_on_one_variable():
+    x = fam("x", ["k"], lower=-5, upper=2)
+    e = LXNonLinearExpression().add_abs(x).add_abs(x, coeff=2.0)
+    _, s = solve_lin(model([x], [cons("c", lin((x, 1)), "<=", -1)], "min", e))
+    assert s.objective_value == pytest.approx(3)
+
+
+def test_a17_exact_form_needs_bounds():
+    x = fam("x", ["k"])
+    with pytest.raises(ValueError, match="finite bounds"):
+        solve_lin(model([x], [], "max", LXNonLinearExpression().add_abs(x)))
+
+
+def test_a17_convex_use_needs_no_bounds():
+    x = fam("x", ["k"])
+    _, s = solve_lin(model([x], [cons("c", lin((x, 1)), ">=", -3)], "min",
+                           LXNonLinearExpression().add_abs(x)))
+    assert s.objective_value == pytest.approx(0)
