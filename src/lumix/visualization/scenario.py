@@ -6,7 +6,7 @@ results, including comparison charts and sensitivity curves.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from typing_extensions import Self
 
@@ -18,6 +18,16 @@ if TYPE_CHECKING:
     from ..solution.solution import LXSolution
 
 TModel = TypeVar("TModel")
+
+
+def _ranked_feasible(analyzer: Any) -> List[Tuple[str, Any]]:
+    """Feasible scenario results, best first in the sense the base model is solved."""
+    from ..analysis._sense import solved_sense
+    from ..core.enums import LXObjectiveSense
+
+    feasible = [(n, s) for n, s in analyzer.results.items() if s.is_feasible()]
+    maximize = solved_sense(analyzer.base_model) == LXObjectiveSense.MAXIMIZE
+    return sorted(feasible, key=lambda item: item[1].objective_value, reverse=maximize)
 
 
 class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
@@ -146,7 +156,8 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
 
         items = list(results.items())
         if sort_by_value:
-            items.sort(key=lambda x: x[1].objective_value, reverse=True)
+            ranked = [(n, sol) for n, sol in _ranked_feasible(self.analyzer) if n in results]
+            items = ranked + [(n, sol) for n, sol in items if not sol.is_feasible()]
 
         names = [name for name, _ in items]
         objectives = [sol.objective_value for _, sol in items]
@@ -168,16 +179,16 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
                 x=names,
                 y=objectives,
                 marker_color=bar_colors,
-                text=[f"${obj:,.0f}" for obj in objectives],
+                text=[f"{obj:,.4g}" for obj in objectives],
                 textposition="auto",
-                hovertemplate="<b>%{x}</b><br>Objective: $%{y:,.2f}<extra></extra>",
+                hovertemplate="<b>%{x}</b><br>Objective: %{y:,.4g}<extra></extra>",
             )
         )
 
         fig.update_layout(
             title="Scenario Objective Comparison",
             xaxis_title="Scenario",
-            yaxis_title="Objective Value ($)",
+            yaxis_title="Objective Value",
         )
 
         # Highlight best scenario
@@ -287,23 +298,30 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
                 mode="lines+markers",
                 line=dict(color=colors[0], width=2),
                 marker=dict(size=8),
-                hovertemplate="<b>%{x:.2f}</b><br>Objective: $%{y:,.2f}<extra></extra>",
+                hovertemplate="<b>%{x:.2f}</b><br>Objective: %{y:,.4g}<extra></extra>",
             )
         )
 
         fig.update_layout(
             title=f"Sensitivity to {parameter_name}",
             xaxis_title=f"{parameter_name} Multiplier",
-            yaxis_title="Objective Value ($)",
+            yaxis_title="Objective Value",
         )
 
         return self._apply_theme(fig)
 
     def plot_scenario_waterfall(self) -> Any:
-        """Waterfall chart showing impact of each scenario vs baseline.
+        """Bar chart of each scenario's objective against the baseline.
+
+        Each scenario is a bar from the baseline objective to its own objective (not
+        cumulative). Infeasible scenarios are left out and named in the title.
 
         Returns:
             Plotly Figure.
+
+        .. versionchanged:: 0.3.0
+           Bars are absolute against the baseline; they used to accumulate, and
+           infeasible scenarios were drawn with an objective of 0.
         """
         if "baseline" not in self.analyzer.results:
             fig = go.Figure()
@@ -318,55 +336,37 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
             return self._apply_theme(fig)
 
         baseline_val = self.analyzer.results["baseline"].objective_value
-
-        names: List[str] = ["Baseline"]
-        values: List[float] = [baseline_val]
-        measures: List[str] = ["absolute"]
-
+        names, bases, heights, labels = ["Baseline"], [0.0], [baseline_val], [f"{baseline_val:,.4g}"]
+        skipped = []
         for name, sol in self.analyzer.results.items():
             if name == "baseline":
                 continue
+            if not sol.is_feasible():
+                skipped.append(name)
+                continue
             delta = sol.objective_value - baseline_val
             names.append(name)
-            values.append(delta)
-            measures.append("relative")
-
-        # Add total
-        final_obj = max(
-            sol.objective_value for sol in self.analyzer.results.values()
-        )
-        names.append("Best Scenario")
-        values.append(final_obj)
-        measures.append("total")
-
-        fig = go.Figure(
-            go.Waterfall(
-                name="Scenario Impact",
-                orientation="v",
-                measure=measures,
-                x=names,
-                y=values,
-                text=[f"${v:,.0f}" for v in values],
-                textposition="outside",
-            )
-        )
-
-        fig.update_layout(
-            title="Scenario Impact Waterfall",
-            yaxis_title="Objective Value ($)",
-        )
-
+            bases.append(baseline_val)
+            heights.append(delta)
+            labels.append(f"{delta:+,.4g}")
+        colors = self._get_colors()
+        bar_colors = [colors[0]] + [colors[4] if h >= 0 else colors[3] for h in heights[1:]]
+        fig = go.Figure(go.Bar(
+            x=names, y=heights, base=bases, text=labels, textposition="outside",
+            marker_color=bar_colors, name="Scenario Impact",
+        ))
+        fig.add_hline(y=baseline_val, line_dash="dot")
+        title = "Scenario Impact vs Baseline"
+        if skipped:
+            title += f" (infeasible: {', '.join(skipped)})"
+        fig.update_layout(title=title, yaxis_title="Objective Value")
         return self._apply_theme(fig)
 
     def _add_objective_comparison(self, fig: Any, row: int, col: int) -> None:
         """Add objective comparison bars to subplot."""
         colors = self._get_colors()
 
-        items = sorted(
-            self.analyzer.results.items(),
-            key=lambda x: x[1].objective_value,
-            reverse=True,
-        )
+        items = _ranked_feasible(self.analyzer)
 
         names = [name for name, _ in items][:10]
         objectives = [sol.objective_value for _, sol in items][:10]
@@ -383,18 +383,14 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
 
     def _add_ranking_table(self, fig: Any, row: int, col: int) -> None:
         """Add scenario ranking table."""
-        items = sorted(
-            self.analyzer.results.items(),
-            key=lambda x: x[1].objective_value,
-            reverse=True,
-        )
+        items = _ranked_feasible(self.analyzer)
 
         baseline_obj = self.analyzer.results.get("baseline")
         baseline_val = baseline_obj.objective_value if baseline_obj else None
 
         ranks = list(range(1, len(items) + 1))
         names = [name for name, _ in items]
-        objectives = [f"${sol.objective_value:,.0f}" for _, sol in items]
+        objectives = [f"{sol.objective_value:,.2f}" for _, sol in items]
         changes: List[str] = []
 
         for _, sol in items:

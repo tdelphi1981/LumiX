@@ -249,74 +249,67 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         return self._apply_theme(fig)
 
     def plot_constraint_utilization(self) -> Any:
-        """Plot constraint slack/utilization as horizontal bar chart.
+        """Plot how much of each constraint's right-hand side is used (horizontal bars).
 
-        Shows which constraints are binding (100% utilized) and which
-        have slack. Requires shadow prices in solution.
+        Each bar is ``100 * LHS / RHS`` of one row, evaluated at the solution; binding
+        rows (zero slack) are coloured apart. Requires the model; duals are optional
+        and shown in the hover text.
 
         Returns:
             Plotly Figure showing constraint capacity usage.
 
         Raises:
-            ValueError: If no shadow price data available.
-        """
-        if not self.solution.shadow_prices:
-            raise ValueError(
-                "No shadow prices in solution. Enable sensitivity analysis "
-                "when solving: optimizer.enable_sensitivity().solve(model)"
-            )
+            ValueError: If the visualizer was created without the model.
 
-        constraints = []
-        for name, shadow_price in self.solution.shadow_prices.items():
-            is_binding = abs(shadow_price) > 1e-6
-            constraints.append(
-                {
-                    "name": name,
-                    "binding": is_binding,
-                    "shadow_price": shadow_price,
-                }
+        .. versionchanged:: 0.3.0
+           Bars show LHS / RHS of each row; it used to draw every non-binding row at
+           50 % and required duals.
+        """
+        if self.model is None:
+            raise ValueError(
+                "plot_constraint_utilization needs the model: "
+                "LXSolutionVisualizer(solution, model)"
             )
+        from ..solution.activity import row_activity
+
+        rows = []
+        for name, act in row_activity(self.model, self.solution).items():
+            if act.rhs != 0:
+                util = 100.0 * act.lhs / act.rhs
+            else:
+                util = 100.0 if act.binding else 0.0
+            rows.append({"name": name, "act": act, "util": util,
+                         "shadow": self.solution.shadow_prices.get(name)})
 
         fig = go.Figure()
         colors = self._get_colors()
-
-        binding = [c for c in constraints if c["binding"]]
-        non_binding = [c for c in constraints if not c["binding"]]
-
-        if binding:
-            fig.add_trace(
-                go.Bar(
-                    y=[c["name"] for c in binding],
-                    x=[100] * len(binding),
-                    orientation="h",
-                    name="Binding (100%)",
-                    marker_color=colors[3],  # Red
-                    hovertemplate=(
-                        "<b>%{y}</b><br>"
-                        "Shadow Price: %{customdata:.4f}<extra></extra>"
-                    ),
-                    customdata=[c["shadow_price"] for c in binding],
-                )
-            )
-
-        if non_binding:
-            fig.add_trace(
-                go.Bar(
-                    y=[c["name"] for c in non_binding],
-                    x=[50] * len(non_binding),
-                    orientation="h",
-                    name="Non-binding",
-                    marker_color=colors[4],  # Green
-                )
-            )
-
+        for label, group, color in (
+            ("Binding", [r for r in rows if r["act"].binding], colors[3]),
+            ("Non-binding", [r for r in rows if not r["act"].binding], colors[4]),
+        ):
+            if not group:
+                continue
+            fig.add_trace(go.Bar(
+                y=[r["name"] for r in group],
+                x=[r["util"] for r in group],
+                orientation="h",
+                name=label,
+                marker_color=color,
+                customdata=[[r["act"].lhs, r["act"].rhs, r["act"].slack,
+                             "-" if r["shadow"] is None else f"{r['shadow']:.4g}"]
+                            for r in group],
+                hovertemplate=(
+                    "<b>%{y}</b><br>Utilization: %{x:.1f}%<br>LHS: %{customdata[0]:.4g}"
+                    "<br>RHS: %{customdata[1]:.4g}<br>Slack: %{customdata[2]:.4g}"
+                    "<br>Shadow price: %{customdata[3]}<extra></extra>"
+                ),
+            ))
         fig.update_layout(
             title="Constraint Utilization",
-            xaxis_title="Utilization (%)",
+            xaxis_title="Utilization (% of right-hand side)",
             yaxis_title="Constraint",
-            barmode="group",
+            barmode="overlay",
         )
-
         return self._apply_theme(fig)
 
     def _get_variable_data(self) -> Dict[str, List[Any]]:
