@@ -279,3 +279,111 @@ def test_b12_find_bottlenecks_needs_feasible_baseline():
     m.get_variable("x").upper_bound = 1                         # x >= 5 impossible
     with pytest.raises(ValueError, match="feasible baseline"):
         LXWhatIfAnalyzer(m, opt()).find_bottlenecks()
+
+
+# ---- Task 4: B11 -------------------------------------------------------------
+
+DUAL_SOLVERS = [s for s in AVAILABLE if s in ("ortools", "gurobi", "glpk")]
+
+
+@dataclass
+class Prod:
+    id: str
+    profit: float
+
+
+@dataclass
+class Plant:
+    id: int
+    use: dict
+    cap: float
+
+
+def wyndor(indexed, sense):
+    """max 3x+5y s.t. x<=4, 2y<=12, 3x+2y<=18 -> x=2,y=6, duals 0, 1.5, 1."""
+    prods = [Prod("x", 3), Prod("y", 5)]
+    plants = [Plant(1, {"x": 1, "y": 0}, 4), Plant(2, {"x": 0, "y": 2}, 12),
+              Plant(3, {"x": 3, "y": 2}, 18)]
+    q = LXVariable[Prod, float]("q").continuous().bounds(lower=0) \
+        .indexed_by(lambda p: p.id).from_data(prods)
+    m = LXModel("wyndor").add_variable(q)
+    if indexed:
+        m.add_constraint(LXConstraint[Plant]("plant").expression(
+            LXLinearExpression().add_term(q, coeff=lambda p, pl: pl.use[p.id])).le()
+            .rhs(lambda pl: pl.cap).from_data(plants).indexed_by(lambda pl: pl.id))
+    else:
+        for pl in plants:
+            m.add_constraint(LXConstraint(f"plant{pl.id}").expression(
+                LXLinearExpression().add_term(q, coeff=lambda p, pl=pl: pl.use[p.id]))
+                .le().rhs(pl.cap))
+    if sense == "max":
+        m.maximize(LXLinearExpression().add_term(q, lambda p: p.profit))
+    else:
+        m.minimize(LXLinearExpression().add_term(q, lambda p: -p.profit))
+    return m
+
+
+def analyze(model, solver):
+    sol = LXOptimizer().use_solver(solver).enable_sensitivity().solve(model)
+    return LXSensitivityAnalyzer(model, sol)
+
+
+@pytest.mark.parametrize("solver", DUAL_SOLVERS)
+@pytest.mark.parametrize("sense", ["max", "min"])
+def test_b11_indexed_constraint_rows_match_scalar_rows(solver, sense):
+    sign = 1.0 if sense == "max" else -1.0
+    an = analyze(wyndor(True, sense), solver)
+    rows = an.analyze_all_constraints()
+    assert set(rows) == {"plant[1]", "plant[2]", "plant[3]"}
+    assert {k: v.shadow_price for k, v in rows.items()} == pytest.approx(
+        {"plant[1]": 0.0, "plant[2]": 1.5 * sign, "plant[3]": 1.0 * sign})
+    assert set(an.get_binding_constraints()) == {"plant[2]", "plant[3]"}
+    assert an.identify_bottlenecks() == ["plant[2]", "plant[3]"]
+    assert an.analyze_constraint("plant[2]").shadow_price == pytest.approx(1.5 * sign)
+    fam = an.analyze_constraint_family("plant")
+    assert list(fam) == [1, 2, 3] and fam[3].name == "plant[3]"
+    with pytest.raises(ValueError, match="indexed"):
+        an.analyze_constraint("plant")
+    scalar = analyze(wyndor(False, sense), solver)
+    assert scalar.identify_bottlenecks() == ["plant2", "plant3"]
+    assert scalar.analyze_constraint_family("plant2") == {
+        None: scalar.analyze_constraint("plant2")}
+
+
+@pytest.mark.parametrize("solver", DUAL_SOLVERS)
+def test_b11_variable_family_per_instance(solver):
+    ps = [Prod("a", 1), Prod("b", 5)]
+    q = LXVariable[Prod, float]("q").continuous().bounds(lower=0) \
+        .indexed_by(lambda p: p.id).from_data(ps)
+    m = LXModel("m").add_variable(q)
+    m.add_constraint(LXConstraint("tot").expression(LXLinearExpression().add_term(q))
+                     .le().rhs(6))
+    m.maximize(LXLinearExpression().add_term(q, lambda p: p.profit))
+    an = analyze(m, solver)
+    a = an.analyze_variable("q[a]")
+    assert a.value == pytest.approx(0.0) and a.reduced_cost == pytest.approx(-4.0)
+    assert not a.is_basic and a.is_at_bound
+    assert an.analyze_variable("q[b]").value == pytest.approx(6.0)
+    assert set(an.analyze_all_variables()) == {"q[a]", "q[b]"}
+    assert set(an.get_non_basic_variables()) == {"q[a]"}
+    assert set(an.analyze_variable_family("q")) == {"a", "b"}
+    with pytest.raises(ValueError, match="indexed"):
+        an.analyze_variable("q")
+    with pytest.raises(ValueError, match="not found"):
+        an.analyze_variable("nope")
+
+
+def test_b11_tuple_keyed_rows():
+    ps = [Prod("x", 3), Prod("y", 5)]
+    q = LXVariable[Prod, float]("q").continuous().bounds(lower=0) \
+        .indexed_by(lambda p: p.id).from_data(ps)
+    m = LXModel("m").add_variable(q)
+    m.add_constraint(LXConstraint[Prod]("cap").expression(LXLinearExpression().add_term(q))
+                     .le().rhs(lambda p: 4.0).from_data(ps)
+                     .indexed_by(lambda p: (p.id, 1)))
+    m.maximize(LXLinearExpression().add_term(q, lambda p: p.profit))
+    an = analyze(m, "ortools")
+    rows = an.analyze_all_constraints()
+    assert set(rows) == {"cap[('x', 1)]", "cap[('y', 1)]"}
+    assert rows["cap[('y', 1)]"].shadow_price == pytest.approx(5.0)
+    assert set(an.analyze_constraint_family("cap")) == {("x", 1), ("y", 1)}

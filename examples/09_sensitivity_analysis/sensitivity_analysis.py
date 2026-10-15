@@ -277,13 +277,12 @@ def run_sensitivity_analysis():
     print("=" * 80)
 
     print("\nAnalyzing production variables:")
-    for var in model.variables:
-        if var.name == "production":
-            sens = analyzer.analyze_variable(var.name)
-            print(f"\n  Variable: {var.name}")
-            print(f"    Reduced Cost: ${sens.reduced_cost:.6f}" if sens.reduced_cost else "    Reduced Cost: $0.000000")
-            print(f"    In Basis: {'YES' if sens.is_basic else 'NO'}")
-            print(f"    At Bound: {'YES' if sens.is_at_bound else 'NO'}")
+    for key, sens in analyzer.analyze_variable_family("production").items():
+        print(f"\n  Variable: {sens.name}")
+        print(f"    Value: {sens.value:.2f}")
+        print(f"    Reduced Cost: ${sens.reduced_cost:.6f}" if sens.reduced_cost else "    Reduced Cost: $0.000000")
+        print(f"    In Basis: {'YES' if sens.is_basic else 'NO'}")
+        print(f"    At Bound: {'YES' if sens.is_at_bound else 'NO'}")
 
     # Non-basic variables
     print("\n" + "-" * 80)

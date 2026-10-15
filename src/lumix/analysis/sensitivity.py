@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from ..core.model import LXModel
 from ..solution.solution import LXSolution
@@ -12,6 +12,21 @@ if TYPE_CHECKING:
     from ..visualization.sensitivity import LXSensitivityPlot
 
 TModel = TypeVar("TModel")
+
+
+def _constraint_rows(constraint: Any) -> List[Tuple[Any, str]]:
+    """(index key, row name) per row; row names are those the solvers key duals by."""
+    if constraint.index_func is None:
+        return [(None, constraint.name)]
+    return [(key, f"{constraint.name}[{key}]")
+            for key in (constraint.index_func(i) for i in constraint.get_instances())]
+
+
+def _variable_entries(name: str, value: Any) -> List[Tuple[Any, str, float]]:
+    """(index key, entry name, value) per instance of a solution variable entry."""
+    if isinstance(value, dict):
+        return [(key, f"{name}[{key}]", float(v)) for key, v in value.items()]
+    return [(None, name, float(value))]
 
 
 @dataclass
@@ -79,11 +94,11 @@ class LXSensitivityAnalyzer(Generic[TModel]):
             analyzer = LXSensitivityAnalyzer(model, solution)
 
             # Analyze variable sensitivity
-            var_sensitivity = analyzer.analyze_variable("production")
+            var_sensitivity = analyzer.analyze_variable("production[widget]")
             print(f"Reduced cost: {var_sensitivity.reduced_cost}")
 
             # Analyze constraint sensitivity
-            const_sensitivity = analyzer.analyze_constraint("capacity")
+            const_sensitivity = analyzer.analyze_constraint("capacity[3]")
             print(f"Shadow price: {const_sensitivity.shadow_price}")
 
             # Get binding constraints
@@ -110,127 +125,134 @@ class LXSensitivityAnalyzer(Generic[TModel]):
         self.solution = solution
         self._variable_sensitivity_cache: Dict[str, LXVariableSensitivity] = {}
         self._constraint_sensitivity_cache: Dict[str, LXConstraintSensitivity] = {}
+        self._row_index: Optional[Dict[str, Tuple[str, Any]]] = None
+        self._entry_index: Optional[Dict[str, Tuple[str, Any, float]]] = None
+
+    def _rows(self) -> Dict[str, Tuple[str, Any]]:
+        """Row name -> (constraint family name, key), in model order."""
+        if self._row_index is None:
+            self._row_index = {
+                row: (c.name, key)
+                for c in self.model.constraints for key, row in _constraint_rows(c)}
+        return self._row_index
+
+    def _entries(self) -> Dict[str, Tuple[str, Any, float]]:
+        """Variable entry name -> (family name, key, value), in solution order."""
+        if self._entry_index is None:
+            self._entry_index = {
+                entry: (name, key, value)
+                for name, val in self.solution.variables.items()
+                for key, entry, value in _variable_entries(name, val)}
+        return self._entry_index
 
     def analyze_variable(self, var_name: str) -> LXVariableSensitivity:
         """
-        Analyze sensitivity of a variable.
-
-        Args:
-            var_name: Variable name
-
-        Returns:
-            Variable sensitivity information
+        Analyze one variable: a scalar variable by name, or one instance of an indexed
+        family by its entry name (``"production[widget]"``).
 
         Raises:
-            ValueError: If variable not found in solution
+            ValueError: If the name is unknown, or names an indexed family (use
+                :meth:`analyze_variable_family`).
+
+        .. versionchanged:: 0.3.0
+           Indexed families are analyzed per instance; a family name used to return the
+           first instance's value and no reduced cost (catalog B11).
         """
-        # Check cache
         if var_name in self._variable_sensitivity_cache:
             return self._variable_sensitivity_cache[var_name]
-
-        # Get variable value
-        if var_name not in self.solution.variables:
+        value = self.solution.variables.get(var_name)
+        if isinstance(value, dict):
+            first = next(iter(_variable_entries(var_name, value)), (None, f"{var_name}[...]"))[1]
+            raise ValueError(
+                f"Variable '{var_name}' is indexed ({len(value)} instances); analyze one "
+                f"instance, e.g. analyze_variable('{first}'), or use "
+                f"analyze_variable_family('{var_name}')")
+        entry = self._entries().get(var_name)
+        if entry is None:
             raise ValueError(f"Variable '{var_name}' not found in solution")
+        family, _key, value = entry
 
-        var_value = self.solution.variables[var_name]
-
-        # Handle indexed variables (get first value or 0)
-        if isinstance(var_value, dict):
-            value = next(iter(var_value.values())) if var_value else 0.0
-        else:
-            value = float(var_value)
-
-        # Get reduced cost
         reduced_cost = self.solution.get_reduced_cost(var_name)
-
-        # Get variable bounds
-        variable = self.model.get_variable(var_name)
+        variable = self.model.get_variable(family)
         lower_bound = variable.lower_bound if variable else None
         upper_bound = variable.upper_bound if variable else None
-
-        # Determine if at bound
-        is_at_bound = False
-        if lower_bound is not None and abs(value - float(lower_bound)) < 1e-6:
-            is_at_bound = True
-        elif upper_bound is not None and abs(value - float(upper_bound)) < 1e-6:
-            is_at_bound = True
-
-        # Determine if basic (non-zero reduced cost means non-basic)
+        is_at_bound = (
+            (lower_bound is not None and abs(value - float(lower_bound)) < 1e-6)
+            or (upper_bound is not None and abs(value - float(upper_bound)) < 1e-6))
         is_basic = reduced_cost is None or abs(reduced_cost) < 1e-6
 
         sensitivity = LXVariableSensitivity(
-            name=var_name,
-            value=value,
-            reduced_cost=reduced_cost,
-            is_basic=is_basic,
-            is_at_bound=is_at_bound,
-            # Note: allowable_increase/decrease require solver support
-            # These would be populated by solver-specific sensitivity analysis
-        )
-
-        # Cache result
+            name=var_name, value=value, reduced_cost=reduced_cost,
+            is_basic=is_basic, is_at_bound=is_at_bound)
         self._variable_sensitivity_cache[var_name] = sensitivity
-
         return sensitivity
+
+    def analyze_variable_family(self, var_name: str) -> Dict[Any, LXVariableSensitivity]:
+        """Analyze every instance of a variable family, keyed by index key
+        (``{None: ...}`` for a scalar variable).
+
+        .. versionadded:: 0.3.0
+        """
+        if var_name not in self.solution.variables:
+            raise ValueError(f"Variable '{var_name}' not found in solution")
+        return {key: self.analyze_variable(entry)
+                for key, entry, _v in _variable_entries(
+                    var_name, self.solution.variables[var_name])}
 
     def analyze_constraint(self, constraint_name: str) -> LXConstraintSensitivity:
         """
-        Analyze sensitivity of a constraint.
+        Analyze one constraint row: a scalar constraint by name, or one row of an indexed
+        family by its row name (``"capacity[3]"``).
 
-        Args:
-            constraint_name: Constraint name
+        Raises:
+            ValueError: If the name is unknown, or names an indexed family (use
+                :meth:`analyze_constraint_family`).
 
-        Returns:
-            Constraint sensitivity information
+        .. versionchanged:: 0.3.0
+           Indexed families are analyzed per row; a family name used to report no shadow
+           price (catalog B11).
         """
-        # Check cache
         if constraint_name in self._constraint_sensitivity_cache:
             return self._constraint_sensitivity_cache[constraint_name]
+        family = self.model.get_constraint(constraint_name)
+        if family is not None and family.index_func is not None:
+            rows = _constraint_rows(family)
+            example = rows[0][1] if rows else f"{constraint_name}[...]"
+            raise ValueError(
+                f"Constraint '{constraint_name}' is indexed ({len(rows)} rows); analyze "
+                f"one row, e.g. analyze_constraint('{example}'), or use "
+                f"analyze_constraint_family('{constraint_name}')")
+        if constraint_name not in self._rows():
+            raise ValueError(f"Constraint '{constraint_name}' not found in model")
 
-        # Get shadow price
         shadow_price = self.solution.get_shadow_price(constraint_name)
-
-        # Determine if binding (non-zero shadow price indicates binding)
         is_binding = shadow_price is not None and abs(shadow_price) > 1e-6
-        is_active = is_binding  # For linear programs, binding = active
-
         sensitivity = LXConstraintSensitivity(
-            name=constraint_name,
-            shadow_price=shadow_price,
-            is_binding=is_binding,
-            is_active=is_active,
-            # Note: slack and allowable ranges require solver support
-            # These would be populated by solver-specific sensitivity analysis
-        )
-
-        # Cache result
+            name=constraint_name, shadow_price=shadow_price,
+            is_binding=is_binding, is_active=is_binding)
         self._constraint_sensitivity_cache[constraint_name] = sensitivity
-
         return sensitivity
 
-    def analyze_all_variables(self) -> Dict[str, LXVariableSensitivity]:
-        """
-        Analyze all variables in solution.
+    def analyze_constraint_family(
+        self, constraint_name: str
+    ) -> Dict[Any, LXConstraintSensitivity]:
+        """Analyze every row of a constraint family, keyed by index key
+        (``{None: ...}`` for a scalar constraint).
 
-        Returns:
-            Dictionary mapping variable names to sensitivity information
+        .. versionadded:: 0.3.0
         """
-        results = {}
-        for var_name in self.solution.variables:
-            results[var_name] = self.analyze_variable(var_name)
-        return results
+        family = self.model.get_constraint(constraint_name)
+        if family is None:
+            raise ValueError(f"Constraint '{constraint_name}' not found in model")
+        return {key: self.analyze_constraint(row) for key, row in _constraint_rows(family)}
+
+    def analyze_all_variables(self) -> Dict[str, LXVariableSensitivity]:
+        """Analyze every variable instance, keyed by entry name (``"x"``, ``"y[a]"``)."""
+        return {entry: self.analyze_variable(entry) for entry in self._entries()}
 
     def analyze_all_constraints(self) -> Dict[str, LXConstraintSensitivity]:
-        """
-        Analyze all constraints in model.
-
-        Returns:
-            Dictionary mapping constraint names to sensitivity information
-        """
-        results = {}
-        for constraint in self.model.constraints:
-            results[constraint.name] = self.analyze_constraint(constraint.name)
-        return results
+        """Analyze every constraint row, keyed by row name (``"c"``, ``"cap[3]"``)."""
+        return {row: self.analyze_constraint(row) for row in self._rows()}
 
     def get_binding_constraints(
         self,
