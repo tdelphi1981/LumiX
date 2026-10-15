@@ -20,6 +20,82 @@ from ...core.variables import LXVariable
 from ..config import LXLinearizerConfig
 
 
+def adaptive_breakpoints(func: Callable[[float], float], x_min: float, x_max: float,
+                         num_segments: int) -> List[float]:
+    """``num_segments + 1`` strictly increasing breakpoints, denser where ``|f''|``
+    is large. Deterministic: the breakpoints are quantiles of a density that mixes
+    the curvature with a uniform floor, so every region keeps some breakpoints."""
+    if num_segments < 1:
+        raise ValueError(f"num_segments must be at least 1, got {num_segments}")
+    uniform = [float(b) for b in np.linspace(x_min, x_max, num_segments + 1)]
+    if num_segments == 1:
+        return uniform
+    xs = np.linspace(x_min, x_max, 10 * num_segments + 1)
+    ys = np.array([float(func(x)) for x in xs])
+    density = np.concatenate([[0.0], np.abs(np.diff(ys, 2)), [0.0]])
+    total = float(density.sum())
+    if not math.isfinite(total) or total <= 1e-9 * (float(np.max(np.abs(ys))) + 1.0):
+        return uniform
+    density = 0.5 * density / total + 0.5 / len(xs)
+    cdf = np.concatenate([[0.0], np.cumsum((density[1:] + density[:-1]) / 2)])
+    cdf /= cdf[-1]
+    inner = np.interp(np.arange(1, num_segments) / num_segments, cdf, xs)
+    points = [float(x_min), *(float(v) for v in inner), float(x_max)]
+    if any(b <= a for a, b in zip(points, points[1:])):
+        return uniform
+    return points
+
+
+def piecewise_points(
+    func: Callable[[float], float],
+    lower: Optional[float],
+    upper: Optional[float],
+    config: LXLinearizerConfig,
+    *,
+    name: str,
+    num_segments: Optional[int] = None,
+    x_min: Optional[float] = None,
+    x_max: Optional[float] = None,
+    adaptive: Optional[bool] = None,
+    breakpoints: Optional[Sequence[float]] = None,
+) -> Tuple[List[float], List[float]]:
+    """Breakpoints and function values of one piecewise-linear term. Settings left
+    as ``None`` come from ``config`` (B9). ``lower``/``upper`` are the variable's
+    bounds (``None`` when open); a domain narrower than them is warned about."""
+    if breakpoints is not None:
+        if x_min is not None or x_max is not None:
+            raise ValueError(f"Give either breakpoints or x_min/x_max for {name}, not both")
+        points = [float(b) for b in breakpoints]
+        if len(points) < 2 or any(b <= a for a, b in zip(points, points[1:])):
+            raise ValueError(
+                f"breakpoints for {name} must contain at least two strictly "
+                f"increasing values, got {points}")
+        x_min, x_max = points[0], points[-1]
+    else:
+        num_segments = config.pwl_num_segments if num_segments is None else num_segments
+        adaptive = config.adaptive_breakpoints if adaptive is None else adaptive
+        x_min = lower if x_min is None else x_min
+        x_max = upper if x_max is None else x_max
+        if x_min is None or x_max is None:
+            raise ValueError(
+                f"Cannot determine domain for piecewise-linear approximation of {name}. "
+                f"Detected: [{x_min}, {x_max}]. "
+                f"Please specify x_min/x_max or set bounds on the variable.")
+        points = (adaptive_breakpoints(func, x_min, x_max, num_segments) if adaptive
+                  else [float(b) for b in np.linspace(x_min, x_max, num_segments + 1)])
+    if lower is None or lower < x_min or upper is None or upper > x_max:
+        warnings.warn(
+            f"The piecewise-linear term restricts {name} to [{x_min}, {x_max}], "
+            f"narrower than its bounds [{lower}, {upper}]", UserWarning, stacklevel=3)
+    try:
+        values = [float(func(bp)) for bp in points]
+    except Exception as e:
+        raise ValueError(
+            f"Failed to evaluate function at breakpoints: {e}. "
+            f"Ensure function is defined over domain [{x_min}, {x_max}].") from e
+    return points, values
+
+
 class LXPiecewiseLinearizer:
     """
     Piecewise-linear approximation for arbitrary nonlinear functions.
@@ -86,63 +162,11 @@ class LXPiecewiseLinearizer:
                 num_segments=50
             )
         """
-        # Use config defaults if not specified
         method = method or self.config.pwl_method
-
-        if breakpoints is not None:
-            if x_min is not None or x_max is not None:
-                raise ValueError(
-                    f"Give either breakpoints or x_min/x_max for {var.name}, not both"
-                )
-            breakpoints = [float(b) for b in breakpoints]
-            if len(breakpoints) < 2 or any(
-                b <= a for a, b in zip(breakpoints, breakpoints[1:])
-            ):
-                raise ValueError(
-                    f"breakpoints for {var.name} must contain at least two strictly "
-                    f"increasing values, got {breakpoints}"
-                )
-            x_min, x_max = breakpoints[0], breakpoints[-1]
-        else:
-            num_segments = num_segments or self.config.pwl_num_segments
-            adaptive = adaptive if adaptive is not None else self.config.adaptive_breakpoints
-
-            # Determine domain (0 is a valid bound, so test for None)
-            x_min = var.lower_bound if x_min is None else x_min
-            x_max = var.upper_bound if x_max is None else x_max
-
-            if x_min is None or x_max is None:
-                raise ValueError(
-                    f"Cannot determine domain for piecewise-linear approximation of {var.name}. "
-                    f"Detected: [{x_min}, {x_max}]. "
-                    f"Please specify x_min/x_max or set bounds on the variable."
-                )
-
-            # Generate breakpoints
-            if adaptive:
-                breakpoints = self._generate_adaptive_breakpoints(
-                    func, x_min, x_max, num_segments
-                )
-            else:
-                breakpoints = list(np.linspace(x_min, x_max, num_segments + 1))
-
-        lower, upper = var.lower_bound, var.upper_bound
-        if lower is None or lower < x_min or upper is None or upper > x_max:
-            warnings.warn(
-                f"The piecewise-linear term restricts {var.name} to [{x_min}, {x_max}], "
-                f"narrower than its bounds [{lower}, {upper}]",
-                UserWarning,
-                stacklevel=2,
-            )
-
-        # Evaluate function at breakpoints
-        try:
-            values = [func(bp) for bp in breakpoints]
-        except Exception as e:
-            raise ValueError(
-                f"Failed to evaluate function at breakpoints: {e}. "
-                f"Ensure function is defined over domain [{x_min}, {x_max}]."
-            )
+        breakpoints, values = piecewise_points(
+            func, var.lower_bound, var.upper_bound, self.config, name=var.name,
+            num_segments=num_segments, x_min=x_min, x_max=x_max, adaptive=adaptive,
+            breakpoints=breakpoints)
 
         # One tag per term keeps auxiliary names unique when a variable has
         # several piecewise terms.
@@ -158,54 +182,6 @@ class LXPiecewiseLinearizer:
             return self._logarithmic_formulation(var, breakpoints, values, tag)
         else:
             raise ValueError(f"Unknown piecewise-linear method: {method}")
-
-    def _generate_adaptive_breakpoints(
-        self, func: Callable[[float], float], x_min: float, x_max: float, num_points: int
-    ) -> List[float]:
-        """
-        Generate adaptive breakpoints based on function curvature.
-
-        Uses second derivative as a measure of curvature to place
-        more breakpoints where the function changes rapidly.
-
-        Args:
-            func: Function to approximate
-            x_min: Minimum domain value
-            x_max: Maximum domain value
-            num_points: Number of breakpoints to generate
-
-        Returns:
-            List of breakpoints (including endpoints)
-        """
-        # Sample function at many points
-        n_sample = num_points * 10
-        x_sample = np.linspace(x_min, x_max, n_sample)
-
-        try:
-            # Compute approximate second derivative
-            y_sample = np.array([func(x) for x in x_sample])
-            second_deriv = np.abs(np.diff(np.diff(y_sample)))
-
-            # Normalize to probability distribution
-            # Add small constant to avoid division by zero
-            weights = second_deriv / (np.sum(second_deriv) + 1e-10)
-            weights = np.concatenate([[0], weights, [0]])  # Add endpoints with zero weight
-
-            # Ensure weights sum to 1
-            weights = weights / np.sum(weights)
-
-            # Sample breakpoints according to curvature
-            indices = np.random.choice(
-                len(x_sample), size=num_points - 2, replace=False, p=weights
-            )
-
-            # Include endpoints and sort
-            breakpoints = [x_min] + sorted([x_sample[i] for i in indices]) + [x_max]
-            return breakpoints
-
-        except Exception:
-            # Fallback to uniform if adaptive fails
-            return list(np.linspace(x_min, x_max, num_points))
 
     def _scalar(self, name: str, kind: str, lower: Optional[float] = None,
                 upper: Optional[float] = None) -> LXVariable:

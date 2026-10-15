@@ -278,13 +278,20 @@ class LXPiecewiseLinearTerm:
     Attributes:
         var: The input variable to the nonlinear function.
         func: The nonlinear function to approximate, taking a float and returning a float.
-        num_segments: Number of linear segments to use (default: 20).
+        num_segments: Number of linear segments to use (default: ``None`` — taken
+            from ``LXLinearizerConfig.pwl_num_segments``, 20).
         x_min: Minimum value of the input domain (default: use variable lower bound).
         x_max: Maximum value of the input domain (default: use variable upper bound).
-        adaptive: If True, use adaptive segmentation based on function curvature (default: True).
-        method: Formulation method - "sos2", "incremental", or "logarithmic" (default: "sos2").
+        adaptive: If True, use adaptive segmentation based on function curvature
+            (default: ``None`` — taken from ``LXLinearizerConfig.adaptive_breakpoints``, True).
+        method: Formulation method - "sos2", "incremental", or "logarithmic"
+            (default: ``None`` — taken from ``LXLinearizerConfig.pwl_method``, "sos2").
         breakpoints: Explicit, strictly increasing breakpoints; when set, num_segments,
             adaptive, x_min and x_max are not used (default: None).
+
+    .. versionchanged:: 0.3.0
+       ``num_segments``, ``adaptive`` and ``method`` default to ``None`` so that the
+       linearizer configuration applies when the term leaves them open.
 
     Example:
         Exponential growth function::
@@ -377,11 +384,11 @@ class LXPiecewiseLinearTerm:
 
     var: LXVariable
     func: Callable[[float], float]
-    num_segments: int = 20
+    num_segments: Optional[int] = None
     x_min: Optional[float] = None
     x_max: Optional[float] = None
-    adaptive: bool = True
-    method: Literal["sos2", "incremental", "logarithmic"] = "sos2"
+    adaptive: Optional[bool] = None
+    method: Optional[Literal["sos2", "incremental", "logarithmic"]] = None
     breakpoints: Optional[List[float]] = None
 
 

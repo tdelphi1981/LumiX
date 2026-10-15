@@ -161,7 +161,11 @@ class LXNonLinearFunctions:
         """
 
         def power_func(x: float) -> float:
-            return x**exponent if x >= 0 else 0
+            if x < 0 and not float(exponent).is_integer():
+                raise ValueError(
+                    f"x**{exponent} is not real for x = {x} < 0; restrict the variable "
+                    "to x >= 0")
+            return x ** exponent
 
         return linearizer.approximate_function(
             power_func,

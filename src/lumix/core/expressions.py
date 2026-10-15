@@ -782,11 +782,11 @@ class LXNonLinearExpression:
         self,
         var: LXVariable,
         func: Callable[[float], float],
-        num_segments: int = 20,
+        num_segments: Optional[int] = None,
         x_min: Optional[float] = None,
         x_max: Optional[float] = None,
-        adaptive: bool = True,
-        method: Literal["sos2", "incremental", "logarithmic"] = "sos2",
+        adaptive: Optional[bool] = None,
+        method: Optional[Literal["sos2", "incremental", "logarithmic"]] = None,
         breakpoints: Optional[Sequence[float]] = None,
     ) -> Self:
         """
@@ -800,13 +800,16 @@ class LXNonLinearExpression:
         Args:
             var: Input variable
             func: Function to approximate (e.g., lambda x: math.exp(x))
-            num_segments: Number of linear segments
+            num_segments: Number of linear segments (default: ``None`` — taken from
+                ``LXLinearizerConfig.pwl_num_segments``, 20)
             x_min: Minimum domain value (default: var.lower_bound)
             x_max: Maximum domain value (default: var.upper_bound)
-            adaptive: Use adaptive breakpoint generation
+            adaptive: Use adaptive breakpoint generation (default: ``None`` — taken
+                from ``LXLinearizerConfig.adaptive_breakpoints``, True)
             method: Linearization method ("sos2", "incremental", "logarithmic");
                 all three are exact for the piecewise-linear function through
-                the breakpoints
+                the breakpoints (default: ``None`` — taken from
+                ``LXLinearizerConfig.pwl_method``, "sos2")
             breakpoints: Strictly increasing x-coordinates to use instead of
                 generated ones (``num_segments``, ``adaptive``, ``x_min`` and
                 ``x_max`` are then not used). With a ``func`` that is itself
@@ -814,6 +817,10 @@ class LXNonLinearExpression:
 
         Returns:
             Self for chaining
+
+        .. versionchanged:: 0.3.0
+           ``num_segments``, ``adaptive`` and ``method`` default to ``None`` so that
+           the linearizer configuration applies when they are left open.
 
         Example::
 
