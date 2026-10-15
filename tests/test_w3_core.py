@@ -416,9 +416,8 @@ def test_final_sequential_goals_after_costless_minimize():
     m.prepare_goal_programming()
     from lumix.goal_programming.solver import LXGoalProgrammingSolver
     s = LXGoalProgrammingSolver(LXOptimizer().use_solver("ortools")).solve_sequential(m, m._relaxed_constraints)
-    # The goal is met (it was ignored: g = 0). Keeping the user objective as a lower
-    # priority (g = 8) is A21/A25, goal programming in W5.
-    assert s.variables["g"]["k"] >= 8 - 1e-6
+    # The costs are the last stage after the goal (W5, A21/A25): g = 8 exactly.
+    assert s.variables["g"]["k"] == pytest.approx(8)
 
 
 def test_final_deepcopy_keeps_cost_objective():

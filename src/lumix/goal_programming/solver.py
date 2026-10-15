@@ -1,6 +1,8 @@
 """Goal programming solver orchestration."""
 
-from typing import Any, Dict, List, Optional, TypeVar
+import copy
+import logging
+from typing import Any, List, Optional, TypeVar
 
 from lumix.core.constraints import LXConstraint
 from lumix.core.enums import LXConstraintSense, LXObjectiveSense
@@ -8,11 +10,26 @@ from lumix.core.model import LXModel
 from lumix.solution.solution import LXSolution
 from lumix.solvers.base import LXOptimizer
 
-from .goal import LXGoalMode
+from .goal import LXGoalMode, LXGoalStage
 from .objective_builder import build_sequential_objectives
 from .relaxation import RelaxedConstraint
+from .view import goal_form, goal_mode_value
 
 TModel = TypeVar("TModel")
+
+logger = logging.getLogger(__name__)
+
+#: Relative slack of a stage bound: later stages keep each earlier stage within
+#: ``optimum + SEQUENTIAL_TOLERANCE * max(1, |optimum|)``.
+SEQUENTIAL_TOLERANCE = 1e-6
+
+
+def _stage_model(model: LXModel, bounds: List[LXConstraint], expr: Any,
+                 sense: LXObjectiveSense) -> LXModel:
+    """A shallow copy of ``model`` with the stage bounds added and the stage objective."""
+    stage = copy.copy(model)
+    stage.constraints = list(model.constraints) + bounds
+    return stage.minimize(expr) if sense == LXObjectiveSense.MINIMIZE else stage.maximize(expr)
 
 
 class LXGoalProgrammingSolver:
@@ -40,93 +57,65 @@ class LXGoalProgrammingSolver:
     def solve_sequential(
         self,
         model: LXModel[TModel],
-        relaxed_constraints: List[RelaxedConstraint[TModel]],
+        relaxed_constraints: Optional[List[RelaxedConstraint[TModel]]] = None,
         **solver_params: Any,
     ) -> LXSolution[TModel]:
         """
-        Solve using sequential/lexicographic goal programming.
+        Solve goal programming lexicographically (A21): priority 1 first, then each
+        lower priority with every earlier stage held at its optimum (within
+        SEQUENTIAL_TOLERANCE), and finally the model's own objective and the
+        priority-0 goals. ``solution.goal_stages`` reports each solve. A stage that
+        does not solve to optimality ends the sequence; its solution is returned.
 
-        Solves one priority level at a time:
-        1. Solve priority 1, record optimal deviation values
-        2. Add constraints fixing priority 1 deviations to optimal values
-        3. Solve priority 2 with fixed priority 1
-        4. Repeat for all priorities
+        ``model`` is not changed; one with unprepared goals is relaxed on a copy.
 
         Args:
-            model: LXModel with relaxed goal constraints already added
-            relaxed_constraints: List of relaxed constraints with deviations
+            model: LXModel with goals (prepared or not)
+            relaxed_constraints: Relaxed goals; default the model's own
             **solver_params: Additional solver parameters
 
         Returns:
-            Final solution with all priorities optimized sequentially
+            Solution of the last stage that was solved
 
         Raises:
-            ValueError: If no objectives can be built from relaxed constraints
+            ValueError: If there is neither a goal with priority >= 1 nor a final objective
+
+        .. versionchanged:: 0.3.0
+           Earlier stages are kept at their optimum; the final objective is solved last.
         """
-        # Build sequential objectives
-        sequential_objectives = build_sequential_objectives(relaxed_constraints)
-
-        if not sequential_objectives:
-            raise ValueError(
-                "No sequential objectives found. "
-                "Ensure at least one goal constraint has priority >= 1."
-            )
-
-        # Store accumulated deviation fixing constraints
-        deviation_bounds: Dict[str, float] = {}
-
-        final_solution = None
-
-        # Solve each priority level
-        for priority, objective_expr in sequential_objectives:
-            # Set objective for this priority
-            model.objective_expr = objective_expr
-            model.objective_sense = LXObjectiveSense.MINIMIZE
-
-            # Solve at this priority level
-            solution = self.optimizer.solve(model, **solver_params)
-
+        model = goal_form(model)
+        relaxed = model._relaxed_constraints if relaxed_constraints is None else relaxed_constraints
+        stage_exprs = build_sequential_objectives(relaxed)
+        final = None
+        if model.objective_expr is not None or model._objective_from_costs:
+            final = (model.cost_objective() if model._objective_from_costs else model.objective_expr,
+                     model.objective_sense)
+        if not stage_exprs and final is None:
+            raise ValueError("No sequential objectives found. "
+                             "Ensure at least one goal constraint has priority >= 1.")
+        bounds: List[LXConstraint] = []
+        stages: List[LXGoalStage] = []
+        solution = None
+        for priority, expr in stage_exprs:
+            solution = self.optimizer._solve_once(
+                _stage_model(model, bounds, expr, LXObjectiveSense.MINIMIZE), **solver_params)
+            stages.append(LXGoalStage(priority, solution.objective_value, solution.status))
             if not solution.is_optimal():
-                # If we can't solve optimally at this priority, return what we have
-                print(
-                    f"Warning: Priority {priority} did not solve to optimality. "
-                    f"Status: {solution.status}"
-                )
-                return solution
-
-            # Record optimal deviation values for this priority
-            for relaxed in relaxed_constraints:
-                if relaxed.goal_metadata.priority == priority:
-                    # Get deviation values
-                    pos_dev_name = relaxed.pos_deviation.name
-                    neg_dev_name = relaxed.neg_deviation.name
-
-                    pos_dev_value = solution.get_variable(relaxed.pos_deviation)
-                    neg_dev_value = solution.get_variable(relaxed.neg_deviation)
-
-                    # Handle both scalar and dict values
-                    if isinstance(pos_dev_value, dict):
-                        # Indexed variable - fix each instance
-                        for idx, val in pos_dev_value.items():
-                            deviation_bounds[f"{pos_dev_name}[{idx}]"] = val
-                    else:
-                        # Scalar variable
-                        deviation_bounds[pos_dev_name] = pos_dev_value
-
-                    if isinstance(neg_dev_value, dict):
-                        for idx, val in neg_dev_value.items():
-                            deviation_bounds[f"{neg_dev_name}[{idx}]"] = val
-                    else:
-                        deviation_bounds[neg_dev_name] = neg_dev_value
-
-                    # Add constraints to fix these deviations for next priorities
-                    # Note: This is a simplified approach - in practice, you'd add
-                    # explicit constraints to the model. For now, we'll rely on
-                    # the fact that higher priorities have much larger weights.
-
-            final_solution = solution
-
-        return final_solution
+                logger.warning("Goal priority %d did not solve to optimality (status %s); "
+                               "lower priorities are not optimized", priority, solution.status)
+                break
+            value = float(solution.objective_value)
+            bounds.append(LXConstraint(f"goal_priority_{priority}_bound").expression(expr).le()
+                          .rhs(value + SEQUENTIAL_TOLERANCE * max(1.0, abs(value))))
+        else:
+            if final is not None:
+                expr, sense = final
+                solution = self.optimizer._solve_once(_stage_model(model, bounds, expr, sense),
+                                                      **solver_params)
+                stages.append(LXGoalStage(0, solution.objective_value, solution.status))
+        solution.goal_stages = stages
+        model.populate_goal_deviations(solution)
+        return solution
 
     def solve_weighted(
         self,
@@ -136,8 +125,8 @@ class LXGoalProgrammingSolver:
         """
         Solve using weighted goal programming.
 
-        This is a simple pass-through to the standard optimizer, since
-        the weighted objective is already built into the model.
+        A pass-through to the optimizer: the model is relaxed on a copy when
+        needed, and the weighted objective is built there.
 
         Args:
             model: LXModel with weighted goal objective already set
@@ -179,23 +168,19 @@ def solve_goal_programming(
         >>> optimizer = LXOptimizer().use_solver("gurobi")
         >>> solution = solve_goal_programming(model, optimizer, mode=LXGoalMode.WEIGHTED)
     """
-    # The model should have already been transformed by LXModel's internal logic
-    # (relaxed constraints, objective built, etc.)
-
     gp_solver = LXGoalProgrammingSolver(optimizer)
-
+    if model._goal_programming_prepared and goal_mode_value(model.goal_mode) != mode.value:
+        raise ValueError(f"The model was prepared for {model.goal_mode} goal programming; "
+                         f"it cannot be solved in {mode.value} mode")
+    view = copy.copy(model)
+    view.goal_mode = mode.value
     if mode == LXGoalMode.WEIGHTED:
-        return gp_solver.solve_weighted(model, **solver_params)
-    else:  # SEQUENTIAL
-        # For sequential, we need access to relaxed constraints
-        # This will be provided via model's internal state
-        raise NotImplementedError(
-            "Sequential mode requires model.solve() with mode parameter. "
-            "Use: optimizer.solve(model) after model.set_goal_mode('sequential')"
-        )
+        return gp_solver.solve_weighted(view, **solver_params)
+    return gp_solver.optimizer.solve(view, **solver_params)
 
 
 __all__ = [
+    "SEQUENTIAL_TOLERANCE",
     "LXGoalProgrammingSolver",
     "solve_goal_programming",
 ]

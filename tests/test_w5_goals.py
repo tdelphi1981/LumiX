@@ -245,3 +245,100 @@ def test_a25_quadratic_objective_with_goals():
     m.add_constraint(goal("g", lin((x, 1.0)), ">=", 3, priority=1))
     for solver in solvers:
         assert solve_with(solver, m).variables["x"]["k"] == pytest.approx(3, abs=1e-5)
+
+
+# --- Görev 4: sequential goal programming is lexicographic (A21) -------------------
+def _lex_model(scale=1.0):
+    x, y = fam("x", ["k"], lower=0), fam("y", ["k"], lower=0)
+    m = LXModel("seq").add_variables(x, y)
+    m.add_constraint(hard("cap", lin((x, 1.0), (y, 1.0)), "<=", 10))
+    m.add_constraint(goal("gx", lin((x, 1.0)), ">=", 8, priority=1))
+    m.add_constraint(goal("gy", lin((y, scale)), ">=", 8 * scale, priority=2))
+    return m.set_goal_mode("sequential")
+
+
+@pytest.mark.parametrize("solver", AVAILABLE)
+def test_a21_sequential_is_lexicographic(solver):
+    s = solve_with(solver, _lex_model())
+    assert s.status == "optimal"
+    assert (s.variables["x"]["k"], s.variables["y"]["k"]) == pytest.approx((8, 2))
+    assert [(st.priority, st.status) for st in s.goal_stages] == [(1, "optimal"), (2, "optimal")]
+    assert [st.objective_value for st in s.goal_stages] == pytest.approx([0, 6])
+    assert s.get_goal_deviations("gy")["neg"] == pytest.approx({"gy": 6.0})
+
+
+def test_a21_sequential_differs_from_weighted_when_scales_differ():
+    m = _lex_model(scale=20.0)
+    seq = solve_with("ortools", m)
+    weighted = solve_with("ortools", copy.copy(m).set_goal_mode("weighted"))
+    assert seq.variables["x"]["k"] == pytest.approx(8)
+    # Weighted: one unit of y removes 20 units of gy's deviation (2e6) against 1e6 for
+    # a unit of x, so y takes its target 8 and x the rest: x = 2.
+    assert weighted.variables["x"]["k"] == pytest.approx(2)
+
+
+def test_a21_mode_can_change_between_solves():
+    m = _lex_model(scale=20.0)
+    assert solve_with("ortools", m).variables["x"]["k"] == pytest.approx(8)
+    m.set_goal_mode("weighted")
+    assert solve_with("ortools", m).variables["x"]["k"] == pytest.approx(2)
+    m.set_goal_mode("sequential")
+    assert solve_with("ortools", m).variables["x"]["k"] == pytest.approx(8)
+
+
+def test_a21_weights_within_a_priority():
+    x, y = fam("x", ["k"], lower=0), fam("y", ["k"], lower=0)
+    m = LXModel("w").add_variables(x, y).set_goal_mode("sequential")
+    m.add_constraint(hard("cap", lin((x, 1.0), (y, 1.0)), "<=", 10))
+    m.add_constraint(goal("gx", lin((x, 1.0)), ">=", 8, priority=1, weight=1.0))
+    m.add_constraint(goal("gy", lin((y, 1.0)), ">=", 8, priority=1, weight=3.0))
+    s = solve_with("ortools", m)
+    assert (s.variables["x"]["k"], s.variables["y"]["k"]) == pytest.approx((2, 8))
+
+
+@pytest.mark.parametrize("sense,expected", [("max", 4.0), ("min", 2.0)])
+def test_a21_user_objective_is_the_last_stage(sense, expected):
+    x = fam("x", ["k"], lower=0, upper=10)
+    m = LXModel("m").add_variable(x).set_goal_mode("sequential")
+    m.add_constraint(goal("hi", lin((x, 1.0)), "<=", 4, priority=1))
+    m.add_constraint(goal("lo", lin((x, 1.0)), ">=", 2, priority=2))
+    m.maximize(lin((x, 1.0))) if sense == "max" else m.minimize(lin((x, 1.0)))
+    s = solve_with("ortools", m)
+    assert s.variables["x"]["k"] == pytest.approx(expected)
+    assert [st.priority for st in s.goal_stages] == [1, 2, 0]
+    assert s.objective_value == pytest.approx(expected)
+
+
+def test_a21_infeasible_stage_stops():
+    x = fam("x", ["k"], lower=0)
+    m = LXModel("m").add_variable(x).set_goal_mode("sequential")
+    m.add_constraint(hard("neg", lin((x, 1.0)), "<=", -1))
+    m.add_constraint(goal("g", lin((x, 1.0)), ">=", 2, priority=1))
+    m.add_constraint(goal("h", lin((x, 1.0)), "<=", 9, priority=2))
+    s = solve_with("ortools", m)
+    assert s.status == "infeasible"
+    assert [(st.priority, st.status) for st in s.goal_stages] == [(1, "infeasible")]
+
+
+def test_a21_sequential_leaves_the_model_unchanged():
+    m = _lex_model()
+    m.maximize(lin((m.variables[0], 1.0)))
+    before = (m.objective_expr, m.objective_sense, list(m.constraints), list(m.variables))
+    solve_with("ortools", m)
+    assert (m.objective_expr, m.objective_sense, list(m.constraints), list(m.variables)) == before
+
+
+def test_a21_solve_goal_programming_sequential():
+    from lumix import LXGoalMode, solve_goal_programming
+    m = _lex_model(scale=20.0).set_goal_mode("weighted")
+    s = solve_goal_programming(m, LXOptimizer().use_solver("ortools"), mode=LXGoalMode.SEQUENTIAL)
+    assert s.variables["x"]["k"] == pytest.approx(8)
+    assert m.goal_mode == "weighted"
+
+
+def test_canonical_goal_stages():
+    c = _lex_model().to_canonical()
+    pos = positions(c)
+    assert c.goal_stages == ({pos[("gx_neg_dev", "gx")]: 1.0}, {pos[("gy_neg_dev", "gy")]: 1.0})
+    assert c.objective == {}
+    assert _lex_model().set_goal_mode("weighted").to_canonical().goal_stages == ()

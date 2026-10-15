@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Generic, Optional, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, TypeVar, Union
 
 from ..core.variables import LXVariable
 
 if TYPE_CHECKING:
     from ..core.model import LXModel
+    from ..goal_programming.goal import LXGoalStage
     from ..visualization.solution import LXSolutionVisualizer
 
 TModel = TypeVar("TModel")
@@ -78,6 +79,10 @@ class LXSolution(Generic[TModel]):
     #: product of two continuous variables): the objective value is a bound, and the
     #: values may not attain it. .. versionadded:: 0.3.0
     relaxation: bool = False
+
+    #: Sequential goal programming: one entry per solve, in order (see LXGoalStage).
+    #: .. versionadded:: 0.3.0
+    goal_stages: List["LXGoalStage"] = field(default_factory=list)
 
     def get_variable(self, var: LXVariable[TModel, TValue]) -> Union[TValue, Dict[Any, TValue]]:
         """

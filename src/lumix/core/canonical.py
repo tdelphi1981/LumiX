@@ -200,6 +200,7 @@ class LXCanonicalBuilder:
         for constraint in self.model.constraints:
             rows.extend(self._rows(constraint))
         objective, constant, sense = self._objective()
+        goal_stages = self._goal_stages()
         for where, family in self._missing_rows:
             logger.warning(
                 "Rows of %s are of the same type as variable '%s' but not among the instances "
@@ -215,7 +216,21 @@ class LXCanonicalBuilder:
             sense=sense,
             scalar_families=tuple(self.scalars),
             objective_quadratic=self.quadratic,
+            goal_stages=goal_stages,
         )
+
+    def _goal_stages(self) -> Tuple[Dict[int, float], ...]:
+        """Sequential goal programming: the stage objectives in priority order (spec
+        §3.1); the model's own objective is ``objective``."""
+        model = self.model
+        if not getattr(model, "_goal_programming_prepared", False):
+            return ()
+        from ..goal_programming.objective_builder import build_sequential_objectives
+        from ..goal_programming.view import goal_mode_value
+        if goal_mode_value(model.goal_mode) != "sequential":
+            return ()
+        return tuple(self.linear_row(expr, None, where=f"goal priority {p}")[0]
+                     for p, expr in build_sequential_objectives(model._relaxed_constraints))
 
     # ---- variables -------------------------------------------------------
     def _variables(self) -> List[LXCanonicalVariable]:

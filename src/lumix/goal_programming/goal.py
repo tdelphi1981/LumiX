@@ -182,10 +182,25 @@ def priority_to_weight(priority: int, base: float = 10.0, exponent_offset: int =
     return base ** (exponent_offset - priority + 1)
 
 
+@dataclass(frozen=True)
+class LXGoalStage:
+    """One solve of sequential goal programming: the priority it optimized (0 for the
+    final objective: the model's own objective and the priority-0 goals), the
+    optimal value of that stage and the solver status.
+
+    .. versionadded:: 0.3.0
+    """
+
+    priority: int
+    objective_value: float
+    status: str
+
+
 __all__ = [
     "LXGoalMode",
     "LXGoalMetadata",
     "LXGoal",
+    "LXGoalStage",
     "get_deviation_var_name",
     "priority_to_weight",
 ]

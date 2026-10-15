@@ -308,9 +308,12 @@ class LXOptimizer(Generic[TModel]):
             ImportError: If solver not installed
             ValueError: If model is invalid
         """
-        from ..goal_programming.view import goal_form
+        from ..goal_programming.view import goal_form, goal_mode_value
 
         view = goal_form(model)
+        if view._goal_programming_prepared and goal_mode_value(view.goal_mode) == "sequential":
+            from ..goal_programming.solver import LXGoalProgrammingSolver
+            return LXGoalProgrammingSolver(self).solve_sequential(view, **solver_params)
         solution = self._solve_once(view, **solver_params)
         if view._goal_programming_prepared:
             view.populate_goal_deviations(solution)
