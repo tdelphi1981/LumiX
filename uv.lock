@@ -1436,7 +1436,7 @@ wheels = [
 
 [[package]]
 name = "lumix-opt"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1460,6 +1460,8 @@ dev = [
     { name = "hypothesis", version = "6.168.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "hypothesis", version = "6.169.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "mypy" },
+    { name = "pandas" },
+    { name = "plotly" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -1513,7 +1515,9 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "ortools", marker = "extra == 'all-solvers'", specifier = ">=9.8.0" },
     { name = "ortools", marker = "extra == 'ortools'", specifier = ">=9.8.0" },
+    { name = "pandas", marker = "extra == 'dev'", specifier = ">=2.0.0" },
     { name = "pandas", marker = "extra == 'viz'", specifier = ">=2.0.0" },
+    { name = "plotly", marker = "extra == 'dev'", specifier = ">=5.15.0" },
     { name = "plotly", marker = "extra == 'viz'", specifier = ">=5.15.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },

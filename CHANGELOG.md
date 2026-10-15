@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
 ### Added
 - `LXModel.to_canonical()` and `LXCanonicalModel`: a solver-independent form of a model that every adapter builds from.
 - Coefficients and filters of `add_term` may take the constraint row instance as a second argument.
@@ -32,8 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `model_factory=` on `LXScenarioAnalyzer` and `LXWhatIfAnalyzer`: a function that builds the model, called once for the base model and once per scenario or what-if run instead of copying the model (for ORM models, open a fresh session inside it). It must return a new model on every call.
 - `LXResultStore` and `LXStoredRun` (`lumix.analysis.store`, needs `lumix-opt[orm]`): pass `result_store=` to either analyzer to write every solve to the `lumix_runs` / `lumix_run_values` tables (SQLAlchemy), with optional shadow prices and reduced costs; read them back with `runs()` and `values()`.
 - `LXSensitivityAnalyzer.analyze_constraint_family(name)` and `analyze_variable_family(name)`: every row or instance of a family, keyed by index key.
+- `lumix.enable_logging(level="INFO", stream=None, fmt=...)`: prints LumiX's log records (LumiX itself attaches only a `NullHandler`); calling it again replaces its handler.
+- `CPSAT_CAPABILITIES`, `GLPK_CAPABILITIES`, `LXPiecewiseLinearizer` and `LXRowKeyFilter` are exported from `lumix`, as the documentation already showed.
+- `LXNonLinearExpression.add_indicator(..., sense="<=", rhs=0.0)`: indicator rows with `>=` and `==` and a right-hand side (any other sense raises `ValueError`).
+- `lumix.solution.row_activity(model, solution)` and `LXRowActivity`: the left-hand side, right-hand side, slack and binding state of every constraint row at a solution.
+- A "Correctness Notes" page in the user guide: what LumiX solves exactly, what it approximates, and how it is verified.
 
-### Changed
+### Behavior changes
+
+Models that were solved wrongly before now give different (correct) results; every entry below that changes a result or raises where 0.2.x did not is listed here. lumix-ir's API surface is unchanged.
+
 - Same-type constraint narrowing applies only to one-argument coefficients and filters, decided for each `add_term` separately (also after `e1 + e2` or `expr * 2`). Parameters with a default value do not count, so `lambda item, g=g: ...` is a one-argument filter.
 - A variable or constraint family whose instances repeat an index key raises `ValueError`.
 - Sums that cancel to floating-point noise (`0.1 + 0.2 - 0.3`) are treated as 0 in rows and right-hand sides.
@@ -74,11 +84,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unknown scenario modification types and target types (e.g. `"objective"`) raise `ValueError` instead of being ignored.
 - What-if `to=` on a constraint whose right-hand side is a function sets every row to that value; the change record's `original_value` / `new_value` / `delta` are `None` for such a constraint. `modify_variable_bound` fills `changes_applied`.
 - `LXScenarioAnalyzer` and `LXWhatIfAnalyzer` accept the model and optimizer as keyword arguments (`base_model=` / `model=`, `optimizer=`).
+- LumiX prints no log lines by default; call `lumix.enable_logging()` or configure `logging`. `LXModelLogger(name, level=None)` sets a level only when `level` is given and never adds a handler.
+- `LXSolution.get_total_deviation(name)` sums only the undesired deviations (an over-achieved `>=` goal no longer reports a deviation); goal charts and the dashboard use it.
+- `LXGoalStage.objective_value` is `None` for a stage without a feasible solution (it was 0).
+- `LXSolutionVisualizer.plot_constraint_utilization()` needs the model (`LXSolutionVisualizer(solution, model)`) and no longer needs duals.
+- Dashboard and scenario charts no longer prefix objective values with `$`.
+- `LXConstraintSensitivity.is_binding` follows the row's slack (zero slack is binding), not a nonzero shadow price; degenerate binding rows are now reported as binding.
+- `find_bottlenecks` tries equality rows in both directions and reports the better one.
+- `model_factory` must return new constraint and variable objects on every call.
+- `LXResultStore` tables: `lumix_runs.scenario` and `lumix_run_values.name` are `TEXT`.
+- `LXSolution._undesired_deviations` moved to the end of the dataclass fields and is excluded from comparisons.
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
-
-### Removed
+- `extract_custom_objectives` always returns an empty list (priority 0 goals are objective terms, not relaxed rows) and issues a `DeprecationWarning`; use `final_objective(model, custom_goals)`. It will be removed in 0.4.0.
 
 ### Fixed
 - A1: a constant in a constraint's left-hand side was ignored by OR-Tools, CP-SAT, CPLEX and GLPK.
@@ -124,8 +143,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - B12: `find_bottlenecks` ranked minimization models backwards and failed on constraints whose right-hand side is a function.
 - B15: a copy of a model built from SQLAlchemy objects with unloaded relationships failed; `detach_orm_object` now loads them while a session is available.
 - `get_best_scenario` could return an infeasible scenario.
-
-### Security
+- B13: `LXRationalConverter(method="continued_fraction")` raised `ZeroDivisionError` for every non-integer.
+- B14: `LXDashboard.plot()` crashed unless both sensitivity and goal data were present.
+- B16: every `LXOptimizer` reset the `lumix.optimizer` logger to INFO and added a console handler, so applications could not silence LumiX and saw each line twice under a configured root logger.
+- B17: README snippets (`LXBilinearTerm(..., bounds_x=...)`, `LXPiecewiseLinearTerm(variable=..., slopes=...)`, `add_scenario("base", {})`, `solve_all()`) and documented imports (`from lumix import CPSAT_CAPABILITIES, GLPK_CAPABILITIES, LXPiecewiseLinearizer`) failed.
+- The constraint-utilization chart drew every non-binding row at a fixed 50 %; it now shows LHS / RHS of each row.
+- The scenario waterfall accumulated the scenario differences; each scenario is now a bar from the baseline to its own objective, and infeasible scenarios (reported objective 0) are left out of every scenario chart and ranking.
+- The goal deviation waterfall's "Total" bar left out the last goal.
+- Linearization warnings (McCormick, big-M, indicator, piecewise domain, deprecated settings) pointed at LumiX internals instead of the user's line; the deprecated-setting warning of `enable_linearization(...)` was therefore hidden by Python's default filters.
+- A zero-weight `add_abs(x, 0)` or `add_product(x, y, 0)` raised "needs finite bounds".
+- In an indexed constraint, a nonlinear term over two families of different data types was narrowed (or not) depending on argument order.
+- Auxiliary variables of a term on a single variable were reported as `{None: value}`.
+- Sequential goal programming rebuilt the stage list for every stage solve.
+- Index keys of an indexed goal that differ but print the same (`1` and `"1"`) raised an internal "duplicate index key" error; the error now names the goal.
+- `find_bottlenecks` moved equality rows only upwards, so it could miss or misreport an improvement.
+- A `model_factory` that reused a constraint or variable object of the base model let what-if and scenario changes modify the base model; it now raises `ValueError`.
+- `LXWhatIfAnalyzer(baseline_solution=...)` never recorded the given baseline in the result store.
+- `LXSensitivityAnalyzer` did not see constraints added after its first lookup, and a lookup of a scalar constraint enumerated every indexed family.
+- `LXConstraintSensitivity.slack` was never filled.
+- Documentation pages called API that does not exist (`identify_binding_constraints`, `set_variable_bound`, `apply_change`, `get_non_binding_constraints`, `LXCustomLinearizer`, `lower_bound_func`), used goals with data but no `indexed_by`, treated a goal's deviations as a number, and described a linearization engine LumiX no longer has; code includes in the examples pages had drifted into docstrings.
 
 ## [0.2.1] - 2026-10-14
 

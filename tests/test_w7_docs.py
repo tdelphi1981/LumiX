@@ -146,3 +146,19 @@ def test_w7_include_markers_exist_and_select_code():
             elif '"""' in body and target.suffix == ".py" and body.count('"""') % 2:
                 problems.append(f"{rst.relative_to(DOCS)}:{n} cuts a docstring")
     assert problems == []
+
+
+def test_w7_version_is_0_3_0():
+    import lumix
+
+    assert lumix.__version__ == "0.3.0"
+
+
+def test_w7_changelog_has_a_0_3_0_section():
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    section = text.split("## [0.3.0]", 1)[1].split("\n## [", 1)[0]
+    for heading in ("### Added", "### Fixed", "### Behavior changes", "### Deprecated"):
+        assert heading in section, heading
+    assert "### Changed" not in section
+    for catalog_id in ("A1:", "A26:", "B13:", "B14:", "B16:", "B17:"):
+        assert catalog_id in section, catalog_id
