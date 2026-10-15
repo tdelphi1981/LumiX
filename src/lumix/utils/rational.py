@@ -216,7 +216,7 @@ class LXRationalConverter:
         # Handle exact integers (with tolerance)
         rounded_x = round(x)
         if self._is_close(x, float(rounded_x)):
-            return int(rounded_x), 1, 0.0
+            return int(rounded_x), 1, abs(x - rounded_x)
 
         # Extract sign and work with absolute value
         sign, int_part, frac_part = self._extract_integer_part(x)
@@ -278,14 +278,14 @@ class LXRationalConverter:
         # Handle exact integers (with tolerance)
         rounded_x = round(x)
         if self._is_close(x, float(rounded_x)):
-            return int(rounded_x), 1, 0.0
+            return int(rounded_x), 1, abs(x - rounded_x)
 
         # Extract sign and integer part
         sign, int_part, frac_part = self._extract_integer_part(x)
 
         # Build continued fraction for fractional part
         if self._is_close(frac_part, 0.0, use_abs=True):
-            return sign * int_part, 1, 0.0
+            return sign * int_part, 1, abs(x - sign * int_part)
 
         # Standard continued fraction algorithm
         # Start with fractional part
@@ -308,14 +308,14 @@ class LXRationalConverter:
                 # Return previous convergent
                 num = sign * (int_part * q_prev1 + p_prev1)
                 den = q_prev1
-                error = self._compute_error(num, den, abs(x))
+                error = self._compute_error(num, den, x)
                 return num, den, error
 
             # Check if we've converged (with tolerance)
             if self._is_close(value, float(a)):
                 num = sign * (int_part * q + p)
                 den = q
-                error = self._compute_error(num, den, abs(x))
+                error = self._compute_error(num, den, x)
                 return num, den, error
 
             # Update for next iteration
@@ -340,7 +340,7 @@ class LXRationalConverter:
         # Handle exact integers (with tolerance)
         rounded_x = round(x)
         if self._is_close(x, float(rounded_x)):
-            return int(rounded_x), 1, 0.0
+            return int(rounded_x), 1, abs(x - rounded_x)
 
         # Extract sign and work with absolute value
         sign, int_part, frac_part = self._extract_integer_part(x)
