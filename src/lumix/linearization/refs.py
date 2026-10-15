@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..core.canonical import canonical_bounds
 from ..core.constraints import LXConstraint
@@ -100,16 +100,21 @@ class LXAuxFactory:
         name = f"{tag}_{role}"
         found = self._families.get(name)
         if found is None:
-            data: list = []
             v = LXVariable[_AuxKey, float](name)
             v = {"continuous": v.continuous, "integer": v.integer, "binary": v.binary}[kind]()
-            v = v.indexed_by(lambda a: a.key).from_data(data)
+            data: Optional[list] = None
+            if key is not None:  # a term on a single variable gets a scalar auxiliary
+                data = []
+                v = v.indexed_by(lambda a: a.key).from_data(data)
             self.variables.append(v)
             found = self._families[name] = (v, data, [lower, upper], kind)
         v, data, bounds, family_kind = found
         if family_kind != kind:
             raise RuntimeError(f"Auxiliary family '{name}' is {family_kind}, not {kind}")
-        data.append(_AuxKey(key))
+        if (data is None) != (key is None):
+            raise RuntimeError(f"Auxiliary family '{name}' mixes a single variable and instances")
+        if data is not None:
+            data.append(_AuxKey(key))
         if kind == "binary":
             return LXVarRef(v, key, 0.0, 1.0, v.var_type)
         bounds[0], bounds[1] = min(bounds[0], lower), max(bounds[1], upper)

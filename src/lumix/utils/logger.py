@@ -244,8 +244,12 @@ class LXModelLogger:
         Examples:
             Log bilinear linearization::
 
-                logger.log_linearization("bilinear", "McCormick", aux_vars=4)
-                # Output: Linearized bilinear using McCormick (added 4 auxiliary variables)
+                logger.log_linearization("bilinear", "McCormick", aux_vars=1)
+                # Output: Linearized bilinear using McCormick (added 1 auxiliary variables)
+
+        Note:
+            LumiX does not call this method itself; take the counts from
+            ``LXLinearizer.get_statistics()``.
         """
         self.logger.debug(f"Linearized {term_type} using {method} (added {aux_vars} auxiliary variables)")
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import logging
 import math
-import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.canonical import LXCanonicalBuilder, LXCanonicalNonlinear
@@ -19,6 +18,7 @@ from ..core.expressions import LXLinearExpression, LXNonLinearExpression, LXQuad
 from ..core.model import LXModel
 from ..nonlinear.terms import LXIndicatorTerm
 from ..solvers.capabilities import LXSolverCapability
+from ..utils._warn import warn_user
 from .config import LXLinearizerConfig
 from .refs import LXAuxFactory, LXVarRef, scaled_bounds
 from .techniques.absminmax import absolute, minmax
@@ -174,33 +174,33 @@ class LXLinearizer:
 
     def _row_terms(self, builder, new_lhs, lhs, outputs, where) -> None:
         """Per-row contributions in an indexed constraint: a row that is an instance
-        of the term's family takes that instance's item only, and a row of the
-        family's own data type that is not one of its instances takes nothing
-        (spec §3 rule 3, as for one-argument linear terms)."""
-        owners: Dict[int, Any] = {}
+        of one of the term's variable families takes that instance's item only, and a
+        row of a family's own data type that is not one of its instances takes nothing
+        (spec §3 rule 3, as for one-argument linear terms). Every multi-instance family
+        of the term is checked, so the result does not depend on argument order."""
+        lookups: Dict[int, List[Tuple[Any, _InstanceKeys]]] = {}
         for index, term in enumerate(lhs.nonlinear_terms):
-            owners[index] = next((v for v in _term_variables(term)
-                                  if len(builder.families.get(v.name, {})) > 1), None)
-        lookups = {i: _InstanceKeys(builder.cache.instances(v), v) if v is not None else None
-                   for i, v in owners.items()}
+            owners = [v for v in _term_variables(term)
+                      if len(builder.families.get(v.name, {})) > 1]
+            lookups[index] = [(v, _InstanceKeys(builder.cache.instances(v), v)) for v in owners]
 
         warned: set = set()
 
         def selected(term_index, item_key, row):
-            keys = lookups[term_index]
-            if keys is None:
-                return True
-            row_key = keys.key_of(row)
-            if row_key is not _MISSING:
-                return row_key == item_key
-            owner = owners[term_index]
-            if builder._row_outside_family(owner, row):
-                if owner.name not in warned:
-                    warned.add(owner.name)
+            outside = None
+            for owner, keys in lookups[term_index]:
+                row_key = keys.key_of(row)
+                if row_key is not _MISSING:
+                    return row_key == item_key
+                if outside is None and builder._row_outside_family(owner, row):
+                    outside = owner
+            if outside is not None:
+                if outside.name not in warned:
+                    warned.add(outside.name)
                     logger.warning(
                         "Rows of %s are of the same type as variable '%s' but not among the "
                         "instances of '%s'; its nonlinear terms contribute nothing there",
-                        where, owner.name, owner.name)
+                        where, outside.name, outside.name)
                 return False
             return True
 
@@ -241,10 +241,10 @@ class LXLinearizer:
         for sense in {"<=": ("<=",), ">=": (">=",), "==": ("<=", ">=")}[term.sense]:
             m = (high if sense == "<=" else -low) - (term.rhs if sense == "<=" else -term.rhs)
             if not math.isfinite(m):
-                warnings.warn(
+                warn_user(
                     f"The indicator on '{b.label}' has an unbounded expression; it uses "
                     f"big_m_value={self.config.big_m_value} (LXLinearizerConfig)",
-                    UserWarning, stacklevel=3)
+                    UserWarning)
                 m = self.config.big_m_value
             if m <= 0:
                 continue                         # holds whatever b is
@@ -262,6 +262,8 @@ class LXLinearizer:
         tags: Dict[int, str] = {}
         out = []
         for item in items:
+            if item.coeff == 0 and item.kind in ("abs", "product"):
+                continue  # zero weight: contributes nothing and needs no bounds
             refs = [self._refs[p] for p in item.variables]
             tag = tags.get(item.term)
             if tag is None:

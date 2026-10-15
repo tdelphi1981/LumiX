@@ -9,13 +9,13 @@ function through the breakpoints:
 """
 
 import math
-import warnings
 from typing import Any, Callable, List, Literal, Optional, Sequence, Tuple
 
 import numpy as np
 
 from ...core.constraints import LXConstraint
 from ...core.variables import LXVariable
+from ...utils._warn import warn_user
 from ..config import LXLinearizerConfig
 from ..refs import LXAuxFactory, LXVarRef
 
@@ -84,9 +84,9 @@ def piecewise_points(
         points = (adaptive_breakpoints(func, x_min, x_max, num_segments) if adaptive
                   else [float(b) for b in np.linspace(x_min, x_max, num_segments + 1)])
     if lower is None or lower < x_min or upper is None or upper > x_max:
-        warnings.warn(
+        warn_user(
             f"The piecewise-linear term restricts {name} to [{x_min}, {x_max}], "
-            f"narrower than its bounds [{lower}, {upper}]", UserWarning, stacklevel=3)
+            f"narrower than its bounds [{lower}, {upper}]", UserWarning)
     try:
         values = [float(func(bp)) for bp in points]
     except Exception as e:

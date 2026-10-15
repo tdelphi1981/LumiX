@@ -10,13 +10,13 @@ Exact unless both factors are continuous:
 """
 
 import math
-import warnings
 from typing import Any, List
 
 from ...core.constraints import LXConstraint
 from ...core.enums import LXVarType
 from ...core.variables import LXVariable
 from ...nonlinear.terms import LXBilinearTerm
+from ...utils._warn import warn_user
 from ..config import LXLinearizerConfig
 from ..refs import LXAuxFactory, LXVarRef, value_kind
 
@@ -87,10 +87,10 @@ def _binary_times(aux, tag, key, b, y, config):
     """``z = b * y`` for ``y`` in [lo, hi]: z = y when b = 1, z = 0 when b = 0 (A14)."""
     lo, hi = y.lower, y.upper
     if not y.bounded:
-        warnings.warn(
+        warn_user(
             f"'{y.label}' has no finite bounds; its product with binary '{b.label}' uses "
             f"big_m_value={config.big_m_value} (LXLinearizerConfig) as the bound",
-            UserWarning, stacklevel=4)
+            UserWarning)
         lo = lo if math.isfinite(lo) else -config.big_m_value
         hi = hi if math.isfinite(hi) else config.big_m_value
     z = aux.var(tag, "z", key, value_kind([y]), min(lo, 0.0), max(hi, 0.0))
@@ -114,7 +114,8 @@ def _expansion(aux, tag, key, x, y, config):
         raise ValueError(
             f"{x.label} takes {span + 1} values; its binary expansion needs {bits} bits, more "
             f"than LXLinearizerConfig.binary_expansion_bits={config.binary_expansion_bits}. "
-            "Raise it, or use 'gurobi' or 'cplex' for a quadratic objective")
+            "Raise it, or, in the objective, write the product with add_quadratic and solve "
+            "it on Gurobi or CPLEX")
     digits = [aux.var(tag, f"bit{k}", key, "binary") for k in range(bits)]
     aux.row(tag, "expand", key, [(x, 1.0)] + [(d, -float(2 ** k)) for k, d in enumerate(digits)],
             "==", float(low))
@@ -136,11 +137,13 @@ def _mccormick(aux, tag, key, x, y, relaxation):
             f"Detected: {x.label} ∈ [{x.lower}, {x.upper}], {y.label} ∈ [{y.lower}, {y.upper}]. "
             "Please specify bounds using .bounds(lower=..., upper=...)")
     relaxation.append(f"{x.label} * {y.label}")
-    warnings.warn(
+    warn_user(
         f"The product {x.label} * {y.label} of two continuous variables is linearized with "
         "McCormick envelopes, a relaxation: the reported optimum may not be attainable "
-        "(solution.relaxation is True). Make a factor integer or binary, or use 'gurobi' or "
-        "'cplex' for a quadratic objective", UserWarning, stacklevel=4)
+        "(solution.relaxation is True). Make a factor integer or binary, or, in the "
+        "objective, write it as an LXQuadraticExpression "
+        f"(add_quadratic({x.var.name}, {y.var.name})) to solve it exactly on Gurobi or CPLEX",
+        UserWarning)
     xl, xu, yl, yu = x.lower, x.upper, y.lower, y.upper
     corners = [xl * yl, xl * yu, xu * yl, xu * yu]
     z = aux.var(tag, "z", key, "continuous", min(corners), max(corners))

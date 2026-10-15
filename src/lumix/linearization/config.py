@@ -1,9 +1,10 @@
 """Configuration for linearization engine."""
 
-import warnings
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
+
+from ..utils._warn import warn_user
 
 
 class LXLinearizationMethod(Enum):
@@ -84,9 +85,9 @@ class LXLinearizerConfig:
     def __post_init__(self) -> None:
         for name, default in _UNUSED.items():
             if getattr(self, name) != default:
-                warnings.warn(
+                warn_user(
                     f"LXLinearizerConfig.{name} has no effect and will be removed in 0.4.0",
-                    DeprecationWarning, stacklevel=3)
+                    DeprecationWarning)
 
 
 #: Fields that no technique reads; setting them warns (B9). Removed in 0.4.0.

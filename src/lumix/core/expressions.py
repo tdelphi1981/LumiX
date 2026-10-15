@@ -822,31 +822,53 @@ class LXNonLinearExpression:
         return self
 
     def add_indicator(
-        self, binary_var: LXVariable, condition: bool, linear_expr: LXLinearExpression
+        self,
+        binary_var: LXVariable,
+        condition: bool,
+        linear_expr: LXLinearExpression,
+        sense: Literal["<=", ">=", "=="] = "<=",
+        rhs: float = 0.0,
     ) -> Self:
         """
-        Add conditional constraint: if binary_var == condition then linear_expr
+        Add a conditional row: if ``binary_var == condition`` then
+        ``linear_expr <sense> rhs``.
+
+        The term adds rows to the model and nothing to the expression's value, so it is
+        usually placed in the objective expression next to the linear part.
 
         Args:
-            binary_var: Binary variable
+            binary_var: Binary variable (a single variable)
             condition: Condition value (True or False)
-            linear_expr: Expression to apply when condition is met
+            linear_expr: Left-hand side of the conditional row
+            sense: ``"<="`` (default), ``">="`` or ``"=="``
+            rhs: Right-hand side (default 0)
 
         Returns:
             Self for chaining
 
+        Raises:
+            ValueError: If ``sense`` is not one of the three senses.
+
         Example::
 
-            # If warehouse is open, then demand must be met
+            # If the warehouse is open, it ships at least 10 units
             expr.add_indicator(
                 is_open,
                 True,
-                LXLinearExpression().add_term(supply, 1.0)
+                LXLinearExpression().add_term(supply, 1.0),
+                sense=">=",
+                rhs=10,
             )
+
+        .. versionchanged:: 0.3.0
+           ``sense`` and ``rhs`` (the row was always ``<= 0`` before).
         """
         from ..nonlinear.terms import LXIndicatorTerm
 
-        self.nonlinear_terms.append(LXIndicatorTerm(binary_var, condition, linear_expr))
+        if sense not in ("<=", ">=", "=="):
+            raise ValueError(f"add_indicator: sense must be '<=', '>=' or '==', not {sense!r}")
+        self.nonlinear_terms.append(
+            LXIndicatorTerm(binary_var, condition, linear_expr, sense, float(rhs)))
         return self
 
     def add_piecewise(
