@@ -286,6 +286,8 @@ def main():
 
     # Set goal programming mode
     model.set_goal_mode("weighted")
+    # Optional: solve() relaxes the goals on a copy by itself. Preparing the model
+    # here lets model.summary() below show the relaxed constraints.
     model.prepare_goal_programming()
 
     print("\nModel Summary:")
@@ -365,9 +367,8 @@ def main():
     # Priority 0
     print("\nPriority 0 (Custom Objective - Maximize Profit):")
     print("-" * 80)
-    deviations = solution.get_goal_deviations("maximize_profit")
-    if deviations:
-        print(f"Profit achieved: ${total_profit:.2f}")
+    # Priority 0 goals are objective terms, not relaxed rows: they have no deviations.
+    print(f"Profit achieved: ${total_profit:.2f}")
 
     # Priority 1
     print("\nPriority 1 (Meet Customer Demands):")

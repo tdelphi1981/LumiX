@@ -76,8 +76,7 @@ model.add_constraint(
 # Set goal programming mode
 model.set_goal_mode("weighted")  # or "sequential"
 
-# Prepare and solve
-model.prepare_goal_programming()
+# Solve: the goals are relaxed automatically, on a copy of the model
 optimizer = LXOptimizer().use_solver("ortools")
 solution = optimizer.solve(model)
 
@@ -187,19 +186,29 @@ model.set_goal_mode("weighted")
 
 ### Sequential Mode (Multiple Solves)
 
-**Note**: Sequential mode is planned but not yet fully implemented. It will solve priorities lexicographically:
-1. Solve Priority 1, get optimal d1*
-2. Fix d1 = d1*, solve Priority 2, get optimal d2*
-3. Fix d2 = d2*, solve Priority 3, etc.
+Sequential mode solves the priorities lexicographically:
+1. Solve Priority 1, get its optimal weighted deviation d1*
+2. Keep Priority 1 at d1* and solve Priority 2, get d2*
+3. Keep d1*, d2* and solve Priority 3, etc.
+4. Finally optimize the model's own objective and the priority 0 goals
 
 ```python
 model.set_goal_mode("sequential")
-# This will perform true preemptive goal programming
+solution = optimizer.solve(model)
+for stage in solution.goal_stages:
+    print(stage.priority, stage.status, stage.objective_value)
 ```
+
+Use it when goals have very different scales: the weights of weighted mode then
+no longer guarantee that a higher priority wins.
 
 ## Custom Objectives (Priority 0)
 
-Use priority 0 to incorporate custom objective terms alongside goal deviations:
+Use priority 0 to incorporate custom objective terms alongside goal deviations.
+A priority 0 goal is not a relaxed row: the expression of a `.ge()` goal is
+maximized and that of a `.le()` goal minimized, times its weight, after all
+goals (it has no deviations). A model objective set with `minimize()` /
+`maximize()` is kept the same way, as the lowest priority:
 
 ```python
 # Maximize profit (priority 0 = custom objective)
@@ -325,7 +334,7 @@ Set goal programming mode ("weighted" or "sequential").
 ```python
 .prepare_goal_programming() -> Self
 ```
-Prepare model for goal programming (relax goals, add deviation variables, build objective). Called automatically by solver.
+Relax the goals in the model itself (add deviation variables, build the objective). Optional: `optimizer.solve(model)` relaxes the goals on a copy and leaves the model unchanged; call this to inspect the relaxed model.
 
 ```python
 .has_goals() -> bool
@@ -342,7 +351,7 @@ Get deviation values for a goal (returns dict with 'pos' and 'neg' keys).
 ```python
 .is_goal_satisfied(goal_name: str, tolerance: float = 1e-6) -> bool
 ```
-Check if goal is satisfied within tolerance.
+Check if the goal's undesired deviations are within tolerance (the shortfall of a `>=` goal, the excess of a `<=` goal, both for `==`).
 
 ```python
 .get_total_deviation(goal_name: str) -> float
@@ -353,7 +362,7 @@ Get total absolute deviation for a goal.
 
 ### Automatic Relaxation
 
-When you call `.prepare_goal_programming()`:
+When you solve a model with goals (or call `.prepare_goal_programming()`):
 
 1. **Identify Goals**: Find all constraints marked with `.as_goal()`
 2. **Create Deviation Variables**: For each goal, create `pos_dev` and `neg_dev`
@@ -374,7 +383,7 @@ Deviation variables are automatically named:
 
 For weighted mode:
 ```python
-priority_weight = 10 ** (6 - priority)
+priority_weight = 10 ** (7 - priority)  # P1 = 10^6, P2 = 10^5, ...
 combined_weight = priority_weight * goal_weight
 ```
 
@@ -394,13 +403,11 @@ Example:
 
 ## Limitations
 
-1. **Sequential Mode**: Not yet fully implemented (use weighted mode)
-2. **Quadratic Objectives**: Goal programming currently supports linear objectives only
-3. **Manual Combination**: Combining custom objectives with goals requires priority 0
+1. **Priority 0 goals**: must be `.ge()` or `.le()`, linear and not indexed
+2. **Model objective**: a nonlinear objective cannot be combined with goals (quadratic objectives need Gurobi or CPLEX)
 
 ## Future Enhancements
 
-- [ ] Full sequential/lexicographic solver
 - [ ] Automatic priority inference
 - [ ] Goal relaxation tolerance settings
 - [ ] Interactive goal adjustment

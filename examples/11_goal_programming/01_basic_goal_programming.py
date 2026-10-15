@@ -219,7 +219,8 @@ def main():
     # Set goal programming mode (weighted = single solve)
     model.set_goal_mode("weighted")
 
-    # Prepare goal programming (automatic relaxation)
+    # Optional: solve() relaxes the goals on a copy by itself. Preparing the model
+    # here lets model.summary() below show the relaxed constraints.
     model.prepare_goal_programming()
 
     print("\nModel Summary:")
