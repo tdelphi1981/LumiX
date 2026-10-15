@@ -67,6 +67,38 @@ class LXKeyFilter:
         return f"LXKeyFilter({self.var.name!r}, {len(self.keys)} keys)"
 
 
+_NO_ROW = object()
+
+
+class LXRowKeyFilter:
+    """
+    Row-aware term filter for indexed constraints: in the row ``r`` it keeps the
+    instance whose index key is ``row_key(r)``. The canonical builder looks that
+    instance up by key instead of testing every instance, so an indexed constraint
+    whose rows each use one instance of another family builds in linear time.
+
+    Called with an instance only (no row), it keeps every instance; a coefficient
+    that takes ``(instance, row)`` must then select the row's instance.
+
+    .. versionadded:: 0.3.0
+    """
+
+    __slots__ = ("var", "row_key")
+    _lumix_arity = 2
+
+    def __init__(self, var: "LXVariable", row_key: Callable[[Any], Any]):
+        self.var = var
+        self.row_key = row_key
+
+    def __call__(self, instance: Any, row: Any = _NO_ROW) -> bool:
+        if row is _NO_ROW:
+            return True
+        return self.var.index_key(instance) == self.row_key(row)
+
+    def __repr__(self) -> str:
+        return f"LXRowKeyFilter({self.var.name!r})"
+
+
 def _key_or_where(var: "LXVariable", where: Optional[Callable[..., bool]],
                   keys: Optional[Iterable[Any]]) -> Optional[Callable[..., bool]]:
     if keys is None:
@@ -921,6 +953,7 @@ class LXNonLinearExpression:
 
 
 __all__ = [
+    "LXRowKeyFilter",
     "LXLinearExpression",
     "LXQuadraticTerm",
     "LXQuadraticExpression",

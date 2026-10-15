@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from .expressions import (LXKeyFilter, LXLinearExpression, LXNonLinearExpression,
-                          LXQuadraticExpression, call_arity, call_with_row, positional_count,
-                          term_parts)
+                          LXQuadraticExpression, LXRowKeyFilter, call_arity, call_with_row,
+                          positional_count, term_parts)
 
 if TYPE_CHECKING:
     from .model import LXModel
@@ -133,25 +133,35 @@ class LXInstanceCache:
             self._instances[slot] = found
         return found
 
-    def candidates(self, var: "LXVariable", where: Any, row: Any = None) -> Tuple[List[Any], Any]:
-        """Instances a term has to examine, in instance order.
-
-        ``row`` narrows a same-type constraint row to its own instance; the
-        builder passes it only for single-argument terms (spec §3 rule 3).
-        For an LXKeyFilter only the keyed instances are returned, with a filter
-        that accepts everything."""
-        instances = self.instances(var)
-        if row is not None and row in instances:
-            return [row], where
-        if not isinstance(where, LXKeyFilter):
-            return instances, where
+    def _key_positions(self, var: "LXVariable") -> Dict[Any, List[int]]:
         slot = id(var)
         positions = self._positions.get(slot)
         if positions is None:
             positions = {}
-            for i, instance in enumerate(instances):
+            for i, instance in enumerate(self.instances(var)):
                 positions.setdefault(var.index_key(instance), []).append(i)
             self._positions[slot] = positions
+        return positions
+
+    def candidates(self, var: "LXVariable", where: Any, row: Any = None) -> Tuple[List[Any], Any]:
+        """Instances a term has to examine, in instance order.
+
+        ``row`` narrows a same-type constraint row to its own instance; the
+        builder passes it only for single-argument terms (spec §3 rule 3) and
+        for an LXRowKeyFilter, which keeps only the instance keyed by the row.
+        For an LXKeyFilter only the keyed instances are returned, with a filter
+        that accepts everything."""
+        instances = self.instances(var)
+        if isinstance(where, LXRowKeyFilter):
+            if row is None:
+                return instances, where
+            return ([instances[i] for i in self._key_positions(var).get(where.row_key(row), ())],
+                    _accept_all)
+        if row is not None and row in instances:
+            return [row], where
+        if not isinstance(where, LXKeyFilter):
+            return instances, where
+        positions = self._key_positions(var)
         hits = sorted(i for key in where.keys for i in positions.get(key, ()))
         return [instances[i] for i in hits], _accept_all
 
@@ -319,7 +329,8 @@ class LXCanonicalBuilder:
                 if not row_aware and self._row_outside_family(var, row):
                     self._missing_rows.setdefault((where, var.name), None)
                     continue
-                instances, keep = self.cache.candidates(var, keep, None if row_aware else row)
+                instances, keep = self.cache.candidates(
+                    var, keep, row if (not row_aware or isinstance(keep, LXRowKeyFilter)) else None)
                 for instance in instances:
                     if not call_with_row(keep, instance, row):
                         continue

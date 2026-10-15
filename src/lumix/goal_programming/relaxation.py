@@ -1,10 +1,10 @@
 """Constraint relaxation for goal programming."""
 
-from typing import Dict, Generic, List, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Tuple, TypeVar
 
 from lumix.core.constraints import LXConstraint
 from lumix.core.enums import LXConstraintSense
-from lumix.core.expressions import LXLinearExpression
+from lumix.core.expressions import LXLinearExpression, LXNonLinearExpression, LXRowKeyFilter
 from lumix.core.variables import LXVariable
 
 from .goal import LXGoal, LXGoalMetadata, get_deviation_var_name
@@ -18,7 +18,8 @@ class RelaxedConstraint(Generic[TModel]):
 
     Contains the relaxed constraint (now an equality with deviation variables),
     the deviation variables themselves, and the goal instances that serve as
-    the data source for deviation variables.
+    the data source for deviation variables. In an indexed goal every row has
+    its own pair of deviations (``<name>_<key>``).
     """
 
     def __init__(
@@ -206,22 +207,24 @@ def relax_constraint(
             .from_data(goal_instances)
         )
 
-    # Create new expression: original_expr + neg_dev - pos_dev
-    # Start with a copy of the original expression's terms
-    relaxed_expr = LXLinearExpression[TModel]()
-    relaxed_expr.terms = constraint.lhs.terms.copy()
-    relaxed_expr._multi_terms = constraint.lhs._multi_terms.copy()
-    relaxed_expr.constant = constraint.lhs.constant
-
-    # Add deviation terms
-    if is_indexed:
-        # For indexed constraints, add terms with coefficient 1.0 for each instance
-        relaxed_expr.add_term(neg_deviation, coeff=1.0)  # + neg_dev
-        relaxed_expr.add_term(pos_deviation, coeff=-1.0)  # - pos_dev
+    # Relaxed expression: original_expr + neg_dev - pos_dev
+    lhs = constraint.lhs
+    if isinstance(lhs, LXNonLinearExpression):
+        relaxed_expr = LXNonLinearExpression(lhs.linear_terms.copy(), list(lhs.nonlinear_terms),
+                                             lhs.constant)
+        linear = relaxed_expr.linear_terms
+    elif isinstance(lhs, LXLinearExpression):
+        relaxed_expr = linear = lhs.copy()
     else:
-        # For non-indexed constraints, same approach
-        relaxed_expr.add_term(neg_deviation, coeff=1.0)
-        relaxed_expr.add_term(pos_deviation, coeff=-1.0)
+        raise ValueError(
+            f"Goal '{constraint.name}' has a {type(lhs).__name__} expression; goals take "
+            "LXLinearExpression or LXNonLinearExpression")
+    if is_indexed:
+        _add_own_deviations(linear, constraint.name, constraint.index_func,
+                            neg_deviation, pos_deviation)
+    else:
+        linear.add_term(neg_deviation, coeff=1.0)    # + neg_dev
+        linear.add_term(pos_deviation, coeff=-1.0)   # - pos_dev
 
     # Create relaxed constraint (always equality)
     relaxed_constraint = LXConstraint[TModel](constraint.name)
@@ -241,6 +244,21 @@ def relax_constraint(
         goal_metadata=goal_metadata,
         goal_instances=goal_instances,
     )
+
+
+def _add_own_deviations(expr: LXLinearExpression, name: str, index_func: Callable[[Any], Any],
+                        neg: LXVariable, pos: LXVariable) -> None:
+    """Row ``r`` of an indexed goal gets only the deviations of its own goal ``name_<key>``
+    (A22). The filter lets the canonical builder look that goal up by key; the
+    two-argument coefficient gives the same rows to readers that call the filter
+    with the instance only."""
+    def row_key(row: Any) -> str:
+        return f"{name}_{index_func(row)}"
+
+    for var, sign in ((neg, 1.0), (pos, -1.0)):
+        def coeff(g: LXGoal, row: Any, sign: float = sign) -> float:
+            return sign if g.id == row_key(row) else 0.0
+        expr.add_term(var, coeff=coeff, where=LXRowKeyFilter(var, row_key))
 
 
 def relax_constraints(
