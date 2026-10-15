@@ -6,22 +6,54 @@ variable with linear constraints. The user's model is not changed; every call of
 :meth:`LXLinearizer.linearize_model` starts afresh."""
 from __future__ import annotations
 
+import copy
+import math
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..core.canonical import LXCanonicalBuilder, LXCanonicalNonlinear
 from ..core.constraints import LXConstraint
-from ..core.enums import LXConstraintSense, LXObjectiveSense
+from ..core.enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from ..core.expressions import LXLinearExpression, LXNonLinearExpression, LXQuadraticExpression
 from ..core.model import LXModel
 from ..nonlinear.terms import LXIndicatorTerm
 from ..solvers.capabilities import LXSolverCapability
 from .config import LXLinearizerConfig
-from .refs import LXAuxFactory, LXVarRef
+from .refs import LXAuxFactory, LXVarRef, scaled_bounds
 from .techniques.absminmax import absolute, minmax
 from .techniques.bilinear import product
 from .techniques.piecewise import piecewise
 
 _TAG = {"abs": "abs", "min": "min", "max": "max", "product": "prod", "piecewise": "pwl"}
+
+
+_MISSING = object()
+
+
+def _term_variables(term: Any) -> List[Any]:
+    if hasattr(term, "vars"):
+        return list(term.vars)
+    return [getattr(term, n) for n in ("var", "var1", "var2") if hasattr(term, n)]
+
+
+class _InstanceKeys:
+    """Index key of a constraint row when the row is an instance of a variable family."""
+
+    def __init__(self, instances: List[Any], var: Any) -> None:
+        self._var = var
+        self._instances = instances
+        try:
+            self._table = {inst: var.index_key(inst) for inst in instances}
+        except TypeError:                         # unhashable data instances
+            self._table = None
+
+    def key_of(self, row: Any) -> Any:
+        if self._table is not None:
+            try:
+                return self._table.get(row, _MISSING)
+            except TypeError:
+                return _MISSING
+        return self._var.index_key(row) if row in self._instances else _MISSING
 
 
 class LXLinearizer:
@@ -117,8 +149,55 @@ class LXLinearizer:
             expr = out
         linearized.maximize(expr) if maximize else linearized.minimize(expr)
 
+    _SIGN = {LXConstraintSense.LE: 1.0, LXConstraintSense.GE: -1.0, LXConstraintSense.EQ: 0.0}
+
     def _constraint(self, builder: LXCanonicalBuilder, constraint: LXConstraint) -> LXConstraint:
-        return constraint      # nonlinear terms in constraints: B7 (W4 Görev 6)
+        lhs = constraint.lhs
+        if not (isinstance(lhs, LXNonLinearExpression) and lhs.nonlinear_terms):
+            return constraint
+        where = f"constraint '{constraint.name}'"
+        self._indicators(builder, lhs)
+        outputs = self._linearize_items(builder.nonlinear(lhs, where),
+                                        self._SIGN[constraint.sense])
+        new_lhs = lhs.linear_terms.copy() + lhs.constant
+        if constraint.index_func is None:
+            for item, z in outputs:
+                z.add_to(new_lhs, item.coeff)
+        else:
+            self._row_terms(builder, new_lhs, lhs, outputs)
+        result = copy.copy(constraint)
+        result.lhs = new_lhs
+        return result
+
+    def _row_terms(self, builder, new_lhs, lhs, outputs) -> None:
+        """Per-row contributions in an indexed constraint: a row that is an instance
+        of the term's family takes that instance's item only (spec §3 rule 3)."""
+        owners: Dict[int, Any] = {}
+        for index, term in enumerate(lhs.nonlinear_terms):
+            owners[index] = next((v for v in _term_variables(term)
+                                  if len(builder.families.get(v.name, {})) > 1), None)
+        lookups = {i: _InstanceKeys(builder.cache.instances(v), v) if v is not None else None
+                   for i, v in owners.items()}
+
+        def selected(term_index, item_key, row):
+            keys = lookups[term_index]
+            if keys is None:
+                return True
+            row_key = keys.key_of(row)
+            return row_key is _MISSING or row_key == item_key
+
+        groups: Dict[int, Tuple[Any, Dict[Any, List[Tuple[Any, float, int]]]]] = {}
+        for item, z in outputs:
+            by_key = groups.setdefault(id(z.var), (z.var, {}))[1]
+            by_key.setdefault(z.key, []).append((item.key, item.coeff, item.term))
+        for var, by_key in groups.values():
+            def coeff(inst, row, var=var, by_key=by_key):
+                return sum(c for k, c, t in by_key.get(var.index_key(inst), ())
+                           if selected(t, k, row))
+
+            def keep(inst, row, var=var, by_key=by_key):
+                return any(selected(t, k, row) for k, _, t in by_key.get(var.index_key(inst), ()))
+            new_lhs.add_term(var, coeff, where=keep)
 
     def _indicators(self, builder: LXCanonicalBuilder, expr: LXNonLinearExpression) -> None:
         for term in expr.nonlinear_terms:
@@ -126,125 +205,37 @@ class LXLinearizer:
                 self._indicator(builder, term)
 
     def _indicator(self, builder: LXCanonicalBuilder, term: LXIndicatorTerm) -> None:
-        """
-        Linearize indicator constraint: if b == condition then (expr sense rhs)
-
-        Uses Big-M method to convert conditional constraint to linear form:
-        - If condition=True and sense='<=':  expr - rhs <= M*(1-b)
-        - If condition=True and sense='>=':  rhs - expr <= M*(1-b)
-        - If condition=False and sense='<=': expr - rhs <= M*b
-        - If condition=False and sense='>=': rhs - expr <= M*b
-        - For '==': use both <= and >= constraints
-
-        Args:
-            term: Indicator term with binary variable, condition, expression, sense, and RHS
-
-        Example:
-            If is_open == 1 then flow >= 10:
-            - Linearizes to: 10 - flow <= M*(1 - is_open)
-            - When is_open=1: 10 - flow <= 0 → flow >= 10 (enforced)
-            - When is_open=0: 10 - flow <= M (relaxed)
-        """
+        """``b == condition`` ⇒ ``expr sense rhs`` (A19). With ``a = 1 - b`` (condition
+        True) or ``a = b`` (False): ``expr <= rhs + M a`` / ``expr >= rhs - M a``,
+        M from the bounds of ``expr``."""
         self._counts["indicator"] += 1
-        binary_var = term.binary_var
-        condition = term.condition
-        expr = term.linear_expr
-        sense = term.sense
-        rhs = term.rhs
-        M = self.config.big_m_value
-
-        # Create constraint name
-        constraint_prefix = (
-            f"indicator_{binary_var.name}_{int(condition)}_{sense.replace('=', 'eq')}"
-        )
-
-        if sense == "<=":
-            # expr <= rhs when condition matches
-            # Linearize: expr - rhs <= M * (1-b) if condition=True
-            #            expr - rhs <= M * b     if condition=False
-            if condition:
-                # expr <= rhs + M*(1-b)
-                # Rewrite as: expr - M*b <= rhs - M
-                indicator_expr = expr.copy()
-                indicator_expr = indicator_expr.add_term(binary_var, -M)
-
-                self._aux.constraints.append(
-                    LXConstraint(f"{constraint_prefix}_le")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(rhs - M)
-                )
-            else:
-                # expr <= rhs + M*b
-                # Rewrite as: expr - M*b <= rhs
-                indicator_expr = expr.copy()
-                indicator_expr = indicator_expr.add_term(binary_var, -M)
-
-                self._aux.constraints.append(
-                    LXConstraint(f"{constraint_prefix}_le")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(rhs)
-                )
-
-        elif sense == ">=":
-            # expr >= rhs when condition matches
-            # Linearize: rhs - expr <= M * (1-b) if condition=True
-            #            rhs - expr <= M * b     if condition=False
-            if condition:
-                # expr >= rhs - M*(1-b)
-                # Rewrite as: rhs - expr <= M*(1-b)
-                # Rewrite as: -expr + M*b <= M - rhs
-                indicator_expr = LXLinearExpression()
-                # Negate all terms in expr
-                for var, coeff in expr.terms.items():
-                    indicator_expr = indicator_expr.add_term(var, -coeff)
-                indicator_expr = indicator_expr.add_term(binary_var, M)
-
-                self._aux.constraints.append(
-                    LXConstraint(f"{constraint_prefix}_ge")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(M - rhs)
-                )
-            else:
-                # expr >= rhs - M*b
-                # Rewrite as: rhs - expr <= M*b
-                # Rewrite as: -expr - M*b <= -rhs
-                indicator_expr = LXLinearExpression()
-                # Negate all terms in expr
-                for var, coeff in expr.terms.items():
-                    indicator_expr = indicator_expr.add_term(var, -coeff)
-                indicator_expr = indicator_expr.add_term(binary_var, -M)
-
-                self._aux.constraints.append(
-                    LXConstraint(f"{constraint_prefix}_ge")
-                    .expression(indicator_expr)
-                    .le()
-                    .rhs(-rhs)
-                )
-
-        elif sense == "==":
-            # expr == rhs when condition matches
-            # Need both <= and >= constraints
-            # Create two indicator terms and recursively linearize
-            le_term = LXIndicatorTerm(
-                binary_var=binary_var,
-                condition=condition,
-                linear_expr=expr,
-                sense="<=",
-                rhs=rhs,
-            )
-            ge_term = LXIndicatorTerm(
-                binary_var=binary_var,
-                condition=condition,
-                linear_expr=expr,
-                sense=">=",
-                rhs=rhs,
-            )
-
-            self._indicator(builder, le_term)
-            self._indicator(builder, ge_term)
+        b = LXVarRef.single(term.binary_var, "An indicator's binary_var")
+        if b.var_type != LXVarType.BINARY:
+            raise ValueError(f"An indicator needs a binary variable; '{b.var.name}' is "
+                             f"{b.var_type.value}")
+        coeffs, constant = builder.linear_row(term.linear_expr, None, where="an indicator")
+        spans = [scaled_bounds(c, self._refs[p]) for p, c in coeffs.items()]
+        low = constant + sum(s[0] for s in spans)
+        high = constant + sum(s[1] for s in spans)
+        tag = self._aux.tag("ind", [b.var.name])
+        terms = [(self._refs[p], c) for p, c in coeffs.items()]
+        rhs = float(term.rhs) - constant
+        for sense in {"<=": ("<=",), ">=": (">=",), "==": ("<=", ">=")}[term.sense]:
+            m = (high if sense == "<=" else -low) - (term.rhs if sense == "<=" else -term.rhs)
+            if not math.isfinite(m):
+                warnings.warn(
+                    f"The indicator on '{b.label}' has an unbounded expression; it uses "
+                    f"big_m_value={self.config.big_m_value} (LXLinearizerConfig)",
+                    UserWarning, stacklevel=3)
+                m = self.config.big_m_value
+            if m <= 0:
+                continue                         # holds whatever b is
+            if sense == "<=":                    # expr - rhs <= M a
+                coef, bound = (m, rhs + m) if term.condition else (-m, rhs)
+            else:                                # rhs - expr <= M a
+                coef, bound = (-m, rhs - m) if term.condition else (m, rhs)
+            self._aux.row(tag, "le" if sense == "<=" else "ge", None,
+                          terms + [(b, coef)], sense, bound)
 
     def _linearize_items(self, items: List[LXCanonicalNonlinear], sign: float
                          ) -> List[Tuple[LXCanonicalNonlinear, LXVarRef]]:

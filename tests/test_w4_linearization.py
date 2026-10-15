@@ -393,3 +393,116 @@ def test_quadratic_stays_native_on_qp_solvers():
         e = LXNonLinearExpression().add_abs(y).add_linear(lin((y, 1.0)))
         s = LXOptimizer().use_solver(solver).enable_linearization().solve(model([y], [], "max", e))
         assert s.objective_value == pytest.approx(4)
+
+
+# --- Görev 6: indicators (A19) and nonlinear terms in constraints (B7) -------------
+def _indicator_brute(cond, sense, rhs, objsense, w, const):
+    best = None
+    for bv in (0, 1):
+        for xv in [i / 2 for i in range(-20, 21)]:
+            active = (bv == 1) == cond
+            lhs = xv + const
+            ok = (not active) or (lhs <= rhs + 1e-9 if sense == "<=" else
+                                  lhs >= rhs - 1e-9 if sense == ">=" else abs(lhs - rhs) < 1e-9)
+            if ok:
+                o = xv + w * bv
+                if best is None or (o > best if objsense == "max" else o < best):
+                    best = o
+    return best
+
+
+@pytest.mark.parametrize("cond", [True, False])
+@pytest.mark.parametrize("sense", ["<=", ">=", "=="])
+@pytest.mark.parametrize("objsense,w", [("max", 1.0), ("min", -1.0)])
+@pytest.mark.parametrize("const", [0.0, 3.0])
+def test_a19_indicator_matches_brute_force(cond, sense, objsense, w, const):
+    from lumix.nonlinear.terms import LXIndicatorTerm
+    x, b = fam("x", ["k"], lower=-10, upper=10), fam("b", ["k"], "binary")
+    e = LXNonLinearExpression().add_nonlinear_term(
+        LXIndicatorTerm(b, cond, lin((x, 1), const=const), sense, 2.0))
+    e.add_linear(lin((x, 1), (b, w)))
+    _, s = solve_lin(model([x, b], [], objsense, e))
+    assert s.objective_value == pytest.approx(_indicator_brute(cond, sense, 2.0, objsense, w, const))
+
+
+def test_a19_two_indicators_on_one_binary():
+    x, y, b = (fam("x", ["k"], lower=-10, upper=10), fam("y", ["k"], lower=-10, upper=10),
+               fam("b", ["k"], "binary"))
+    e = (LXNonLinearExpression().add_indicator(b, True, lin((x, 1)))
+         .add_indicator(b, True, lin((y, 1))))
+    e.add_linear(lin((x, 1), (y, 1), (b, 5)))
+    _, s = solve_lin(model([x, y, b], [], "max", e))
+    assert s.objective_value == pytest.approx(20)
+
+
+def test_a19_indicator_needs_a_single_binary():
+    from lumix.nonlinear.terms import LXIndicatorTerm
+    x, b = fam("x", ["k"], lower=0, upper=4), fam("b", ["p", "q"], "binary")
+    e = LXNonLinearExpression().add_nonlinear_term(LXIndicatorTerm(b, True, lin((x, 1)), "<=", 2))
+    with pytest.raises(ValueError, match="single variable"):
+        solve_lin(model([x, b], [], "max", e.add_linear(lin((x, 1)))))
+
+
+@pytest.mark.parametrize("path", ["optimizer", "linearizer"])
+def test_b7_abs_in_a_constraint(path):
+    x = fam("x", ["k"], lower=-10, upper=10)
+    m = model([x], [LXConstraint("absle").expression(LXNonLinearExpression().add_abs(x)).le()
+                    .rhs(2)], "max", lin((x, 1)))
+    assert LXLinearizer(m, ORTOOLS_CAPABILITIES).needs_linearization()
+    s = (LXOptimizer().use_solver("ortools").enable_linearization().solve(m)
+         if path == "optimizer" else solve_lin(m)[1])
+    assert s.objective_value == pytest.approx(2)
+
+
+@pytest.mark.parametrize("sense,rhs,expected", [(">=", 2, 2), ("==", 3, -3)])
+def test_b7_nonconvex_constraint_uses_are_exact(sense, rhs, expected):
+    x = fam("x", ["k"], lower=-1 if sense == ">=" else -5, upper=5)
+    c = cons("absc", LXNonLinearExpression().add_abs(x), sense, rhs)
+    _, s = solve_lin(model([x], [c], "min", lin((x, 1))))
+    assert s.objective_value == pytest.approx(expected)
+
+
+def test_b7_integer_square_in_a_constraint():
+    x = fam("x", ["k"], "integer", 0, 10)
+    c = cons("sq", LXNonLinearExpression().add_product(x, x), "<=", 4)
+    _, s = solve_lin(model([x], [c], "max", lin((x, 1))))
+    assert s.objective_value == pytest.approx(2)
+
+
+@dataclass(frozen=True)
+class P:
+    id: str
+    cap: float
+
+
+def test_b7_indexed_constraint_narrows_with_broadcast():
+    ps = [P("a", 3.0), P("b", 5.0)]
+    x = LXVariable[P, float]("x").continuous().bounds(lower=0, upper=10).indexed_by(
+        lambda p: p.id).from_data(ps)
+    s_ = fam("s", ["only"], lower=0, upper=10)
+    row = (LXConstraint[P]("cap").expression(LXNonLinearExpression().add_max(x, s_)).le()
+           .rhs(lambda p: p.cap).indexed_by(lambda p: p.id).from_data(ps))
+    m = model([x, s_], [row], "max", lin((x, 1), (s_, 1)))
+    _, s = solve_lin(m)
+    assert s.objective_value == pytest.approx(3 + 5 + 3)      # s <= min(cap) = 3
+
+
+def test_b7_row_of_other_data_sees_every_instance():
+    ps = [P("a", 0.0), P("b", 0.0)]
+    x = LXVariable[P, float]("x").continuous().bounds(lower=-4, upper=4).indexed_by(
+        lambda p: p.id).from_data(ps)
+    budgets = [("r", 5.0)]
+    row = (LXConstraint("budget").expression(LXNonLinearExpression().add_abs(x)).le()
+           .rhs(lambda r: r[1]).indexed_by(lambda r: r[0]).from_data(budgets))
+    _, s = solve_lin(model([x], [row], "max", lin((x, 1))))
+    assert s.objective_value == pytest.approx(5)              # |x_a| + |x_b| <= 5
+
+
+def test_b7_same_term_in_objective_and_constraint():
+    x = fam("x", ["k"], lower=-5, upper=5)
+    e = LXNonLinearExpression().add_abs(x)
+    c = LXConstraint("c").expression(e).ge().rhs(2)
+    lm, s = solve_lin(model([x], [c], "min", e))
+    assert s.objective_value == pytest.approx(2)
+    names = [v.name for v in lm.variables]
+    assert len(set(names)) == len(names)
