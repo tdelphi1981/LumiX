@@ -506,3 +506,61 @@ def test_b7_same_term_in_objective_and_constraint():
     assert s.objective_value == pytest.approx(2)
     names = [v.name for v in lm.variables]
     assert len(set(names)) == len(names)
+
+
+# --- Görev 7: W3 carry-over (expression arithmetic, multi-index callables) ----------
+def test_quadratic_arithmetic():
+    x = fam("x", ["k"], lower=0, upper=4)
+    q = LXQuadraticExpression().add_squared(x, 2.0) + lin((x, 1.0), const=3.0)
+    l = lin((x, 5.0))
+    m = LXModel("m").add_variable(x)
+    def parts(e):
+        c = m.minimize(e).to_canonical()
+        return c.objective, c.objective_quadratic, c.objective_constant
+    assert parts(l - q) == ({0: 4.0}, {(0, 0): -2.0}, -3.0)
+    assert parts(-q) == ({0: -1.0}, {(0, 0): -2.0}, -3.0)
+    assert parts(q * 2) == parts(2 * q) == ({0: 2.0}, {(0, 0): 4.0}, 6.0)
+    assert parts(q - 3) == ({0: 1.0}, {(0, 0): 2.0}, 0.0)
+    assert parts(q - l) == ({0: -4.0}, {(0, 0): 2.0}, 3.0)
+
+
+from lumix import LXIndexDimension  # noqa: E402
+
+
+@dataclass(frozen=True)
+class D:
+    id: int
+    rate: float
+
+
+@dataclass(frozen=True)
+class T:
+    id: int
+    hours: float
+
+
+DS, TS = [D(1, 2.0), D(2, 3.0)], [T(1, 1.0), T(2, 10.0)]
+
+
+def _product_var(name):
+    return LXVariable(name).continuous().bounds(lower=0, upper=1).indexed_by_product(
+        LXIndexDimension(D, lambda d: d.id).from_data(DS),
+        LXIndexDimension(T, lambda t: t.id).from_data(TS))
+
+
+def test_two_argument_cost_on_a_product_family():
+    a = _product_var("a").cost(lambda d, t: d.rate * t.hours)
+    b = _product_var("b").cost_multi(lambda d, t: d.rate * t.hours)
+    ca = LXModel("m").add_variable(a).minimize().to_canonical().objective
+    cb = LXModel("m").add_variable(b).minimize().to_canonical().objective
+    assert ca == cb == {0: 2.0, 1: 20.0, 2: 3.0, 3: 30.0}
+
+
+def test_quadratic_callable_takes_parts_on_product_families():
+    w = _product_var("w")
+    spread = LXQuadraticExpression().add_squared(w, coeff=lambda d, t: d.rate)
+    whole = LXQuadraticExpression().add_squared(w, coeff=lambda pair: pair[0].rate)
+    m = LXModel("m").add_variable(w)
+    assert (m.minimize(spread).to_canonical().objective_quadratic
+            == m.minimize(whole).to_canonical().objective_quadratic
+            == {(0, 0): 2.0, (1, 1): 2.0, (2, 2): 3.0, (3, 3): 3.0})

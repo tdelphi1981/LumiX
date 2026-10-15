@@ -496,8 +496,14 @@ class LXVariable(Generic[TModel, TValue]):
         Returns:
             Self for chaining
 
+        On an ``indexed_by_product`` / join family the function may take one
+        argument per part, like :meth:`cost_multi`.
+
         Example:
             .cost(lambda product: product.unit_cost)
+
+        .. versionchanged:: 0.3.0
+           Accepts one argument per part on multi-index families.
         """
         self.cost_func = func
         return self
@@ -508,10 +514,12 @@ class LXVariable(Generic[TModel, TValue]):
 
         .. versionadded:: 0.3.0
         """
-        from .expressions import LXLinearExpression
+        from .expressions import LXLinearExpression, call_arity
         if self._multi_cost_func is not None:
             return LXLinearExpression().add_multi_term(self, coeff=self._multi_cost_func)
         if self.cost_func is not None:
+            if self.is_multi_indexed and call_arity(self.cost_func) > 1:
+                return LXLinearExpression().add_multi_term(self, coeff=self.cost_func)
             return LXLinearExpression().add_term(self, self.cost_func)
         return None
 

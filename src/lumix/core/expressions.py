@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
+import math
 import numbers
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Optional, Sequence, Tuple, TypeVar
@@ -110,6 +112,31 @@ def _call_coeff(coeff_func: Callable[..., float], args: tuple) -> float:
     """Call a coefficient with (instance, constraint_instance) when it accepts two
     arguments, else with the instance only."""
     return call_with_row(coeff_func, args[0], args[1] if len(args) > 1 else None)
+
+
+def positional_count(func: Callable[..., Any]) -> float:
+    """Number of required positional parameters (``math.inf`` with ``*args``)."""
+    try:
+        params = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return 1
+    count = 0
+    for p in params:
+        if p.kind == p.VAR_POSITIONAL:
+            return math.inf
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty:
+            count += 1
+    return count
+
+
+def _scale_quadratic(coeff: Any, scalar: float) -> Any:
+    if not callable(coeff):
+        return float(coeff) * scalar
+
+    @functools.wraps(coeff)
+    def scaled(*args: Any) -> float:
+        return scalar * coeff(*args)
+    return scaled
 
 
 def term_parts(coeff: Callable[..., Any], where: Callable[..., Any]) -> List[Tuple[Any, Any]]:
@@ -394,6 +421,8 @@ class LXLinearExpression(Generic[TModel]):
 
     def __sub__(self, other: Any) -> Any:
         """``expr1 - expr2`` or ``expr - constant`` (a new expression)."""
+        if isinstance(other, LXQuadraticExpression):
+            return (-other) + self
         if isinstance(other, numbers.Real):
             return self + (-float(other))
         if isinstance(other, LXLinearExpression):
@@ -611,6 +640,28 @@ class LXQuadraticExpression:
         return result
 
     __radd__ = __add__
+
+    def __mul__(self, scalar: Any) -> "LXQuadraticExpression":
+        """``quad * scalar`` or ``scalar * quad`` (a new expression)."""
+        if not isinstance(scalar, numbers.Real):
+            return NotImplemented
+        s = float(scalar)
+        terms = [LXQuadraticTerm(t.var1, t.var2, _scale_quadratic(t.coefficient, s), t.diagonal)
+                 for t in self.quadratic_terms]
+        return LXQuadraticExpression(self.linear_terms * s, terms, self.constant * s)
+
+    __rmul__ = __mul__
+
+    def __neg__(self) -> "LXQuadraticExpression":
+        return self * -1
+
+    def __sub__(self, other: Any) -> Any:
+        if isinstance(other, (numbers.Real, LXLinearExpression, LXQuadraticExpression)):
+            return self + (-other)
+        return NotImplemented
+
+    def __rsub__(self, other: Any) -> Any:
+        return (-self) + other
 
 
 @dataclass

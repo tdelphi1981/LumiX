@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from .enums import LXConstraintSense, LXObjectiveSense, LXVarType
 from .expressions import (LXKeyFilter, LXLinearExpression, LXNonLinearExpression,
-                          LXQuadraticExpression, call_arity, call_with_row, term_parts)
+                          LXQuadraticExpression, call_arity, call_with_row, positional_count,
+                          term_parts)
 
 if TYPE_CHECKING:
     from .model import LXModel
@@ -434,19 +435,33 @@ class LXCanonicalBuilder:
         for term in expr.quadratic_terms:
             p1 = self._positions(term.var1, "the objective")
             p2 = self._positions(term.var2, "the objective")
-            c = term.coefficient
             first = self.cache.instances(term.var1)
             if term.diagonal:
-                pairs = [(i, i, c(i) if callable(c) else c) for i in first]
+                pairs = [(i, i, self._quad_coeff(term, i, None)) for i in first]
             else:
                 second = self.cache.instances(term.var2)
-                pairs = [(i, j, c(i, j) if callable(c) else c) for i in first for j in second]
+                pairs = [(i, j, self._quad_coeff(term, i, j)) for i in first for j in second]
             for i, j, value in pairs:
                 a = p1[term.var1.index_key(i)]
                 b = p2[term.var2.index_key(j)]
                 key = (min(a, b), max(a, b))
                 acc[key] = acc.get(key, 0.0) + float(value)
         return {k: v for k, v in acc.items() if v}
+
+    @staticmethod
+    def _quad_coeff(term: Any, i: Any, j: Any) -> Any:
+        """A callable coefficient gets the instances, or their parts on multi-index
+        families when it takes one argument per part (like ``add_multi_term``)."""
+        c = term.coefficient
+        if not callable(c):
+            return c
+        sides = [(term.var1, i)] if term.diagonal else [(term.var1, i), (term.var2, j)]
+        whole = [inst for _, inst in sides]
+        parts = [p for var, inst in sides
+                 for p in (inst if var.is_multi_indexed else (inst,))]
+        if len(parts) != len(whole) and positional_count(c) == len(parts):
+            return c(*parts)
+        return c(*whole)
 
     def quadratic_items(self, expr: LXQuadraticExpression) -> List[LXCanonicalNonlinear]:
         """The objective products of ``expr`` as product items (one per pair of
