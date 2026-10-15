@@ -290,7 +290,17 @@ class LXModel(Generic[TModel]):
 
         Returns:
             Self for chaining
+
+        Raises:
+            ValueError: If the model already has a constraint with this name.
+
+        .. versionchanged:: 0.3.0
+           A second constraint with the same name raises ``ValueError``; it used to be
+           accepted and then hid the first one from duals, activity and analysis.
         """
+        if any(c.name == constraint.name for c in self.constraints):
+            raise ValueError(f"Model '{self.name}' already has a constraint named "
+                             f"'{constraint.name}'")
         self.constraints.append(constraint)
         return self
 
@@ -304,7 +314,8 @@ class LXModel(Generic[TModel]):
         Returns:
             Self for chaining
         """
-        self.constraints.extend(constraints)
+        for constraint in constraints:
+            self.add_constraint(constraint)
         return self
 
     def to_canonical(self) -> "LXCanonicalModel":
@@ -527,7 +538,8 @@ class LXModel(Generic[TModel]):
             expr, sense = final
             self.minimize(expr) if sense == LXObjectiveSense.MINIMIZE else self.maximize(expr)
         else:
-            self.objective_expr = None
+            self.objective_expr = None      # the stages minimize the deviations
+            self.objective_sense = LXObjectiveSense.MINIMIZE
         self._goal_prepared_mode = goal_mode_value(self.goal_mode)
         self._goal_programming_prepared = True
         return self
@@ -558,6 +570,8 @@ class LXModel(Generic[TModel]):
         """
         if not self._goal_programming_prepared or not self._relaxed_constraints:
             return solution
+        if not solution.variables:
+            return solution     # no solution (infeasible, unbounded, stopped): no deviations
 
         # Import here to avoid circular dependency
         from ..solution.solution import LXSolution

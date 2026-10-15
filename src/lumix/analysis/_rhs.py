@@ -17,12 +17,17 @@ def set_rhs(constraint: Any, value: Union[float, Callable[[Any], float]]) -> Non
         constraint.rhs_value = float(value)
 
 
-def shift_rhs(constraint: Any, *, add: float = 0.0, multiply: float = 1.0) -> None:
-    """``rhs := rhs * multiply + add`` for a scalar RHS, or row by row for an rhs_func."""
+def shift_rhs(constraint: Any, *, add: float = 0.0, multiply: float = 1.0,
+              percent: float = 0.0) -> None:
+    """``rhs := rhs * multiply + add + percent * |rhs|`` for a scalar RHS, or row by row
+    for an rhs_func. ``percent`` moves the RHS up by a share of its size, also when the
+    RHS is negative."""
     if constraint.rhs_value is not None:
-        constraint.rhs_value = constraint.rhs_value * multiply + add
+        r = constraint.rhs_value
+        constraint.rhs_value = r * multiply + add + percent * abs(r)
     elif constraint.rhs_func is not None:
         inner = constraint.rhs_func
-        constraint.rhs_func = lambda instance: inner(instance) * multiply + add
+        constraint.rhs_func = lambda instance: (
+            inner(instance) * multiply + add + percent * abs(inner(instance)))
     else:
         raise ValueError(f"Constraint '{constraint.name}' has no RHS value")

@@ -225,3 +225,122 @@ def test_rescan_lp_solvers_cpsat_huge_finite_bound_is_treated_as_open():
     m.add_constraint(_row("c", LXLinearExpression().add_term(x, 1), "le", 10))
     m.maximize(LXLinearExpression().add_term(x, 1))
     assert _solve("cpsat", m).objective_value == 10
+
+
+# ---------------------------------------------------------------- goal programming
+def _goal_model(mode="sequential"):
+    x = LXVariable("x").continuous().bounds(lower=0)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("cap", LXLinearExpression().add_term(x, 1), "le", 8))
+    m.add_constraint(_row("tgt", LXLinearExpression().add_term(x, 1), "ge", 10).as_goal(1))
+    m.set_goal_mode(mode)
+    return m
+
+
+@pytest.mark.parametrize("prepare", [False, True])
+def test_rescan_goals_prepared_model_without_objective_is_minimized(prepare):
+    from lumix import LXObjectiveSense, LXScenario, LXScenarioAnalyzer, LXWhatIfAnalyzer
+    from lumix.analysis._sense import solved_sense
+    m = _goal_model()
+    if prepare:
+        m.prepare_goal_programming()
+    assert solved_sense(m) == LXObjectiveSense.MINIMIZE
+    opt = LXOptimizer().use_solver("ortools")
+    assert dict(LXWhatIfAnalyzer(m, opt).find_bottlenecks())["cap"] == pytest.approx(1.0)
+    a = LXScenarioAnalyzer(m, opt)
+    a.add_scenario(LXScenario("more_cap").modify_constraint_rhs("cap", set_value=10))
+    a.add_scenario(LXScenario("less_cap").modify_constraint_rhs("cap", set_value=5))
+    a.run_all_scenarios()
+    assert a.get_best_scenario() == "more_cap"
+
+
+@pytest.mark.parametrize("mode", ["weighted", "sequential"])
+def test_rescan_goals_infeasible_solve_reports_no_goal_as_satisfied(mode):
+    x = LXVariable("x").continuous().bounds(lower=0, upper=10)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("hard", LXLinearExpression().add_term(x, 1), "ge", 20))
+    m.add_constraint(_row("g", LXLinearExpression().add_term(x, 1), "ge", 5).as_goal(1))
+    m.set_goal_mode(mode)
+    s = _solve("ortools", m)
+    assert s.status == "infeasible"
+    assert s.is_goal_satisfied("g") is not True
+    assert s.get_total_deviation("g") is None
+    assert "Goals Satisfied" not in s.summary()
+
+
+def _nonlinear_goal_model():
+    from lumix import LXNonLinearExpression
+    x = LXVariable("x").integer().bounds(lower=0, upper=10)
+    y = LXVariable("y").integer().bounds(lower=0, upper=10)
+    m = LXModel("orig").add_variables(x, y)
+    m.add_constraint(_row("cap", LXLinearExpression().add_term(x, 1).add_term(y, 1), "le", 10))
+    m.add_constraint(_row("g1", LXLinearExpression().add_term(x, 1), "ge", 8).as_goal(1, 1.0))
+    m.add_constraint(_row("g2", LXLinearExpression().add_term(y, 1), "ge", 6).as_goal(2, 100.0))
+    m.add_constraint(_row("nl", LXNonLinearExpression().add_abs(x), "le", 10))
+    m.set_goal_mode("sequential")
+    return m
+
+
+@pytest.mark.parametrize("prepare", [False, True])
+def test_rescan_linearization_manual_linearize_model_keeps_the_goals(prepare):
+    from lumix.linearization import LXLinearizer, LXLinearizerConfig
+    from lumix.solvers import ORTOOLS_CAPABILITIES
+    m = _nonlinear_goal_model()
+    if prepare:
+        m.prepare_goal_programming()
+    lm = LXLinearizer(m, ORTOOLS_CAPABILITIES, LXLinearizerConfig()).linearize_model()
+    s = _solve("ortools", lm)
+    assert (s.variables["x"], s.variables["y"]) == (8, 2)        # lexicographic
+    assert s.get_total_deviation("g2") == pytest.approx(4)
+
+
+@pytest.mark.parametrize("prepare", [False, True])
+def test_rescan_goals_row_activity_reports_the_goal_row_itself(prepare):
+    from lumix import LXConstraintSense
+    from lumix.solution import row_activity
+    x = LXVariable("x").continuous().bounds(lower=0)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("hard", LXLinearExpression().add_term(x, 1), "le", 3))
+    m.add_constraint(_row("short", LXLinearExpression().add_term(x, 1), "ge", 5).as_goal(1))
+    m.maximize(LXLinearExpression().add_term(x, 1))
+    if prepare:
+        m.prepare_goal_programming()
+    s = _solve("ortools", m)
+    row = row_activity(m, s)["short"]
+    assert (row.lhs, row.rhs, row.sense) == (pytest.approx(3), 5, LXConstraintSense.GE)
+    assert row.slack == pytest.approx(-2) and not row.binding
+
+
+@pytest.mark.parametrize("method, sense, expected", [
+    ("relax_constraint", "ge", -12.0), ("tighten_constraint", "ge", -8.0),
+    ("relax_constraint", "le", -8.0), ("tighten_constraint", "le", -12.0),
+    ("increase_constraint_rhs", "ge", -8.0), ("decrease_constraint_rhs", "ge", -12.0),
+])
+def test_rescan_analysis_percent_change_of_a_negative_rhs_moves_the_right_way(method, sense, expected):
+    from lumix import LXWhatIfAnalyzer
+    x = LXVariable("x").continuous().bounds(lower=-100, upper=100)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("c", LXLinearExpression().add_term(x, 1), sense, -10))
+    (m.minimize if sense == "ge" else m.maximize)(LXLinearExpression().add_term(x, 1))
+    result = getattr(LXWhatIfAnalyzer(m, LXOptimizer().use_solver("ortools")), method)("c", by_percent=0.2)
+    assert result.new_objective == pytest.approx(expected)
+
+
+def test_rescan_analysis_relaxing_a_prepared_ge_goal_lowers_its_target():
+    from lumix import LXWhatIfAnalyzer
+    m = _goal_model("weighted").prepare_goal_programming()
+    w = LXWhatIfAnalyzer(m, LXOptimizer().use_solver("ortools"))
+    relaxed = w.relax_constraint("tgt", by=1)
+    tightened = w.tighten_constraint("tgt", by=1)
+    assert relaxed.new_solution.get_total_deviation("tgt") == pytest.approx(1.0)
+    assert tightened.new_solution.get_total_deviation("tgt") == pytest.approx(3.0)
+
+
+def test_rescan_goals_duplicate_constraint_names_raise():
+    x = _var("x")
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(_row("lim", LXLinearExpression().add_term(x, 1), "le", 2))
+    with pytest.raises(ValueError, match="already has a constraint named 'lim'"):
+        m.add_constraint(_row("lim", LXLinearExpression().add_term(x, 1), "le", 5))
+    with pytest.raises(ValueError, match="already has a constraint named 'lim'"):
+        m.add_constraints(_row("lim", LXLinearExpression().add_term(x, 1), "le", 5))

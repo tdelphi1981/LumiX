@@ -124,6 +124,13 @@ class LXLinearizer:
         for constraint in self._aux.constraints:
             linearized.add_constraint(constraint)
         linearized.relaxation_terms = list(self.relaxation_terms)
+        # goal programming settings and the state of prepare_goal_programming()
+        linearized.goal_mode = self.model.goal_mode
+        if self.model._goal_programming_prepared:
+            linearized._goal_programming_prepared = True
+            linearized._relaxed_constraints = list(self.model._relaxed_constraints)
+            linearized._goal_prepared_mode = getattr(self.model, "_goal_prepared_mode", None)
+            linearized.objective_sense = self.model.objective_sense
         self.auxiliary_vars = list(self._aux.variables)
         self.auxiliary_constraints = list(self._aux.constraints)
         return linearized

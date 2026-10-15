@@ -267,7 +267,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         # For LE constraints, relaxing means increasing RHS
         # For GE constraints, relaxing means decreasing RHS
         # For EQ constraints, we increase (arbitrary choice)
-        if constraint.sense == LXConstraintSense.GE:
+        if self._sense_of(constraint) == LXConstraintSense.GE:
             # For >= constraints, relaxing means decreasing RHS
             if by is not None:
                 by = -by
@@ -280,6 +280,14 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             by_percent=by_percent,
             description_prefix="Relax",
         )
+
+    def _sense_of(self, constraint: Any) -> LXConstraintSense:
+        """The constraint's sense; for a goal relaxed by ``prepare_goal_programming()``
+        (an equality with deviations) the sense of the goal."""
+        for relaxed in getattr(self.model, "_relaxed_constraints", None) or []:
+            if relaxed.constraint.name == constraint.name:
+                return relaxed.goal_metadata.constraint_sense
+        return constraint.sense
 
     def tighten_constraint(
         self,
@@ -304,7 +312,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             raise ValueError(f"Constraint '{constraint_name}' not found")
 
         # Tightening is opposite of relaxing
-        if constraint.sense == LXConstraintSense.LE:
+        if self._sense_of(constraint) in (LXConstraintSense.LE, LXConstraintSense.EQ):
             # For <= constraints, tightening means decreasing RHS
             if by is not None:
                 by = -by
@@ -579,7 +587,8 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             new_rhs = None if original_rhs is None else original_rhs + by
             description = f"{description_prefix} {constraint_name} RHS by {by}"
         elif by_percent is not None:
-            new_rhs = None if original_rhs is None else original_rhs * (1 + by_percent)
+            new_rhs = (None if original_rhs is None
+                       else original_rhs + by_percent * abs(original_rhs))
             description = f"{description_prefix} {constraint_name} RHS by {by_percent*100:.1f}%"
         else:
             raise ValueError("Must specify one of: by, by_percent, or to")
@@ -591,7 +600,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         elif by is not None:
             shift_rhs(modified, add=by)
         else:
-            shift_rhs(modified, multiply=1 + by_percent)
+            shift_rhs(modified, percent=by_percent)
 
         new_solution = self.optimizer.solve(modified_model)
 

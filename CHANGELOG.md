@@ -95,7 +95,9 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `LXResultStore` tables: `lumix_runs.scenario` and `lumix_run_values.name` are `TEXT`.
 - `LXSolution._undesired_deviations` moved to the end of the dataclass fields and is excluded from comparisons.
 - OR-Tools and CP-SAT report `time_limit` (it was `not_solved` / `unknown`) when the time limit stops the search before any solution, as Gurobi and GLPK do.
-
+- `LXModel.add_constraint` raises `ValueError` for a second constraint with the same name (it hid the first one from duals, activity and analysis).
+- `by_percent` in what-if changes moves the right-hand side by a share of its absolute value (`-10` relaxed by 20 % for a `>=` row is `-12`); `tighten_constraint` on an equality lowers the right-hand side (it raised it, like `relax_constraint`).
+- A goal solve without a solution has no goal deviations: `get_goal_deviations` and `is_goal_satisfied` return `None`, and `summary()` has no goal lines.
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
@@ -173,6 +175,11 @@ Models that were solved wrongly before now give different (correct) results; eve
 - CP-SAT widened equalities that have an exact solution on its grid when another equality had none (`x + y == 1` gave 1.001), and failed with a raw `TypeError` on a very large finite bound (it is now capped like an open bound).
 - Gurobi's documented `LogToConsole=1` printed nothing; documented CPLEX parameters such as `mip_limits_cutsfactor` were skipped as unknown, and the CPLEX log could not be shown (`verbose=True` now shows it; any CPLEX parameter can be given by its path, `_` for `.`).
 - CPLEX warns when it cannot bound a nonconvex objective (status 133) instead of reporting the point it stopped at as an ordinary feasible solution.
+- A sequential goal model without its own objective that was prepared with `prepare_goal_programming()` was analysed as a maximization: `find_bottlenecks` reported improvements with the wrong sign and `get_best_scenario` picked the scenario with the largest deviation.
+- A goal model whose solve found no solution (infeasible, unbounded) reported every goal as satisfied with zero deviation.
+- `row_activity` and sensitivity `slack` / `is_binding` reported a goal's relaxed row (deviations included, always binding) instead of the goal itself.
+- `LXLinearizer(...).linearize_model()` returned a model without the goal mode and the `prepare_goal_programming()` state, so a sequential goal model was solved in weighted mode (or with no objective at all).
+- What-if `relax_constraint` / `tighten_constraint` / `increase_constraint_rhs` / `decrease_constraint_rhs` with `by_percent` moved a negative right-hand side the wrong way, and relaxing a prepared `>=` goal raised its target.
 
 ## [0.2.1] - 2026-10-14
 
