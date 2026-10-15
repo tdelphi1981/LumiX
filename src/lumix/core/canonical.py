@@ -124,6 +124,16 @@ class LXInstanceCache:
         # Keyed by id(): two distinct LXVariable objects may share a name.
         self._instances: Dict[int, List[Any]] = {}
         self._positions: Dict[int, Dict[Any, List[int]]] = {}
+        self._identities: Dict[int, set] = {}
+
+    def contains(self, var: "LXVariable", row: Any) -> bool:
+        """``row in self.instances(var)``: a row that is one of the instance objects is
+        found by identity in O(1); only other rows are compared by value."""
+        slot = id(var)
+        ids = self._identities.get(slot)
+        if ids is None:
+            ids = self._identities[slot] = {id(i) for i in self.instances(var)}
+        return id(row) in ids or row in self.instances(var)
 
     def instances(self, var: "LXVariable") -> List[Any]:
         slot = id(var)
@@ -157,7 +167,7 @@ class LXInstanceCache:
                 return instances, where
             return ([instances[i] for i in self._key_positions(var).get(where.row_key(row), ())],
                     _accept_all)
-        if row is not None and row in instances:
+        if row is not None and self.contains(var, row):
             return [row], where
         if not isinstance(where, LXKeyFilter):
             return instances, where
@@ -452,7 +462,8 @@ class LXCanonicalBuilder:
         if row is None or type(row) in _BUILTIN_ROWS:
             return False
         instances = self.cache.instances(var)
-        return bool(instances) and type(row) is type(instances[0]) and row not in instances
+        return (bool(instances) and type(row) is type(instances[0])
+                and not self.cache.contains(var, row))
 
     def _positions(self, var: "LXVariable", where: str) -> Dict[Any, int]:
         positions = self.families.get(var.name)

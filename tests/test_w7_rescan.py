@@ -491,3 +491,29 @@ def test_rescan_commercial_cplex_mip_emphasis_is_applied():
     finally:
         cs.LXCPLEXSolver._parse_solution = real
     assert seen["emphasis"] == 1
+
+
+# ---------------------------------------------------------------- final review
+def test_final_same_type_rows_build_in_linear_time():
+    import time
+    from dataclasses import dataclass
+
+    @dataclass
+    class P:
+        id: int
+        cap: float
+
+    def build_seconds(n):
+        ps = [P(i, i % 7 + 1) for i in range(n)]
+        x = LXVariable[P, float]("x").continuous().bounds(lower=0).indexed_by(lambda p: p.id).from_data(ps)
+        m = LXModel("m").add_variable(x).maximize(LXLinearExpression().add_term(x, lambda p: 1))
+        m.add_constraint(LXConstraint[P]("cap").expression(LXLinearExpression().add_term(x, lambda p: 1))
+                         .le().rhs(lambda p: p.cap).from_data(ps).indexed_by(lambda p: p.id))
+        t = time.perf_counter()
+        c = m.to_canonical()
+        assert len(c.rows) == n and all(len(r.coeffs) == 1 for r in c.rows)
+        return time.perf_counter() - t
+
+    build_seconds(500)                      # warm up
+    small, large = build_seconds(1000), build_seconds(4000)
+    assert large < 8 * small                # quadratic scaling gives ~16x
