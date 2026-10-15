@@ -303,13 +303,15 @@ class LXModel(Generic[TModel]):
     def to_canonical(self) -> "LXCanonicalModel":
         """Solver-independent canonical form of this model (variable instances,
         rows with summed coefficients, objective). Solver adapters build from
-        it; external engines can read it instead of LumiX internals.
+        it; external engines can read it instead of LumiX internals. Goals are
+        relaxed in the canonical form without changing this model.
 
         .. versionadded:: 0.3.0
         """
+        from ..goal_programming.view import goal_form
         from .canonical import LXCanonicalBuilder
 
-        return LXCanonicalBuilder(self).build()
+        return LXCanonicalBuilder(goal_form(self)).build()
 
     def minimize(self, expr: Optional[LXLinearExpression | LXQuadraticExpression] = None) -> Self:
         """
@@ -445,8 +447,9 @@ class LXModel(Generic[TModel]):
         4. Adds deviation variables to the model
         5. Replaces goal constraints with relaxed versions
 
-        This is automatically called by the solver, but can be called
-        manually for inspection or debugging.
+        Solving a model with goals relaxes them on a copy automatically; call
+        this method to relax them in the model itself (to inspect it, or for
+        tools that read the model).
 
         Returns:
             Self for chaining

@@ -295,6 +295,8 @@ class LXOptimizer(Generic[TModel]):
         """
         Solve with full type safety.
 
+        Models with goals are relaxed automatically, without changing ``model``.
+
         Args:
             model: LXModel to solve
             **solver_params: Solver-specific parameters
@@ -306,6 +308,16 @@ class LXOptimizer(Generic[TModel]):
             ImportError: If solver not installed
             ValueError: If model is invalid
         """
+        from ..goal_programming.view import goal_form
+
+        view = goal_form(model)
+        solution = self._solve_once(view, **solver_params)
+        if view._goal_programming_prepared:
+            view.populate_goal_deviations(solution)
+        return solution
+
+    def _solve_once(self, model: LXModel[TModel], **solver_params: Any) -> LXSolution[TModel]:
+        """Solve ``model`` as it is (goals already relaxed), with linearization if enabled."""
         # Create solver instance (or reuse existing one if already set)
         if self._solver is None:
             self._solver = self._create_solver()
@@ -332,13 +344,6 @@ class LXOptimizer(Generic[TModel]):
         )
         solution.relaxation = bool(getattr(solve_model, "relaxation_terms", None))
         self.logger.log_solve_end(solution.status, solution.objective_value, solution.solve_time)
-
-        # Populate goal deviations if model has prepared goal programming
-        if (hasattr(model, 'populate_goal_deviations') and
-            hasattr(model, '_goal_programming_prepared') and
-            model._goal_programming_prepared):
-            model.populate_goal_deviations(solution)
-
         return solution
 
     def _create_solver(self) -> LXSolverInterface[TModel]:

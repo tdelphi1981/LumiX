@@ -128,3 +128,46 @@ def test_a22_indexed_nonlinear_goal(solver):
     m.prepare_goal_programming()
     s = LXOptimizer().use_solver(solver).enable_linearization().solve(m)
     assert s.get_goal_deviations("far")["neg"] == pytest.approx({"far_A": 7.0, "far_B": 0.0})
+
+
+# --- Görev 2: goals are prepared by solve and to_canonical (A26) -------------------
+def _cap_goal():
+    x = fam("x", ["k"], lower=0)
+    m = LXModel("m").add_variable(x)
+    m.add_constraint(hard("cap", lin((x, 1.0)), "<=", 5))
+    m.add_constraint(goal("g", lin((x, 1.0)), ">=", 8, priority=1))
+    return m
+
+
+@pytest.mark.parametrize("solver", AVAILABLE)
+def test_a26_goals_are_prepared_by_solve(solver):
+    s = solve_with(solver, _cap_goal())
+    assert s.status == "optimal" and s.variables["x"]["k"] == pytest.approx(5)
+    assert s.get_goal_deviations("g")["neg"] == pytest.approx({"g": 3.0})
+
+
+def test_a26_solve_and_to_canonical_leave_the_model_unchanged():
+    m = _cap_goal()
+    before = (list(m.variables), list(m.constraints), m.objective_expr, m.goal_mode)
+    LXOptimizer().use_solver("ortools").solve(m)
+    m.to_canonical()
+    assert (list(m.variables), list(m.constraints), m.objective_expr, m.goal_mode) == before
+    assert m.has_goals() and not m._goal_programming_prepared
+
+
+def test_a26_to_canonical_relaxes_goals():
+    c = _cap_goal().to_canonical()
+    assert {v.family for v in c.variables} == {"x", "g_pos_dev", "g_neg_dev"}
+    assert [r.name for r in c.rows] == ["cap", "g"]
+    assert c.rows[1].sense == LXConstraintSense.EQ
+    assert c.sense == LXObjectiveSense.MINIMIZE and len(c.objective) == 1
+
+
+def test_a26_explicit_prepare_still_works():
+    m = _cap_goal()
+    m.prepare_goal_programming()
+    opt = LXOptimizer().use_solver("ortools")
+    values = [opt.solve(m).objective_value, opt.solve(m).objective_value,
+              opt.solve(copy.deepcopy(m)).objective_value]
+    assert values == pytest.approx([3e6, 3e6, 3e6])
+    assert opt.solve(m).get_goal_deviations("g")["neg"] == pytest.approx({"g": 3.0})
