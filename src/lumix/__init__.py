@@ -67,6 +67,10 @@ Quick Start
     print(f"Impact: ${result.delta_objective:,.2f}")
 """
 
+import logging as _logging
+
+_logging.getLogger("lumix").addHandler(_logging.NullHandler())
+
 __version__ = "0.2.1"
 
 # Core classes
@@ -139,7 +143,14 @@ from .analysis import (
 )
 
 # Utils
-from .utils import LXModelLogger, LXORMContext, LXORMModel, LXRationalConverter, LXTypedQuery
+from .utils import (
+    LXModelLogger,
+    LXORMContext,
+    LXORMModel,
+    LXRationalConverter,
+    LXTypedQuery,
+    enable_logging,
+)
 
 # Goal Programming
 from .goal_programming import (
@@ -237,6 +248,7 @@ __all__ = [
     "LXTypedQuery",
     "LXRationalConverter",
     "LXModelLogger",
+    "enable_logging",
     # Goal Programming
     "LXGoal",
     "LXGoalMetadata",

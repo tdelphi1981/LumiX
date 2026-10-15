@@ -18,6 +18,28 @@ events like model creation, variable/constraint addition, solving, and solution 
 - Configurable logging levels
 - Built on Python's standard logging module
 
+Seeing LumiX's log messages
+---------------------------
+
+.. versionchanged:: 0.3.0
+   LumiX no longer prints log lines by default. It attaches only a
+   :class:`logging.NullHandler` to the ``lumix`` logger and never changes levels,
+   as the Python logging guide recommends for libraries.
+
+In a script or notebook, turn the messages on with one call:
+
+.. code-block:: python
+
+   import lumix
+
+   lumix.enable_logging()            # INFO and above, to stderr
+   lumix.enable_logging("DEBUG")     # calling again replaces the handler
+
+Applications that configure :mod:`logging` themselves (``logging.basicConfig``,
+``dictConfig``) see LumiX's records through their own handlers, once each.
+Silence LumiX with ``logging.getLogger("lumix").setLevel(logging.WARNING)``;
+creating an ``LXOptimizer`` no longer resets that level.
+
 Basic Usage
 -----------
 
@@ -26,27 +48,39 @@ Creating a Logger
 
 .. code-block:: python
 
-   from lumix.utils import LXModelLogger
    import logging
 
-   # Create logger with default settings
+   import lumix
+   from lumix.utils import LXModelLogger
+
+   lumix.enable_logging()  # show the messages (LumiX adds no handler itself)
+
+   # Create logger with default settings (the level is left to the application)
    logger = LXModelLogger()
 
    # Create with custom name and level
    logger = LXModelLogger(
-       name="production_model",
+       name="lumix.production_model",
        level=logging.INFO  # or DEBUG, WARNING, ERROR
    )
+
+.. note::
+   ``lumix.enable_logging()`` prints records of the ``lumix`` logger and its children.
+   A logger named outside ``lumix.`` (e.g. ``"production_model"``) needs its own
+   handler, as any Python logger does.
 
 Logging Model Construction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   from lumix import LXModel, LXVariable
+   import logging
+
+   from lumix import LXModel, LXVariable, enable_logging
    from lumix.utils import LXModelLogger
 
-   logger = LXModelLogger(name="build", level=logging.DEBUG)
+   enable_logging("DEBUG")
+   logger = LXModelLogger(name="lumix.build", level=logging.DEBUG)
 
    # Log model creation
    model = LXModel("production_plan")
@@ -65,7 +99,7 @@ Logging Solve Process
 
    from lumix import LXOptimizer
 
-   logger = LXModelLogger(name="solve")
+   logger = LXModelLogger(name="lumix.solve")
 
    # Start timing
    logger.log_solve_start("Gurobi")
@@ -188,14 +222,14 @@ Most verbose - logs everything including variable/constraint creation:
    2025-10-22 14:30:01 - production - DEBUG - Created 10 constraint(s): capacity (<=)
    2025-10-22 14:30:01 - production - INFO - Created model 'ProductionPlan' with 50 variables and 10 constraints
 
-INFO Level (Default)
-~~~~~~~~~~~~~~~~~~~~
+INFO Level
+~~~~~~~~~~
 
 Standard level - logs major events:
 
 .. code-block:: python
 
-   logger = LXModelLogger(level=logging.INFO)  # or omit, it's default
+   logger = LXModelLogger(level=logging.INFO)
 
 **Use When:**
 
@@ -325,21 +359,19 @@ Use different loggers for different models:
 Custom Formatting
 ~~~~~~~~~~~~~~~~~
 
-Customize the log format by modifying the handler:
+Pass a format to :func:`lumix.enable_logging`, or add your own handler:
 
 .. code-block:: python
 
    import logging
 
-   logger = LXModelLogger(name="custom_format")
+   import lumix
 
-   # Get the underlying Python logger
+   lumix.enable_logging(fmt="[%(levelname)s] %(name)s: %(message)s")
+
+   # or, for a logger of your own
+   logger = LXModelLogger(name="custom_format", level=logging.INFO)
    py_logger = logger.logger
-
-   # Remove existing handlers
-   py_logger.handlers.clear()
-
-   # Add custom handler
    handler = logging.StreamHandler()
    handler.setFormatter(logging.Formatter(
        '[%(levelname)s] %(message)s'  # Simple format

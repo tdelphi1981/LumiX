@@ -17,8 +17,10 @@ Key Features:
 Examples:
     Basic usage for model logging::
 
+        import lumix
         from lumix.utils import LXModelLogger
 
+        lumix.enable_logging()  # LumiX prints nothing unless asked
         logger = LXModelLogger(name="production_model", level=logging.INFO)
 
         # Log model creation
@@ -71,42 +73,36 @@ class LXModelLogger:
             logger.log_solve_end("Optimal", objective_value=42500.0)
 
     Note:
-        The logger automatically creates a console handler if none exists. Multiple
-        instances with the same name will share the same underlying Python logger.
+        LumiX adds no handlers; call :func:`lumix.enable_logging` (or configure
+        :mod:`logging`) to see the messages. Multiple instances with the same name share
+        the same underlying Python logger.
     """
 
-    def __init__(self, name: str = "lumix", level: int = logging.INFO):
+    def __init__(self, name: str = "lumix", level: Optional[int] = None):
         """Initialize model logger with specified name and logging level.
 
         Args:
             name: Logger name for identification. Defaults to "lumix". Use different
                 names to distinguish between multiple models.
-            level: Logging level from Python's logging module. Defaults to logging.INFO.
-                Common values: logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR.
+            level: Level to set on the logger. When omitted the level is left to the
+                application (LumiX itself never sets one).
 
         Examples:
-            Create logger with default settings::
+            Create a logger and show its messages::
 
-                logger = LXModelLogger()
+                import lumix
 
-            Create logger with custom name and debug level::
+                lumix.enable_logging()
+                logger = LXModelLogger(name="my_model")
 
-                logger = LXModelLogger(name="my_model", level=logging.DEBUG)
+        .. versionchanged:: 0.3.0
+           ``level`` sets the logger's level only when given, and no console handler is
+           added; call :func:`lumix.enable_logging` or configure :mod:`logging` in the
+           application to see the messages.
         """
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(level)
-
-        # Create console handler if not exists
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setLevel(level)
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
+        if level is not None:
+            self.logger.setLevel(level)
         self.start_time: Optional[datetime] = None
 
     def log_model_creation(self, name: str, num_vars: int, num_constraints: int) -> None:
@@ -336,4 +332,38 @@ class LXModelLogger:
         self.logger.error(message)
 
 
-__all__ = ["LXModelLogger"]
+DEFAULT_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+def enable_logging(level: "int | str" = "INFO", *, stream: Any = None,
+                   fmt: str = DEFAULT_FORMAT) -> logging.Handler:
+    """Print LumiX log records to a stream (stderr by default).
+
+    LumiX, like any library, only attaches a ``NullHandler`` to the ``lumix`` logger.
+    Call this helper in scripts and notebooks to see its messages; applications that
+    configure :mod:`logging` themselves need nothing. Calling it again replaces the
+    handler it added before, so lines are never printed twice.
+
+    Args:
+        level: Level of the ``lumix`` logger (``"DEBUG"``, ``"INFO"``, ... or an int).
+        stream: Stream to write to; ``sys.stderr`` when omitted.
+        fmt: :class:`logging.Formatter` format string.
+
+    Returns:
+        The handler, so it can be removed with
+        ``logging.getLogger("lumix").removeHandler(handler)``.
+
+    .. versionadded:: 0.3.0
+    """
+    root = logging.getLogger("lumix")
+    for old in [h for h in root.handlers if getattr(h, "_lumix_console", False)]:
+        root.removeHandler(old)
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    handler._lumix_console = True  # type: ignore[attr-defined]
+    root.addHandler(handler)
+    root.setLevel(level if isinstance(level, int) else level.upper())
+    return handler
+
+
+__all__ = ["LXModelLogger", "enable_logging"]
