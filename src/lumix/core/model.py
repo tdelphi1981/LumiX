@@ -518,6 +518,7 @@ class LXModel(Generic[TModel]):
             self.minimize(expr) if sense == LXObjectiveSense.MINIMIZE else self.maximize(expr)
         else:
             self.objective_expr = None
+        self._goal_prepared_mode = goal_mode_value(self.goal_mode)
         self._goal_programming_prepared = True
         return self
 
@@ -537,7 +538,7 @@ class LXModel(Generic[TModel]):
         Extracts deviation variable values from the solution and organizes
         them by goal name for easy access via solution.get_goal_deviations().
 
-        This method is automatically called after solving if the model has goals.
+        ``LXOptimizer.solve`` calls this method on the model it relaxed.
 
         Args:
             solution: Solution object to populate

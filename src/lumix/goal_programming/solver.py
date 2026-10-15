@@ -132,7 +132,7 @@ class LXGoalProgrammingSolver:
         needed, and the weighted objective is built there.
 
         Args:
-            model: LXModel with weighted goal objective already set
+            model: LXModel with goals (relaxed on a copy when not prepared)
             **solver_params: Additional solver parameters
 
         Returns:

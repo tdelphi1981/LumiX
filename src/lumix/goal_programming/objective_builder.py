@@ -133,7 +133,7 @@ def build_sequential_objectives(
 
     Creates one objective per priority level. These are solved sequentially:
     1. Solve priority 1, record optimal deviation values
-    2. Fix priority 1 deviations, solve priority 2
+    2. Bound priority 1 by its optimum, solve priority 2
     3. Continue for all priorities
 
     Args:
@@ -270,6 +270,7 @@ def extract_custom_objectives(
 __all__ = [
     "build_weighted_objective",
     "build_sequential_objectives",
+    "final_objective",
     "combine_objectives",
     "extract_custom_objectives",
 ]

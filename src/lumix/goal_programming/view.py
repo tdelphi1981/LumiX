@@ -18,8 +18,19 @@ def goal_mode_value(mode: Any) -> str:
 def goal_form(model: "LXModel") -> "LXModel":
     """The model with its goals relaxed. ``model`` itself when it has no goals or
     was prepared with ``prepare_goal_programming()``; otherwise a prepared shallow
-    copy that shares the variables, constraints and data of ``model``."""
-    if model._goal_programming_prepared or not model.has_goals():
+    copy that shares the variables, constraints and data of ``model``.
+
+    Raises:
+        ValueError: If ``model`` was prepared for the other goal mode."""
+    if model._goal_programming_prepared:
+        prepared = getattr(model, "_goal_prepared_mode", None)
+        if prepared is not None and prepared != goal_mode_value(model.goal_mode):
+            raise ValueError(
+                f"The model was prepared for {prepared} goal programming and its goal mode "
+                f"is now {goal_mode_value(model.goal_mode)}; build the model again (or solve "
+                "it without calling prepare_goal_programming()) to change the mode")
+        return model
+    if not model.has_goals():
         return model
     view = copy.copy(model)
     view.variables = list(model.variables)

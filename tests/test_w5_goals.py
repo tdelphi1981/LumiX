@@ -447,3 +447,14 @@ def test_goal_satisfied_below_a_le_goal():
     m.add_constraint(goal("g", lin((x, 1.0)), "<=", 3, priority=1))
     s = solve_with("ortools", m)
     assert s.is_goal_satisfied("g") is True
+
+
+@pytest.mark.parametrize("prepared,switched", [("sequential", "weighted"), ("weighted", "sequential")])
+def test_mode_change_after_explicit_prepare_raises(prepared, switched):
+    # The relaxed objective belongs to the prepared mode: solving it in the other
+    # mode ignored the goals (sequential → weighted) or mixed them into the last stage.
+    m = _lex_model().set_goal_mode(prepared)
+    m.prepare_goal_programming()
+    m.set_goal_mode(switched)
+    with pytest.raises(ValueError, match="prepared for"):
+        LXOptimizer().use_solver("ortools").solve(m)
