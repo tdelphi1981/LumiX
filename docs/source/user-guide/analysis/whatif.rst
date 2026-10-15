@@ -172,7 +172,8 @@ By default the analyzer copies ``model`` for every what-if run (see
   raises ``ValueError``.
 - Pass exactly one of ``model`` and ``model_factory`` (``ValueError`` otherwise); a
   missing ``optimizer`` raises ``TypeError``.
-- The analyzer keeps the models it built for as long as it lives.
+- A model built for a what-if run is freed once the run is over (the analyzer keeps
+  only the baseline model).
 
 See `ORM Data with a Fresh Session`_ for the typical use.
 
@@ -662,15 +663,14 @@ session:
 
 .. code-block:: python
 
-   from sqlalchemy.orm import Session
+   from sqlalchemy.orm import Session, selectinload
    from lumix import LXLinearExpression, LXModel, LXVariable, LXWhatIfAnalyzer
 
-   sessions = []
-
    def build_model():
-       session = Session(engine)
-       sessions.append(session)
-       products = session.query(Product).all()
+       with Session(engine) as session:     # closed after loading
+           products = (session.query(Product)
+                       .options(selectinload(Product.category))   # what lambdas read
+                       .all())
 
        production = (
            LXVariable[Product, float]("production")
@@ -689,11 +689,15 @@ session:
    analyzer = LXWhatIfAnalyzer(optimizer=optimizer, model_factory=build_model)
    result = analyzer.increase_constraint_rhs("capacity", by=100)
 
-   for session in sessions:
-       session.close()
+.. important::
 
-Alternatively, keep the session open for the lifetime of the analyzer, or eager-load the
-relationships your lambdas use (``joinedload``) before building the model.
+   Close the session inside the factory, after eager-loading every relationship your
+   lambdas read (``selectinload`` / ``joinedload``). Loaded attributes stay readable on
+   the instances after the session closes, and the connection goes back to the pool.
+   A session left open per model holds one pooled connection each, so with SQLAlchemy's
+   default pool (5 + 10 overflow) the 16th run would wait for a connection and fail.
+
+Without a factory, keep the model's session open for the lifetime of the analyzer.
 
 Pickling
 ~~~~~~~~

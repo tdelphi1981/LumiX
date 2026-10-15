@@ -1,8 +1,9 @@
 """Model source for the analyzers: an existing model (copied per run) or a factory."""
 from __future__ import annotations
 
+import weakref
 from copy import deepcopy
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 
 class ModelSource:
@@ -18,17 +19,19 @@ class ModelSource:
                 f"{owner} needs exactly one of a model or model_factory")
         self._factory = factory
         self.base = model if model is not None else factory()
-        self._seen = {id(self.base)}
-        self._keep = [self.base]       # keep ids stable while we compare them
+        # Weak references: a built model (and the session its data came from) is freed
+        # once its run is over; a model still alive cannot share its id with a new one.
+        self._seen: Dict[int, "weakref.ref[Any]"] = {id(self.base): weakref.ref(self.base)}
 
     def new(self) -> Any:
         if self._factory is None:
             return deepcopy(self.base)
         model = self._factory()
-        if id(model) in self._seen:
+        ref = self._seen.get(id(model))
+        if ref is not None and ref() is model:
             raise ValueError(
                 "model_factory must build a new model on every call; it returned a "
                 "model it had already returned")
-        self._seen.add(id(model))
-        self._keep.append(model)
+        self._seen = {k: r for k, r in self._seen.items() if r() is not None}
+        self._seen[id(model)] = weakref.ref(model)
         return model

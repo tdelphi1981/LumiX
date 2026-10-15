@@ -160,20 +160,25 @@ every run, so nothing is copied, and it can open a fresh session each time:
 
 .. code-block:: python
 
-   from sqlalchemy.orm import Session
-
-   sessions = []
+   from sqlalchemy.orm import Session, selectinload
 
    def build_model():
-       session = Session(engine)
-       sessions.append(session)
-       return build_production_model(session.query(Product).all())   # a new LXModel
+       with Session(engine) as session:     # closed after loading
+           products = (session.query(Product)
+                       .options(selectinload(Product.category))   # what lambdas read
+                       .all())
+       return build_production_model(products)   # a new LXModel
 
    analyzer = LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model)
    # ... add and run scenarios ...
 
-   for session in sessions:
-       session.close()
+.. important::
+
+   Close the session inside the factory, after eager-loading every relationship your
+   lambdas read (``selectinload`` / ``joinedload``). Loaded attributes stay readable on
+   the instances after the session closes, and the connection goes back to the pool.
+   A session left open per model holds one pooled connection each, so with SQLAlchemy's
+   default pool (5 + 10 overflow) the 16th run would wait for a connection and fail.
 
 The factory must return a new model on every call. See
 :doc:`/user-guide/analysis/scenario` and :doc:`/user-guide/analysis/whatif`.

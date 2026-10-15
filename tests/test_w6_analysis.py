@@ -479,3 +479,56 @@ def test_w6_get_best_scenario_on_goal_model_minimizes_deviation():
 def test_w6_find_bottlenecks_on_goal_model_reports_improvement():
     top = LXWhatIfAnalyzer(_goal_model(), opt()).find_bottlenecks(top_n=1)
     assert top[0][0] == "demand" and top[0][1] > 0
+
+
+def test_w6_factory_models_are_not_kept_alive():
+    import gc
+    import weakref
+    built = []
+
+    def build():
+        m = mincost_model()
+        built.append(weakref.ref(m))
+        return m
+
+    sa = LXScenarioAnalyzer(optimizer=opt(), model_factory=build, include_baseline=False)
+    for i in range(3):
+        sa.add_scenario(LXScenario(f"s{i}").modify_constraint_rhs("need_x", set_value=4))
+    sa.run_all_scenarios()
+    gc.collect()
+    assert built[0]() is sa.base_model                     # the base model stays
+    assert all(ref() is None for ref in built[1:])         # scenario models are freed
+
+
+def test_w6_orm_factory_pattern_returns_connections(tmp_path):
+    """The documented ORM factory pattern: eager-load, close the session, build."""
+    sa_ = pytest.importorskip("sqlalchemy")
+    from sqlalchemy.orm import Session, selectinload
+    m, s, Product = _lazy_orm_model()
+    src = s.get_bind()
+    s.close()
+    engine = sa_.create_engine(f"sqlite:///{tmp_path / 'p.db'}", pool_size=1,
+                               max_overflow=0, pool_timeout=1)
+    Product.metadata.create_all(engine)
+    with Session(src) as a, Session(engine) as b:
+        for row in a.query(Product).options(selectinload(Product.category)).all():
+            b.merge(row)
+        b.commit()
+
+    def build():
+        with Session(engine) as session:          # connection returned on exit
+            prods = session.query(Product).options(selectinload(Product.category)).all()
+        y = LXVariable[Product, float]("y").continuous().bounds(lower=0, upper=10) \
+            .indexed_by(lambda p: p.id).from_data(prods)
+        mm = LXModel("mm").add_variable(y).maximize(
+            LXLinearExpression().add_term(y, lambda p: p.profit * p.category.factor))
+        mm.add_constraint(LXConstraint("cap").expression(LXLinearExpression().add_term(y))
+                          .le().rhs(10))
+        return mm
+
+    sa = LXScenarioAnalyzer(optimizer=opt(), model_factory=build)
+    for i in range(5):
+        sa.add_scenario(LXScenario(f"s{i}").modify_constraint_rhs("cap", set_value=5))
+    r = sa.run_all_scenarios()
+    assert r["baseline"].objective_value == pytest.approx(60.0)
+    assert r["s4"].objective_value == pytest.approx(30.0)

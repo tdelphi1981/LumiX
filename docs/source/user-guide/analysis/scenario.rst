@@ -334,21 +334,21 @@ How it works:
   raises ``ValueError``.
 - Pass exactly one of ``base_model`` and ``model_factory`` (``ValueError`` otherwise);
   a missing ``optimizer`` raises ``TypeError``.
-- The analyzer keeps the models it built for as long as it lives.
+- A model built for a scenario is freed once its run is over (the analyzer keeps only
+  the base model).
 
 A factory is the recommended way to analyze an ORM-backed model whose session may be
 closed before the analysis runs: open a fresh session inside the factory.
 
 .. code-block:: python
 
-   from sqlalchemy.orm import Session
-
-   sessions = []
+   from sqlalchemy.orm import Session, selectinload
 
    def build_model():
-       session = Session(engine)            # fresh session per model
-       sessions.append(session)
-       products = session.query(Product).all()
+       with Session(engine) as session:     # fresh session, closed after loading
+           products = (session.query(Product)
+                       .options(selectinload(Product.category))   # what lambdas read
+                       .all())
        production = (
            LXVariable[Product, float]("production")
            .continuous().bounds(lower=0)
@@ -356,16 +356,21 @@ closed before the analysis runs: open a fresh session inside the factory.
            .from_data(products)
        )
        model = LXModel("plan").add_variable(production)
-       # ... constraints and objective; lambdas may use lazy relationships
-       # such as p.category.factor, since this session stays open
+       # ... constraints and objective; lambdas may read p.category.factor,
+       # which was loaded before the session closed
        return model
 
    analyzer = LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model)
    analyzer.add_scenario(LXScenario("half").modify_constraint_rhs("capacity", set_value=500))
    results = analyzer.run_all_scenarios()
 
-   for session in sessions:
-       session.close()
+.. important::
+
+   Close the session inside the factory, after eager-loading every relationship your
+   lambdas read (``selectinload`` / ``joinedload``). Loaded attributes stay readable on
+   the instances after the session closes, and the connection goes back to the pool.
+   A session left open per model holds one pooled connection each, so with SQLAlchemy's
+   default pool (5 + 10 overflow) the 16th run would wait for a connection and fail.
 
 Recording Results
 -----------------
