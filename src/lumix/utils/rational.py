@@ -291,9 +291,9 @@ class LXRationalConverter:
         # Start with fractional part
         value = frac_part
 
-        # Initialize convergents: p_{-1}/q_{-1} = 1/0, p_0/q_0 = a_0/1
-        p_prev2, q_prev2 = 1, 0
-        p_prev1, q_prev1 = 0, 1
+        # Convergent seeds: p_{-2}/q_{-2} = 0/1, p_{-1}/q_{-1} = 1/0
+        p_prev2, q_prev2 = 0, 1
+        p_prev1, q_prev1 = 1, 0
 
         while True:
             # Get next coefficient
@@ -312,7 +312,7 @@ class LXRationalConverter:
                 return num, den, error
 
             # Check if we've converged (with tolerance)
-            if self._is_close(value, float(a)) or q == 0:
+            if self._is_close(value, float(a)):
                 num = sign * (int_part * q + p)
                 den = q
                 error = self._compute_error(num, den, abs(x))

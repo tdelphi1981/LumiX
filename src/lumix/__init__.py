@@ -84,6 +84,7 @@ from .core import (
     LXVariable,
     LXVarType,
 )
+from .core.expressions import LXRowKeyFilter
 
 # Indexing
 from .indexing import LXCartesianProduct, LXIndexDimension
@@ -95,6 +96,7 @@ from .linearization import (
     LXLinearizationMethod,
     LXNonLinearFunctions,
 )
+from .linearization.techniques import LXPiecewiseLinearizer
 
 # Nonlinear terms
 from .nonlinear import (
@@ -111,6 +113,8 @@ from .solution import LXSolution, LXSolutionMapper
 # Solvers
 from .solvers import (
     CPLEX_CAPABILITIES,
+    CPSAT_CAPABILITIES,
+    GLPK_CAPABILITIES,
     GUROBI_CAPABILITIES,
     ORTOOLS_CAPABILITIES,
     LXOptimizer,
@@ -175,6 +179,7 @@ __all__ = [
     "LXVariable",
     "LXConstraint",
     "LXKeyFilter",
+    "LXRowKeyFilter",
     "LXCanonicalModel",
     "LXCanonicalNonlinear",
     "LXCanonicalRow",
@@ -194,6 +199,7 @@ __all__ = [
     "LXLinearizerConfig",
     "LXLinearizationMethod",
     "LXNonLinearFunctions",
+    "LXPiecewiseLinearizer",
     # Nonlinear terms
     "LXAbsoluteTerm",
     "LXBilinearTerm",
@@ -209,6 +215,8 @@ __all__ = [
     "LXSolverFeature",
     "LXSolverCapability",
     "ORTOOLS_CAPABILITIES",
+    "CPSAT_CAPABILITIES",
+    "GLPK_CAPABILITIES",
     "GUROBI_CAPABILITIES",
     "CPLEX_CAPABILITIES",
     # Analysis
