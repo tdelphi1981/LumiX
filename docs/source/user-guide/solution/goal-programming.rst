@@ -16,6 +16,7 @@ The :class:`~lumix.solution.solution.LXSolution` class provides methods to:
 - Check if goals are satisfied
 - Calculate total deviations
 - Analyze goal achievement
+- Inspect the stages of sequential goal programming (``goal_stages``)
 
 Goal Programming Concepts
 --------------------------
@@ -42,7 +43,7 @@ Deviation Variables
 Each goal creates two deviation variables:
 
 - **Positive deviation** (``pos``): Amount by which goal is exceeded
-- **Negative deviation** (neg``): Amount by which goal is under-achieved
+- **Negative deviation** (``neg``): Amount by which goal is under-achieved
 
 .. code-block:: python
 
@@ -87,22 +88,36 @@ The ``get_goal_deviations()`` method returns a dictionary:
        "neg": Union[float, Dict[Any, float]]
    }
 
-For **scalar goals**:
+The values are dicts keyed by goal instance id (deviation variables are indexed by
+:class:`~lumix.goal_programming.goal.LXGoal` instances).
+
+For **single goals** the key is the goal name:
 
 .. code-block:: python
 
    deviations = solution.get_goal_deviations("total_cost_target")
-   # {'pos': 0.0, 'neg': 150.5}
+   # {'pos': {'total_cost_target': 0.0}, 'neg': {'total_cost_target': 150.5}}
 
-For **indexed goals**:
+For **indexed goals** every row has its own deviations, keyed
+``<goal name>_<index key>``:
 
 .. code-block:: python
 
    deviations = solution.get_goal_deviations("demand_target")
    # {
-   #     'pos': {'product_A': 10.0, 'product_B': 0.0},
-   #     'neg': {'product_A': 0.0, 'product_B': 5.0}
+   #     'pos': {'demand_target_A': 10.0, 'demand_target_B': 0.0},
+   #     'neg': {'demand_target_A': 0.0, 'demand_target_B': 5.0}
    # }
+
+.. versionchanged:: 0.3.0
+
+   Each row of an indexed goal has its own pair of deviations. Before 0.3.0 every
+   row contained all deviations of the goal, so the values per key were not
+   meaningful.
+
+Priority 0 goals are objective terms, not goals with deviations:
+``get_goal_deviations()`` returns ``None`` for them (and ``is_goal_satisfied()`` and
+``get_total_deviation()`` return ``None`` too).
 
 Checking Goal Satisfaction
 ---------------------------
@@ -125,9 +140,24 @@ Check if a goal is achieved within tolerance:
 Return Values
 ~~~~~~~~~~~~~
 
-- ``True``: Goal is satisfied (both deviations within tolerance)
+- ``True``: Goal is satisfied (its undesired deviations are within tolerance)
 - ``False``: Goal is not satisfied
-- ``None``: Goal not found in solution
+- ``None``: Goal not found in solution (also for priority 0 goals)
+
+Only the **undesired** deviations count: the shortfall (``neg``) of a ``>=`` goal,
+the excess (``pos``) of a ``<=`` goal, and both for an ``==`` goal. Exceeding a
+``>=`` goal or staying below a ``<=`` goal satisfies it. For an indexed goal, every
+row must be within tolerance.
+
+.. code-block:: python
+
+   # Goal: production >= 100, solved production = 110 (pos = 10, neg = 0)
+   solution.is_goal_satisfied("production_target")  # True
+
+.. versionchanged:: 0.3.0
+
+   Before 0.3.0 both deviations had to be within tolerance, so an over-achieved
+   ``>=`` goal or an under-used ``<=`` goal was reported as unsatisfied.
 
 .. code-block:: python
 
@@ -154,7 +184,7 @@ Get the sum of absolute deviations:
    else:
        print("Goal not found")
 
-**Calculation**:
+**Calculation** (both deviations, desired and undesired):
 
 .. code-block:: python
 
@@ -290,6 +320,8 @@ Output::
    Goal Constraints: 5
    Goals Satisfied: 3/5
 
+"Goals Satisfied" counts the goals for which ``is_goal_satisfied()`` is ``True``.
+
 Example Workflows
 -----------------
 
@@ -398,42 +430,31 @@ Multi-Objective Optimization
 Sequential Goal Programming
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. versionadded:: 0.3.0
+
+In sequential mode (``model.set_goal_mode("sequential")``), ``optimizer.solve()``
+solves one stage per priority and a final stage for the model's own objective and
+the priority 0 goals. ``solution.goal_stages`` lists them in solve order as
+:class:`~lumix.goal_programming.goal.LXGoalStage` items (``priority``,
+``objective_value``, ``status``); the final stage has priority ``0``. In weighted
+mode and for models without goals, ``goal_stages`` is an empty list.
+
 .. code-block:: python
 
-   def sequential_goal_programming(products, goal_priorities):
-       """Solve goals sequentially by priority."""
+   model.set_goal_mode("sequential")
+   solution = optimizer.solve(model)
 
-       # Priority levels (1 = highest)
-       priorities = sorted(set(goal_priorities.values()))
+   for stage in solution.goal_stages:
+       name = "final objective" if stage.priority == 0 else f"priority {stage.priority}"
+       print(f"{name}: {stage.objective_value:.2f} ({stage.status})")
 
-       solutions_by_priority = {}
+   # A stage that is not solved to optimality stops the sequence; its
+   # solution is returned and it is the last stage listed
+   if not solution.is_optimal():
+       print(f"Stopped at priority {solution.goal_stages[-1].priority}")
 
-       for priority in priorities:
-           print(f"\\n=== Solving Priority {priority} Goals ===")
-
-           # Get goals at this priority
-           current_goals = [
-               name for name, p in goal_priorities.items()
-               if p == priority
-           ]
-
-           # Build and solve model for this priority
-           model = build_model_with_goals(current_goals)
-           solution = optimizer.solve(model)
-
-           solutions_by_priority[priority] = solution
-
-           # Report results
-           for goal_name in current_goals:
-               satisfied = solution.is_goal_satisfied(goal_name)
-               status = "✓" if satisfied else "✗"
-               print(f"{status} {goal_name}")
-
-               if not satisfied:
-                   total_dev = solution.get_total_deviation(goal_name)
-                   print(f"   Deviation: {total_dev:.2f}")
-
-       return solutions_by_priority
+The variable values, goal deviations and ``objective_value`` of the solution are
+those of the last stage solved. See :doc:`/user-guide/goal_programming/sequential-mode`.
 
 Handling Deviation Types
 -------------------------

@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On `indexed_by_product` and join families, `.cost(...)` and the callable coefficients of `add_quadratic` / `add_squared` may take one argument per part (`lambda d, t: ...`), like `cost_multi`.
 - Nonlinear terms in constraints are linearized; the direction comes from the constraint sense, and in an indexed constraint a row that is an instance of the term's family uses only that instance.
 - `adaptive_breakpoints(func, x_min, x_max, num_segments)` and `piecewise_points(...)` in `lumix.linearization.techniques.piecewise`.
+- Goal programming: `LXSolution.goal_stages`, a list of `LXGoalStage(priority, objective_value, status)` (exported from `lumix`), one per solve of sequential mode; the final stage (model objective and priority-0 goals) has priority 0.
+- `LXRowKeyFilter(var, row_key)` in `lumix.core.expressions`: a row-aware filter that keeps, in each row, the instance keyed by `row_key(row)`; the canonical builder looks it up by key, so such rows build in linear time.
+- `LXModel.to_canonical().goal_stages`: in sequential goal mode, the stage objectives (`{position: coeff}`) in priority order; `objective` then holds the final stage (model objective and priority-0 goals). Empty in weighted mode.
+- `solve_goal_programming(model, optimizer, mode=LXGoalMode.SEQUENTIAL)` (it raised `NotImplementedError`); the mode given overrides the model's mode without changing `model.goal_mode`.
+- `SEQUENTIAL_TOLERANCE` in `lumix.goal_programming.solver`: relative slack of the sequential stage bounds (default `0.0`, exact).
+- `final_objective(model, custom_goals)` in `lumix.goal_programming.objective_builder`: the model's objective combined with the priority-0 goals.
+- Goals whose expression is an `LXNonLinearExpression` (e.g. `add_abs`); solve them with `enable_linearization()`.
 
 ### Changed
 - Same-type constraint narrowing applies only to one-argument coefficients and filters, decided for each `add_term` separately (also after `e1 + e2` or `expr * 2`). Parameters with a default value do not count, so `lambda item, g=g: ...` is a one-argument filter.
@@ -49,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Adaptive piecewise breakpoints are deterministic (quantiles of the curvature mixed with a uniform density) and exactly `num_segments + 1`; a linear function gets uniform breakpoints.
 - `num_segments`, `adaptive` and `method` of `add_piecewise`, `LXPiecewiseLinearTerm` and `LXPiecewiseLinearizer.approximate_function` default to `None` and are taken from `LXLinearizerConfig` (`pwl_num_segments`, `adaptive_breakpoints`, `pwl_method`); values given on the term win.
 - `LXBilinearLinearizer.linearize_bilinear` and `LXPiecewiseLinearizer.approximate_function` take single variables (a scalar or a one-instance family).
+- `LXOptimizer.solve(model)` and `model.to_canonical()` relax goals automatically on a shallow copy; the user's model is not changed and `prepare_goal_programming()` is no longer needed (calling it still relaxes the goals in place). The goal mode can change between solves.
+- Priority-0 goals are objective terms, not relaxed rows: a `.ge()` goal's expression is maximized and a `.le()` goal's minimized, times its weight; `get_goal_deviations()` returns `None` for them. Priority-0 `.eq()`, indexed or nonlinear goals, and negative or non-integer priorities raise `ValueError`.
+- The model's own objective (`minimize` / `maximize`, also the cost-based form) is the lowest priority of a model with goals: in weighted mode it is added in minimization form with weight 1, so `objective_value` is the combined value; in sequential mode it is the final stage. A nonlinear objective with goals raises `ValueError`.
+- Sequential goal programming is lexicographic: each solved priority is bounded by its optimum (`Σ weight·undesired deviation ≤ optimum + SEQUENTIAL_TOLERANCE·max(1, |optimum|)`) in the later stages, and the model objective is solved last. A stage that is not optimal stops the sequence and its solution is returned. `LXOptimizer.solve()` runs sequential mode itself; `solve_sequential()`'s `relaxed_constraints` is optional.
+- `build_weighted_objective` skips priority-0 goals.
+- Solving a model prepared with `prepare_goal_programming()` after `set_goal_mode` changed its mode raises `ValueError` (sequential → weighted ignored the goals).
+- `LXSolution.is_goal_satisfied` (and the "Goals Satisfied" line of `summary()`) checks only the undesired deviations: exceeding a `>=` goal or staying below a `<=` goal is satisfied.
+- A sequential stage that is not solved to optimality is reported with a warning on the `lumix.goal_programming.solver` logger instead of `print`.
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
@@ -88,6 +103,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - B8: adaptive piecewise breakpoints were random and one short of `num_segments + 1`.
 - B9: `LXLinearizerConfig` settings were never applied to piecewise terms.
 - The constant of an `LXNonLinearExpression` objective was dropped.
+- A21: sequential goal programming was not lexicographic: earlier priorities were not bounded, so the result was that of the last priority alone.
+- A22: every row of an indexed goal contained the deviations of all rows; each row now has its own pair, named `<name>_<key>`.
+- A25: priority-0 goals optimized nothing, and the model's own objective was silently replaced by the goal objective.
+- A26: goals were solved as hard constraints unless `prepare_goal_programming()` was called first.
+- Goals with an `LXNonLinearExpression` crashed during relaxation.
 
 ### Security
 

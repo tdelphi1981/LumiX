@@ -52,6 +52,7 @@ Goal Metadata and Data Structures
    lumix.goal_programming.goal.LXGoal
    lumix.goal_programming.goal.LXGoalMetadata
    lumix.goal_programming.goal.LXGoalMode
+   lumix.goal_programming.goal.LXGoalStage
    lumix.goal_programming.goal.get_deviation_var_name
    lumix.goal_programming.goal.priority_to_weight
 
@@ -64,6 +65,10 @@ including priority, weight, and which deviations are undesired.
 
 The :class:`~lumix.goal_programming.goal.LXGoalMode` enum defines solving modes: WEIGHTED
 or SEQUENTIAL (lexicographic).
+
+The :class:`~lumix.goal_programming.goal.LXGoalStage` dataclass reports one solve of
+sequential goal programming (``priority``, ``objective_value``, ``status``); see
+``LXSolution.goal_stages``.
 
 Constraint Relaxation
 ~~~~~~~~~~~~~~~~~~~~~
@@ -94,13 +99,16 @@ Objective Building
    lumix.goal_programming.objective_builder.build_sequential_objectives
    lumix.goal_programming.objective_builder.combine_objectives
    lumix.goal_programming.objective_builder.extract_custom_objectives
+   lumix.goal_programming.objective_builder.final_objective
 
 The objective building module constructs goal programming objectives:
 
 - **Weighted**: Single objective with exponentially scaled priorities
 - **Sequential**: Multiple objectives solved lexicographically
 - **Combined**: Mix traditional objectives with goal deviations
-- **Custom**: Extract priority 0 goals as custom objective terms
+- **Custom**: Extract priority 0 goals from a list of relaxed constraints
+- **Final**: The model's own objective and the priority 0 goals, optimized after all
+  goals (:func:`~lumix.goal_programming.objective_builder.final_objective`)
 
 Solver Orchestration
 ~~~~~~~~~~~~~~~~~~~~
@@ -111,11 +119,16 @@ Solver Orchestration
 
    lumix.goal_programming.solver.LXGoalProgrammingSolver
    lumix.goal_programming.solver.solve_goal_programming
+   lumix.goal_programming.solver.SEQUENTIAL_TOLERANCE
 
 The :class:`~lumix.goal_programming.solver.LXGoalProgrammingSolver` class orchestrates
-sequential (lexicographic) goal programming with multiple solve iterations.
+sequential (lexicographic) goal programming with multiple solve iterations; each
+solved priority is bounded by its optimum, relaxed by ``SEQUENTIAL_TOLERANCE``
+(``0.0`` by default).
 
-For weighted mode, transformation is handled directly in :class:`~lumix.core.model.LXModel`.
+``LXOptimizer.solve()`` relaxes the goals on a copy of the model and picks the mode
+from ``model.goal_mode``; for weighted mode, the transformation is
+:meth:`LXModel.prepare_goal_programming() <lumix.core.model.LXModel.prepare_goal_programming>`.
 
 Detailed API Reference
 ----------------------
@@ -135,6 +148,7 @@ Goal Metadata
 - :class:`LXGoal`: Represents a single goal instance with metadata
 - :class:`LXGoalMetadata`: Configuration for goal constraints (priority, weight, sense)
 - :class:`LXGoalMode`: Enum for solving modes (WEIGHTED, SEQUENTIAL)
+- :class:`LXGoalStage`: Report of one sequential solve (priority, objective value, status)
 
 **Utility Functions:**
 
@@ -176,6 +190,7 @@ Objective Building
 - :func:`build_sequential_objectives`: Build objectives for sequential solving
 - :func:`combine_objectives`: Combine traditional and goal objectives
 - :func:`extract_custom_objectives`: Extract priority 0 custom objectives
+- :func:`final_objective`: The model's objective and the priority 0 goals, solved after all goals
 
 Solver
 ~~~~~~
@@ -193,7 +208,11 @@ Solver
 
 **Key Functions:**
 
-- :func:`solve_goal_programming`: High-level convenience function
+- :func:`solve_goal_programming`: High-level convenience function (weighted or sequential)
+
+**Module Data:**
+
+- ``SEQUENTIAL_TOLERANCE``: Relative slack of the stage bounds in sequential mode
 
 Usage Examples
 --------------
@@ -241,7 +260,7 @@ Multi-Priority Goals
 
 .. code-block:: python
 
-   # Priority 1: Maximize profit (custom objective)
+   # Priority 0: Maximize profit after all goals (custom objective)
    profit_goal = (
        LXConstraint("profit")
        .expression(profit_expr)
@@ -250,7 +269,7 @@ Multi-Priority Goals
        .as_goal(priority=0, weight=1.0)  # Priority 0 = custom objective
    )
 
-   # Priority 2: Meet demand (higher priority)
+   # Priority 1: Meet demand (highest priority)
    demand_goal = (
        LXConstraint[Product]("demand")
        .expression(production_expr)
@@ -260,7 +279,7 @@ Multi-Priority Goals
        .from_data(products)
    )
 
-   # Priority 3: Minimize overtime (lower priority)
+   # Priority 2: Minimize overtime (lower priority)
    overtime_goal = (
        LXConstraint("overtime")
        .expression(overtime_expr)
@@ -316,11 +335,12 @@ Sequential Goal Programming
    # Create solver
    gp_solver = LXGoalProgrammingSolver(optimizer)
 
-   # Get relaxed constraints from model
-   relaxed_constraints = model._relaxed_constraints
+   # Solve sequentially by priority (goals are relaxed on a copy of the model)
+   solution = gp_solver.solve_sequential(model)
 
-   # Solve sequentially by priority
-   solution = gp_solver.solve_sequential(model, relaxed_constraints)
+   # Or simply: solution = optimizer.solve(model)
+   for stage in solution.goal_stages:
+       print(stage.priority, stage.objective_value, stage.status)
 
 Building Custom Objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

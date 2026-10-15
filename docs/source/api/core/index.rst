@@ -77,6 +77,7 @@ Expressions
    lumix.core.expressions.LXNonLinearExpression
    lumix.core.expressions.LXQuadraticTerm
    lumix.core.expressions.LXKeyFilter
+   lumix.core.expressions.LXRowKeyFilter
 
 Expression classes for building objective functions and constraint left-hand sides.
 

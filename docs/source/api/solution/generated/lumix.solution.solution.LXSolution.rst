@@ -46,5 +46,6 @@
       ~LXSolution.shadow_prices
       ~LXSolution.reduced_costs
       ~LXSolution.goal_deviations
+      ~LXSolution.goal_stages
    
    

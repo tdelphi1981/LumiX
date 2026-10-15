@@ -12,7 +12,12 @@ function by combining weighted deviations. The objective building module provide
 - **Weighted objectives**: Single objective with exponentially scaled priorities
 - **Sequential objectives**: Multiple objectives for lexicographic optimization
 - **Combined objectives**: Mix traditional objectives with goal deviations
-- **Custom objectives**: Extract priority 0 goals as custom terms
+- **Final objective**: The model's own objective and the priority 0 goals,
+  optimized after all goals (:func:`~lumix.goal_programming.objective_builder.final_objective`)
+
+You rarely call these functions yourself: ``optimizer.solve(model)`` relaxes the
+goals and builds the objectives on a copy of the model. They are useful to inspect
+or customize the objectives.
 
 Objective Types
 ---------------
@@ -47,6 +52,13 @@ Where:
    # Use in model
    model.minimize(objective)
 
+Priority 0 goals are skipped: they are objective terms, not relaxed rows (see
+`Final Objective (Priority 0 and the Model Objective)`_).
+
+.. versionchanged:: 0.3.0
+
+   ``build_weighted_objective`` skips priority 0 goals.
+
 Sequential Objectives
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -70,7 +82,10 @@ Creates separate objectives for each priority level:
    for priority, obj_expr in sequential_objs:
        model.minimize(obj_expr)
        solution = optimizer.solve(model)
-       # Fix deviations at this priority before next iteration
+       # Bound this priority by its optimum before the next iteration
+
+``optimizer.solve(model)`` does this for you when the model is in sequential mode
+(see :doc:`sequential-mode`).
 
 Building Weighted Objectives
 -----------------------------
@@ -195,8 +210,9 @@ Basic Usage
            print(f"Warning: Priority {priority} not optimal")
            break
 
-       # Fix deviations for next iteration
-       # (implementation details omitted)
+       # Bound this priority by its optimum for the next iteration:
+       #   objective_expr <= solution.objective_value
+       # (optimizer.solve() does all of this in sequential mode)
 
 What Gets Excluded
 ~~~~~~~~~~~~~~~~~~
@@ -214,8 +230,8 @@ Priority 0 goals (custom objectives) are excluded from sequential objectives:
        .as_goal(priority=0, weight=1.0)  # Priority 0
    )
 
-   # build_sequential_objectives will skip this
-   # These should be handled separately or combined with highest priority
+   # build_sequential_objectives will skip this; in sequential mode it is
+   # optimized in the final stage, together with the model's own objective
 
 Combining Objectives
 --------------------
@@ -265,11 +281,53 @@ Handling Maximization
        goal_weight=1.0
    )
 
-Custom Objectives (Priority 0)
--------------------------------
+Final Objective (Priority 0 and the Model Objective)
+----------------------------------------------------
+
+.. versionadded:: 0.3.0
+
+:func:`~lumix.goal_programming.objective_builder.final_objective` builds the
+objective that comes after all goals: the model's own objective (from
+``minimize()`` / ``maximize()``, also the cost-based form without an argument)
+and the priority 0 goals. A priority 0 goal's expression is maximized for
+``.ge()`` and minimized for ``.le()``, times its weight.
+
+.. code-block:: python
+
+   from lumix.goal_programming.objective_builder import final_objective
+
+   custom_goals = [c for c in model.constraints
+                   if c.is_goal() and c.goal_metadata.priority == 0]
+
+   result = final_objective(model, custom_goals)
+   if result is not None:
+       expr, sense = result
+
+It returns ``None`` when there is neither a model objective nor a priority 0 goal.
+Without priority 0 goals the model's objective keeps its sense; with them
+everything is combined into one minimization (maximized expressions are
+subtracted). It raises ``ValueError`` for a nonlinear model objective and for a
+priority 0 goal that uses ``.eq()``, is indexed or has nonlinear terms.
+
+How the final objective is used:
+
+- **Weighted mode**: added to the weighted goal objective in minimization form,
+  with weight ``priority_to_weight(0) = 1``.
+- **Sequential mode**: solved as the last stage, with every priority bounded by its
+  optimum.
+
+.. code-block:: text
+
+   # Weighted example (maximize profit, one priority 1 goal):
+   #   minimize: 1,000,000 × neg_dev[demand]   (priority 1)
+   #           - profit_expr                   (model objective / priority 0)
 
 Extracting Custom Objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``extract_custom_objectives`` filters priority 0 goals from a list of relaxed
+constraints you built yourself with ``relax_constraint``. The goal relaxation of a
+model does not relax priority 0 goals, so use ``final_objective`` for them.
 
 .. code-block:: python
 
@@ -301,19 +359,21 @@ Using Custom Objectives
 
 .. code-block:: python
 
-   # Priority 0 goals are treated as custom objective terms
-   # They contribute to the objective with weight 1.0 (no priority scaling)
+   # Priority 0 goals are objective terms, with weight 1.0 (no priority scaling)
 
    # In weighted mode:
-   #   Objective = custom_objectives + priority_1_goals + priority_2_goals + ...
+   #   Objective = priority_1_goals + priority_2_goals + ... + final_objective
    #
-   # Where custom_objectives use weight 1.0,
-   # and priority goals use exponential scaling
-
    # Example:
-   #   minimize: 1.0 × neg_dev[profit]           (priority 0)
-   #           + 1,000,000 × neg_dev[demand]     (priority 1)
+   #   minimize: 1,000,000 × neg_dev[demand]     (priority 1)
    #           + 100,000 × neg_dev[quality]      (priority 2)
+   #           - 1.0 × profit_expr               (priority 0, maximized)
+
+.. versionchanged:: 0.3.0
+
+   Priority 0 goals were relaxed like other goals and their deviation minimized
+   with weight 1, which optimized nothing (a ``profit >= 0`` goal is met by any
+   plan).
 
 Practical Examples
 ------------------
@@ -379,11 +439,11 @@ Multi-Objective Production Planning
        .add_constraint(demand_goal)
    )
 
-   # Behind the scenes:
-   #   1. Constraints are relaxed
+   # Behind the scenes (when solved):
+   #   1. The demand goal is relaxed; the priority 0 profit goal is not
    #   2. Weighted objective is built:
-   #        minimize: 1.0 × neg_dev[profit]
-   #                + 1,000,000 × neg_dev[demand]
+   #        minimize: 1,000,000 × neg_dev[demand]
+   #                - 1.0 × profit
    #   3. Demand is effectively prioritized over profit
 
 Portfolio Optimization

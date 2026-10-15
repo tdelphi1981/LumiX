@@ -154,8 +154,10 @@ Weighted vs Sequential Mode
    model.set_goal_mode("sequential")
    # Solve priorities lexicographically:
    # 1. Minimize P1 deviations
-   # 2. Fix P1, minimize P2 deviations
-   # 3. Fix P2, minimize P3 deviations
+   # 2. Bound P1 by its optimum, minimize P2 deviations
+   # 3. Bound P1 and P2, minimize P3 deviations
+   # 4. Finally optimize the model's own objective (if any)
+   # solution.goal_stages reports each solve
 
 Solution Analysis
 ~~~~~~~~~~~~~~~~~
@@ -321,7 +323,8 @@ Pattern 3: Custom Objective (Priority 0)
 
 .. code-block:: python
 
-   # Use priority 0 to incorporate custom objective
+   # Use priority 0 to incorporate custom objective, optimized after all goals
+   # (.ge() maximizes the expression, .le() minimizes it; rhs is not used)
    model.add_constraint(
        LXConstraint("maximize_profit")
        .expression(profit_expr)
@@ -329,6 +332,9 @@ Pattern 3: Custom Objective (Priority 0)
        .rhs(0)
        .as_goal(priority=0, weight=1.0)
    )
+
+   # Equivalent: the model's own objective is the lowest priority
+   model.maximize(profit_expr)
 
 Pattern 4: Indexed Goals
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -444,7 +450,7 @@ Try These Modifications
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **More Priorities**: Add 4th and 5th priority levels
-2. **Sequential Mode**: Enable true preemptive GP (when available)
+2. **Sequential Mode**: Enable true preemptive GP with ``model.set_goal_mode("sequential")``
 3. **Dynamic Weights**: Adjust weights based on context
 4. **Conditional Goals**: Goals that activate under conditions
 5. **Interactive**: Allow user to set priorities dynamically

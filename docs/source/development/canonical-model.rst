@@ -31,6 +31,8 @@ Structure (``schema_version`` 1):
 - ``objective_nonlinear``: the nonlinear terms of an ``LXNonLinearExpression``
   objective, one :class:`~lumix.core.canonical.LXCanonicalNonlinear` per variable
   instance (see `Nonlinear objective items`_).
+- ``goal_stages``: the stage objectives of sequential goal programming, empty
+  otherwise (see `Goal programming`_).
 
 Adding fields keeps the schema version; changing or removing fields increments it.
 
@@ -124,6 +126,46 @@ Row semantics
 - For ``add_multi_term`` / ``sum_over`` on ``indexed_by_product`` families,
   coefficients and filters receive one argument per dimension; on single-index
   families they receive the instance (tuples and NamedTuples are not unpacked).
+- A filter of type :class:`~lumix.core.expressions.LXRowKeyFilter` keeps, in each
+  row, only the instance whose index key is ``row_key(row)``. The builder looks
+  that instance up by key instead of testing every instance, so an indexed
+  constraint whose rows each use one instance of another family builds in linear
+  time. Goal relaxation uses it to give every row of an indexed goal its own
+  deviation variables.
+
+Goal programming
+----------------
+
+.. versionadded:: 0.3.0
+
+A model with goals (constraints marked with ``.as_goal()``) is relaxed in the
+canonical form; the model itself is not changed (see
+:doc:`/user-guide/goal_programming/index`):
+
+- the deviation variables appear in ``variables`` (families ``<goal>_pos_dev`` and
+  ``<goal>_neg_dev``, keyed by the goal instance id: the goal name for a single
+  goal, ``<goal>_<key>`` for each row of an indexed goal);
+- each goal row of priority 1 or lower is an ``EQ`` row with its deviations;
+  priority 0 goals are objective terms, not rows.
+
+The objective depends on the goal mode:
+
+- **Weighted** (the default): ``objective`` is the weighted sum of the undesired
+  deviations plus the model's own objective and the priority 0 goals, in
+  minimization form; ``goal_stages`` is ``()``.
+- **Sequential**: ``goal_stages`` is a tuple of objective coefficient dicts
+  (``{position: coeff}``, the weighted undesired deviations of one priority), one
+  per priority in solve order (priority 1 first). ``objective`` holds the final
+  stage: the model's own objective together with the priority 0 goals, empty when
+  there is neither. An engine solves the stages in order and bounds each solved
+  stage by its optimum before the next one.
+
+.. code-block:: python
+
+   model.set_goal_mode("sequential")
+   canon = model.to_canonical()
+   for coeffs in canon.goal_stages:
+       print({canon.variables[i].name: c for i, c in coeffs.items()})
 
 Scalar and empty families
 -------------------------

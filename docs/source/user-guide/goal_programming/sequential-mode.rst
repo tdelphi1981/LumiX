@@ -9,12 +9,19 @@ Overview
 **Sequential goal programming** (also called **lexicographic goal programming**) optimizes
 goals one priority level at a time in strict order:
 
-1. Optimize priority 1 goals, record optimal deviation values
-2. Fix priority 1 deviations to optimal values
-3. Optimize priority 2 goals (subject to fixed priority 1)
+1. Optimize priority 1 goals and record the optimal value of their weighted deviations
+2. Bound the priority 1 deviations by that optimum
+3. Optimize priority 2 goals (subject to the priority 1 bound)
 4. Repeat for all priorities
+5. Finally, optimize the model's own objective and the priority 0 goals (the final stage)
 
 This guarantees that higher priority goals are **never compromised** for lower priorities.
+
+.. versionchanged:: 0.3.0
+
+   Sequential mode is lexicographic. Before 0.3.0 the earlier priorities were not
+   bounded, so each stage could undo the previous ones and the result was that of
+   the last priority alone.
 
 When to Use
 -----------
@@ -42,14 +49,14 @@ Sequential Solving Process
 
    graph TD
        A[Priority 1 Goals] --> B[Solve P1]
-       B --> C[Record P1 Optimal Deviations]
-       C --> D[Fix P1 Deviations]
+       B --> C[Record P1 Optimum]
+       C --> D[Bound P1 Deviations]
        D --> E[Priority 2 Goals]
        E --> F[Solve P2]
-       F --> G[Record P2 Optimal Deviations]
-       G --> H[Fix P2 Deviations]
-       H --> I[Priority 3 Goals]
-       I --> J[Solve P3]
+       F --> G[Record P2 Optimum]
+       G --> H[Bound P2 Deviations]
+       H --> I[Model Objective + Priority 0]
+       I --> J[Solve Final Stage]
        J --> K[Final Solution]
 
        style A fill:#e1f5ff
@@ -72,7 +79,11 @@ For priorities P1, P2, P3, ...:
 
    \text{subject to: model constraints}
 
-**Step 2**: Fix P1 deviations, solve for P2
+Here :math:`d_g` stands for the undesired deviations of goal :math:`g` (the
+shortfall of a ``>=`` goal, the excess of a ``<=`` goal, both for an ``==`` goal),
+and :math:`z_1^*` is the optimal value of step 1.
+
+**Step 2**: Bound P1 by its optimum, solve for P2
 
 .. math::
 
@@ -82,9 +93,23 @@ For priorities P1, P2, P3, ...:
 
    \quad \text{model constraints}
 
-   \quad d_g^{P1} = d_g^{P1*} \quad \forall g \in G_1
+   \quad \sum_{g \in G_1} w_g d_g \le z_1^* + \tau \max(1, |z_1^*|)
 
-**Step 3**: Fix P1 and P2, solve for P3, and so on.
+**Step 3**: Bound P1 and P2, solve for P3, and so on.
+
+**Final stage**: With every priority bounded, optimize the model's own objective
+together with the priority 0 goals. It is skipped when the model has neither.
+
+The relative slack :math:`\tau` is
+``lumix.goal_programming.solver.SEQUENTIAL_TOLERANCE``, ``0.0`` by default: each
+stage is bounded by its exact optimum, and the solver's own feasibility tolerance
+absorbs rounding. Raise it only if a solver reports a later stage infeasible:
+
+.. code-block:: python
+
+   import lumix.goal_programming.solver as gp_solver
+
+   gp_solver.SEQUENTIAL_TOLERANCE = 1e-6
 
 Basic Usage
 -----------
@@ -135,6 +160,79 @@ Setting Sequential Mode
    # 1. First optimize demand (priority 1)
    # 2. Then optimize quality without degrading demand (priority 2)
 
+``optimizer.solve(model)`` reads the mode from ``model.set_goal_mode(...)`` and runs
+the stages itself; the model is not changed, so the mode can be changed between
+solves:
+
+.. code-block:: python
+
+   model.set_goal_mode("weighted")
+   weighted = optimizer.solve(model)
+
+   model.set_goal_mode("sequential")
+   sequential = optimizer.solve(model)
+
+.. note::
+
+   This holds for models whose goals are relaxed by ``solve()``. After an explicit
+   ``model.prepare_goal_programming()`` the model is relaxed for the mode set at
+   that time; solving it after ``set_goal_mode`` changed the mode raises
+   ``ValueError``. Build a new model to switch modes.
+
+Stage Reports
+~~~~~~~~~~~~~
+
+.. versionadded:: 0.3.0
+
+``solution.goal_stages`` lists every solve as a
+:class:`~lumix.goal_programming.goal.LXGoalStage` with ``priority``,
+``objective_value`` and ``status``. The final stage (model objective and priority 0
+goals) has priority ``0``:
+
+.. code-block:: python
+
+   solution = optimizer.solve(model)
+
+   for stage in solution.goal_stages:
+       print(f"Priority {stage.priority}: {stage.objective_value:.2f} ({stage.status})")
+
+   # Priority 1: 0.00 (optimal)
+   # Priority 2: 6.00 (optimal)
+   # Priority 0: 42.00 (optimal)
+
+The returned solution is that of the last stage solved: its variable values and
+goal deviations, and ``objective_value`` of that stage (your own objective when
+the model has one).
+
+If a stage does not solve to optimality (infeasible, a time limit, ...), the
+sequence stops: lower priorities and the final stage are not solved, the solution
+of that stage is returned (for example with status ``"infeasible"``), it is the last
+entry of ``goal_stages``, and a warning is logged on the
+``lumix.goal_programming.solver`` logger:
+
+.. code-block:: python
+
+   solution = optimizer.solve(model)
+   if not solution.is_optimal():
+       last = solution.goal_stages[-1]
+       print(f"Stopped at priority {last.priority}: {last.status}")
+
+The Model Objective as the Final Stage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An objective set with ``model.minimize(...)`` / ``model.maximize(...)`` is solved
+last, with every goal bounded by its optimum. It keeps its sense; when priority 0
+goals are present, they are combined with it into one minimization (a maximized
+expression is subtracted):
+
+.. code-block:: python
+
+   model.maximize(profit_expr)
+   model.set_goal_mode("sequential")
+   solution = optimizer.solve(model)
+
+   print(solution.objective_value)  # the best profit that keeps every goal optimal
+
 Using the Solver Directly
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -142,20 +240,31 @@ Using the Solver Directly
 
    from lumix.goal_programming import LXGoalProgrammingSolver
 
-   # Set sequential mode
-   model.set_goal_mode("sequential")
-
-   # Get relaxed constraints (internal model state)
-   relaxed_constraints = model._relaxed_constraints
-
    # Create sequential solver
    gp_solver = LXGoalProgrammingSolver(optimizer)
 
-   # Solve sequentially
-   solution = gp_solver.solve_sequential(
-       model=model,
-       relaxed_constraints=relaxed_constraints
-   )
+   # Solve sequentially; the goals are relaxed on a copy of the model
+   solution = gp_solver.solve_sequential(model)
+
+``relaxed_constraints`` is optional and defaults to the model's own relaxed goals.
+
+:func:`~lumix.goal_programming.solver.solve_goal_programming` takes the mode as an
+argument; it overrides the model's mode without changing ``model.goal_mode``:
+
+.. code-block:: python
+
+   from lumix import LXGoalMode, solve_goal_programming
+
+   solution = solve_goal_programming(model, optimizer, mode=LXGoalMode.SEQUENTIAL)
+
+A model already relaxed with ``prepare_goal_programming()`` for the other mode
+raises ``ValueError``.
+
+.. versionchanged:: 0.3.0
+
+   ``solve_goal_programming(..., mode=LXGoalMode.SEQUENTIAL)`` works (it raised
+   ``NotImplementedError``), and ``relaxed_constraints`` of ``solve_sequential`` is
+   optional.
 
 Practical Examples
 ------------------
@@ -380,6 +489,10 @@ Same Problem, Different Modes
    # - P2 goal is optimized without degrading P1
    # - P3 goal is optimized without degrading P1 or P2
 
+The two modes give different results when a lower priority goal has a much larger
+scale than a higher one; see :ref:`the weighted mode example
+<weighted-scale-example>`.
+
 Expected Differences
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -391,7 +504,7 @@ Expected Differences
      - Sequential Mode
    * - Number of solves
      - 1
-     - N (number of priorities)
+     - N (number of priorities), plus one for the model objective and priority 0 goals
    * - Priority enforcement
      - Approximate (via weights)
      - Strict (lexicographic)
@@ -431,21 +544,11 @@ Monitoring Progress
 .. code-block:: python
 
    # Track how each priority level performs
-   gp_solver = LXGoalProgrammingSolver(optimizer)
+   solution = optimizer.solve(model)
 
-   # Wrap solve method to monitor
-   original_solve = gp_solver.optimizer.solve
-
-   def monitored_solve(model):
-       print(f"Solving: {model.name}")
-       result = original_solve(model)
-       print(f"  Objective: {result.objective_value:.2f}")
-       print(f"  Status: {result.status}")
-       return result
-
-   gp_solver.optimizer.solve = monitored_solve
-
-   solution = gp_solver.solve_sequential(model, relaxed_constraints)
+   for stage in solution.goal_stages:
+       label = "final" if stage.priority == 0 else f"priority {stage.priority}"
+       print(f"{label}: objective {stage.objective_value:.2f}, status {stage.status}")
 
 Partial Sequential
 ~~~~~~~~~~~~~~~~~~
@@ -465,8 +568,8 @@ Partial Sequential
    model_p1 = build_model_with_goals(critical_goals)
    solution_p1 = optimizer.solve(model_p1)
 
-   # Fix P1 deviations, solve P2+P3 with weights
-   # (implementation would require manual deviation fixing)
+   # Bound P1 deviations, solve P2+P3 with weights
+   # (implementation would require manual deviation bounds)
 
 Best Practices
 --------------

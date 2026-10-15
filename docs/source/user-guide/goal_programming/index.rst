@@ -48,9 +48,12 @@ Key Concepts
 
 1. **Soft Constraints (Goals)**: Can be violated with a penalty
 2. **Deviation Variables**: Measure how much a goal is over/under achieved
-3. **Priorities**: Order goals by importance (1 = highest)
+3. **Priorities**: Order goals by importance (1 = highest); priority 0 marks an
+   objective term that is optimized after all goals
 4. **Weights**: Relative importance within same priority level
 5. **Solving Modes**: Weighted (single solve) or Sequential (lexicographic)
+6. **Model Objective**: An objective set with ``minimize()`` / ``maximize()`` is kept
+   as the lowest priority, optimized after all goals
 
 When to Use Goal Programming
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -127,7 +130,23 @@ When you mark a constraint as a goal with ``.as_goal()``, LumiX automatically:
 1. **Creates deviation variables**: Positive and negative deviations for each goal instance
 2. **Relaxes the constraint**: Converts it to an equality with deviations
 3. **Builds the objective**: Minimizes undesired deviations based on constraint type
-4. **Applies priorities**: Uses exponential weights for priority levels
+4. **Applies priorities**: Uses exponential weights for priority levels (weighted
+   mode) or one solve per priority level (sequential mode)
+5. **Keeps your objective**: The model's own objective and the priority 0 goals are
+   optimized after all goals
+
+``optimizer.solve(model)`` and ``model.to_canonical()`` do this on a shallow copy of
+the model: your model keeps its constraints, variables and objective, so you can
+change the goal mode or the goals and solve again.
+
+.. versionchanged:: 0.3.0
+
+   Goals are relaxed automatically by ``solve()`` and ``to_canonical()``, and
+   ``prepare_goal_programming()`` is no longer needed. Before 0.3.0, a model solved
+   without it treated its goals as hard constraints. Calling
+   ``model.prepare_goal_programming()`` still works: it relaxes the goals in the
+   model itself, which is useful to inspect the relaxed model or for tools that
+   read the model directly.
 
 .. mermaid::
 
@@ -177,6 +196,40 @@ The relationship is: ``expr + neg_dev - pos_dev = rhs``
    # If actual production = 90:
    #   pos_dev = 0   (no over-production)
    #   neg_dev = 10  (under-production)
+
+In an indexed goal (``indexed_by`` / ``from_data``), every row has its own pair of
+deviations, keyed ``<goal name>_<index key>``.
+
+Priority 0 and the Model Objective
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Priorities are integers ``>= 0``. Priorities 1, 2, 3, ... are goals; **priority 0**
+is not a goal but an objective term: the expression of a ``.ge()`` goal is
+maximized, that of a ``.le()`` goal minimized, times its weight. A priority 0 goal
+has no deviation variables and its right-hand side is not used.
+
+The model's own objective (``model.minimize(...)``, ``model.maximize(...)``, or the
+cost-based ``minimize()`` / ``maximize()`` without an argument) is the **lowest
+priority**: it is optimized together with the priority 0 goals, after all goals.
+
+.. code-block:: python
+
+   model.maximize(profit_expr)        # optimized after the goals
+   model.add_constraint(demand_goal)  # priority 1
+   solution = optimizer.solve(model)
+
+These raise ``ValueError``:
+
+- a negative or non-integer priority;
+- a priority 0 goal that uses ``.eq()``, is indexed, or has nonlinear terms;
+- a nonlinear (``LXNonLinearExpression``) model objective in a model with goals.
+  Quadratic objectives are accepted on solvers that support them (Gurobi, CPLEX).
+
+.. versionchanged:: 0.3.0
+
+   Priority 0 goals are optimized as objective terms, and the model's own objective
+   is kept as the lowest priority. Before 0.3.0 priority 0 goals optimized nothing
+   and the model's objective was silently replaced by the goal objective.
 
 Components Overview
 -------------------
@@ -232,13 +285,16 @@ Single-solve approach where all goals are combined into one objective function w
 exponentially scaled priorities. See :doc:`weighted-mode` for details.
 
 **Use when**: Goals have clear priority hierarchy and you want a single optimal solution.
+Weighted mode approximates the priority order with weights; when goals have very
+different scales, use sequential mode.
 
 Sequential Goal Programming
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Multi-solve approach where goals are optimized one priority level at a time. Higher
-priority goals are optimized first, then their optimal values are fixed while optimizing
-lower priorities. See :doc:`sequential-mode` for details.
+priority goals are optimized first, then each optimized level is bounded by its optimum
+while lower priorities are optimized; the model's own objective comes last. Each solve
+is reported in ``solution.goal_stages``. See :doc:`sequential-mode` for details.
 
 **Use when**: Priorities must be strictly enforced (lexicographic optimization).
 
@@ -360,12 +416,13 @@ Resource Allocation
 
 .. code-block:: python
 
-   # Custom objective: Maximize profit
+   # Custom objective: Maximize profit after all goals
+   # (same as model.maximize(profit_expr))
    profit_objective = (
        LXConstraint("profit")
        .expression(profit_expr)
-       .ge()
-       .rhs(0)
+       .ge()  # .ge() maximizes the expression, .le() minimizes it
+       .rhs(0)  # ignored for priority 0
        .as_goal(priority=0, weight=1.0)  # Priority 0 = custom objective
    )
 

@@ -526,14 +526,15 @@ Common Pitfalls
 Pitfall 1: Forgetting ``prepare_goal_programming()``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Error**: Goal programming doesn't work, all constraints treated as hard
+**Error** (LumiX before 0.3.0): Goal programming doesn't work, all constraints treated as hard
 
-**Solution**:
+**Solution**: Since 0.3.0, ``optimizer.solve(model)`` relaxes the goals itself and
+the call is optional. On older versions, call it before solving:
 
 .. code-block:: python
 
    model.set_goal_mode("weighted")
-   model.prepare_goal_programming()  # Don't forget this!
+   model.prepare_goal_programming()  # Needed before 0.3.0
    solution = optimizer.solve(model)
 
 Pitfall 2: Database Not Populated

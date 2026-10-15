@@ -28,6 +28,7 @@ Weighted goal programming is ideal when:
 
 - Priorities must be absolutely enforced (use :doc:`sequential-mode` instead)
 - You need exact lexicographic optimization
+- Goals have very different scales (see `Limits of the Weight Approximation`_)
 
 How It Works
 ------------
@@ -79,6 +80,33 @@ For each goal, the system:
 
    EQ (=): minimize both deviations
        budget == 50000  →  minimize (pos_dev + neg_dev)
+
+The model's own objective and the priority 0 goals are added to this sum (see
+`Combining with Custom Objectives`_).
+
+.. _weighted-scale-example:
+
+Limits of the Weight Approximation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The weights ``10^(7-p)`` approximate the priority order; they do not enforce it.
+A lower priority wins whenever one unit of its weighted deviation is worth more
+than the higher priority's, which happens when goal expressions have very
+different scales. For example, with ``x + y <= 10`` as a hard constraint:
+
+.. code-block:: python
+
+   gx = (LXConstraint("gx").expression(LXLinearExpression().add_term(x, 1.0))
+         .ge().rhs(8).as_goal(priority=1, weight=1.0))
+   gy = (LXConstraint("gy").expression(LXLinearExpression().add_term(y, 20.0))
+         .ge().rhs(160).as_goal(priority=2, weight=1.0))
+
+   # Weighted:   x = 2, y = 8  (a unit of y removes 20 units of gy's deviation,
+   #                            2,000,000 against 1,000,000 for a unit of x)
+   # Sequential: x = 8, y = 2  (priority 1 is met first)
+
+When goals have very different scales, or priorities must hold exactly, use
+:doc:`sequential-mode`, or rescale the goal expressions.
 
 Basic Usage
 -----------
@@ -263,10 +291,45 @@ Asymmetric Deviation Costs
 Combining with Custom Objectives
 ---------------------------------
 
+The Model Objective
+~~~~~~~~~~~~~~~~~~~
+
+An objective set on the model with ``minimize()`` / ``maximize()`` (with an
+expression, or without an argument to use the variables' costs) is kept as the
+**lowest priority**. In weighted mode it is added to the goal objective in
+minimization form (a maximized objective is subtracted) with weight
+``priority_to_weight(0) = 1``:
+
+.. code-block:: python
+
+   model.maximize(profit_expr)       # lowest priority
+   model.add_constraint(demand_goal)  # priority 1
+
+   solution = optimizer.solve(model)
+   # Solved objective: 10^6 * demand deviations - profit
+   print(solution.objective_value)    # the combined value, not the profit
+
+``solution.objective_value`` is the value of this combined objective. Compute the
+value of your own objective from the variable values when you need it, or use
+:doc:`sequential-mode`, whose final stage reports it directly.
+
+A nonlinear (``LXNonLinearExpression``) objective cannot be combined with goals
+and raises ``ValueError``; write the nonlinear terms in a goal instead. A
+quadratic objective works on solvers that support it (Gurobi, CPLEX).
+
+.. versionchanged:: 0.3.0
+
+   The model's objective is kept as the lowest priority. Before 0.3.0 it was
+   silently replaced by the goal objective.
+
 Priority 0 for Custom Objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use **priority 0** to include a traditional objective alongside goals:
+Use **priority 0** to include a traditional objective alongside goals. A priority
+0 goal is an objective term, not a goal: the expression of a ``.ge()`` goal is
+maximized and the expression of a ``.le()`` goal minimized, times its weight. Its
+right-hand side is not used and it has no deviation variables. Priority 0 goals
+are combined with the model's objective, with weight ``1``:
 
 .. code-block:: python
 
@@ -277,10 +340,9 @@ Use **priority 0** to include a traditional objective alongside goals:
            LXLinearExpression()
            .add_term(production, lambda p: p.profit_margin)
        )
-       .ge()
-       .rhs(0)
+       .ge()   # maximize the expression
+       .rhs(0)  # not used for priority 0
        .as_goal(priority=0, weight=1.0)  # Priority 0!
-       .from_data(products)
    )
 
    # Regular goals (priority 1+)
@@ -302,9 +364,18 @@ Use **priority 0** to include a traditional objective alongside goals:
    )
 
    # Result:
-   #   Priority 1 (demand) will be optimized first
-   #   Then priority 2 (quality)
-   #   Finally, profit will be maximized without hurting higher priorities
+   #   Priority 1 (demand) has the largest weight (10^6)
+   #   Then priority 2 (quality, 10^5)
+   #   Profit is maximized with weight 1, after the goals
+
+Priority 0 goals must use ``.ge()`` or ``.le()`` and must not be indexed or contain
+nonlinear terms; otherwise ``ValueError`` is raised. ``get_goal_deviations()``
+returns ``None`` for them.
+
+.. versionchanged:: 0.3.0
+
+   Priority 0 goals are optimized. Before 0.3.0 they were relaxed like other goals
+   with weight 1, so they optimized nothing.
 
 Practical Example
 -----------------
@@ -431,6 +502,7 @@ Production Planning with Multiple Goals
    print("=" * 80)
 
    if solution.is_optimal():
+       # Combined value: weighted goal deviations minus profit
        print(f"\nObjective Value: {solution.objective_value:.2f}")
        print(f"Solve Time: {solution.solve_time:.3f}s")
 
@@ -454,8 +526,8 @@ Production Planning with Multiple Goals
        print("\nGoal Achievement:")
        print("-" * 80)
 
+       # The priority 0 "profit" term has no deviations, so it is not listed
        goals = [
-           ("profit", "Maximize Profit", 0),
            ("demand", "Meet Demand", 1),
            ("utilization", "Target Utilization", 2),
        ]
