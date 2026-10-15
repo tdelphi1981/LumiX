@@ -131,6 +131,7 @@ Setting Sequential Mode
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    quality_goal = (
@@ -186,15 +187,17 @@ Stage Reports
 
 ``solution.goal_stages`` lists every solve as a
 :class:`~lumix.goal_programming.goal.LXGoalStage` with ``priority``,
-``objective_value`` and ``status``. The final stage (model objective and priority 0
-goals) has priority ``0``:
+``objective_value`` and ``status``. ``objective_value`` is ``None`` when the stage
+has no feasible solution. The final stage (model objective and priority 0 goals) has
+priority ``0``:
 
 .. code-block:: python
 
    solution = optimizer.solve(model)
 
    for stage in solution.goal_stages:
-       print(f"Priority {stage.priority}: {stage.objective_value:.2f} ({stage.status})")
+       value = "n/a" if stage.objective_value is None else f"{stage.objective_value:.2f}"
+       print(f"Priority {stage.priority}: {value} ({stage.status})")
 
    # Priority 1: 0.00 (optimal)
    # Priority 2: 6.00 (optimal)
@@ -317,6 +320,7 @@ Resource Allocation with Strict Priorities
        .where(lambda d: d.critical)  # Only critical departments
        .as_goal(priority=1, weight=10.0)  # High weight
        .from_data(departments)
+       .indexed_by(lambda d: d.id)
    )
 
    # Priority 2: All departments meet minimum
@@ -330,6 +334,7 @@ Resource Allocation with Strict Priorities
        .rhs(lambda d: d.min_budget)
        .as_goal(priority=2, weight=5.0)
        .from_data(departments)
+       .indexed_by(lambda d: d.id)
    )
 
    # Priority 3: Approach target budgets
@@ -343,6 +348,7 @@ Resource Allocation with Strict Priorities
        .rhs(lambda d: d.target_budget)
        .as_goal(priority=3, weight=1.0)
        .from_data(departments)
+       .indexed_by(lambda d: d.id)
    )
 
    # Hard constraint: Total budget limit
@@ -414,6 +420,7 @@ Production Scheduling with Hierarchical Goals
        .rhs(lambda m: m.max_safe_hours)
        .as_goal(priority=1, weight=100.0)
        .from_data(machines)
+       .indexed_by(lambda m: m.id)
    )
 
    # Priority 2: Customer commitments (high importance)
@@ -425,6 +432,7 @@ Production Scheduling with Hierarchical Goals
        .where(lambda o: o.is_committed)
        .as_goal(priority=2, weight=10.0)
        .from_data(orders)
+       .indexed_by(lambda o: o.id)
    )
 
    # Priority 3: Additional demand (nice to have)
@@ -436,6 +444,7 @@ Production Scheduling with Hierarchical Goals
        .where(lambda o: not o.is_committed)
        .as_goal(priority=3, weight=1.0)
        .from_data(orders)
+       .indexed_by(lambda o: o.id)
    )
 
    model = (
@@ -548,7 +557,8 @@ Monitoring Progress
 
    for stage in solution.goal_stages:
        label = "final" if stage.priority == 0 else f"priority {stage.priority}"
-       print(f"{label}: objective {stage.objective_value:.2f}, status {stage.status}")
+       value = "n/a" if stage.objective_value is None else f"{stage.objective_value:.2f}"
+       print(f"{label}: objective {value}, status {stage.status}")
 
 Partial Sequential
 ~~~~~~~~~~~~~~~~~~

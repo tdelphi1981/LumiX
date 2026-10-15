@@ -97,6 +97,7 @@ Basic Goal Programming
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)  # Mark as goal!
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Build model
@@ -115,9 +116,10 @@ Basic Goal Programming
    if solution.is_goal_satisfied("demand_goal"):
        print("Demand goal achieved!")
    else:
+       # {"pos": {"demand_goal_<id>": value}, "neg": {...}}, one entry per product
        deviations = solution.get_goal_deviations("demand_goal")
-       print(f"Under-achieved by: {deviations['neg']}")
-       print(f"Over-achieved by: {deviations['pos']}")
+       print(f"Under-achieved by: {sum(deviations['neg'].values()):.2f}")
+       print(f"Over-achieved by: {sum(deviations['pos'].values()):.2f}")
 
 How It Works
 ------------
@@ -359,6 +361,7 @@ Best Practices
           .rhs(lambda p: p.demand)
           .as_goal(priority=1, weight=1.0)  # Can deviate
           .from_data(products)
+          .indexed_by(lambda p: p.id)
       )
 
 4. **Check Goal Satisfaction in Solutions**
@@ -391,6 +394,7 @@ Production Planning
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Priority 2: Maintain quality standards
@@ -434,6 +438,7 @@ Resource Allocation
        .rhs(lambda d: d.target_allocation)
        .as_goal(priority=1, weight=1.0)
        .from_data(departments)
+       .indexed_by(lambda d: d.id)
    )
 
 Multi-Objective Portfolio

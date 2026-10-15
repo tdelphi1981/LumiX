@@ -100,6 +100,7 @@ LumiX automatically relaxes constraints when you use ``.as_goal()``:
        .ge()
        .rhs(lambda p: p.demand_target)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Mark as goal - relaxed automatically when the model is solved
@@ -110,6 +111,7 @@ LumiX automatically relaxes constraints when you use ``.as_goal()``:
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)  # Marks the constraint as a goal
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # When the model is solved (or converted with to_canonical()), LumiX:
@@ -177,6 +179,7 @@ You can manually relax constraints using the relaxation API:
        .ge()
        .rhs(lambda p: p.demand_target)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Manually relax
@@ -340,6 +343,7 @@ Production Planning
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # When relaxed, creates:
@@ -367,6 +371,7 @@ Resource Constraints with Goals
        .le()
        .rhs(lambda r: r.capacity)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
        # No .as_goal() - stays hard constraint
    )
 
@@ -378,6 +383,7 @@ Resource Constraints with Goals
        .rhs(lambda r: r.capacity * r.target_utilization)
        .as_goal(priority=2, weight=1.0)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
 
    # Result:
@@ -426,9 +432,10 @@ Deviation values are available in the solution:
    solution = optimizer.solve(model)
 
    # Via goal deviations
+   # {"pos": {"demand_<id>": value}, "neg": {"demand_<id>": value}}
    deviations = solution.get_goal_deviations("demand")
-   print(f"Positive deviations: {deviations['pos']}")
-   print(f"Negative deviations: {deviations['neg']}")
+   print(f"Positive deviations: {sum(deviations['pos'].values()):.2f}")
+   print(f"Negative deviations: {sum(deviations['neg'].values()):.2f}")
 
    # Via variable access
    pos_dev_values = solution.get_variable(relaxed.pos_deviation)

@@ -71,7 +71,7 @@ class LXSolution(Generic[TModel]):
     nodes: Optional[int] = None
 
     # Goal programming information
-    goal_deviations: Dict[str, Dict[str, Union[float, Dict[Any, float]]]] = field(
+    goal_deviations: Dict[str, Dict[str, Dict[Any, float]]] = field(
         default_factory=dict
     )
     #: True when the model was linearized with a relaxation (McCormick envelopes for a
@@ -152,7 +152,7 @@ class LXSolution(Generic[TModel]):
 
     def get_goal_deviations(
         self, goal_name: str
-    ) -> Optional[Dict[str, Union[float, Dict[Any, float]]]]:
+    ) -> Optional[Dict[str, Dict[Any, float]]]:
         """
         Get deviation values for a goal constraint.
 

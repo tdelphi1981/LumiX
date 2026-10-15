@@ -136,26 +136,30 @@ Goal deviations use nested dictionaries:
 
    @dataclass
    class LXSolution:
-       # Structure: {goal_name: {deviation_type: value}}
+       # Structure: {goal_name: {"pos" | "neg": {row_name: value}}}
        goal_deviations: Dict[str, Dict[str, Union[float, Dict[Any, float]]]]
+
+The solver always stores dicts keyed by row name, also for a single goal (the
+``float`` in the annotation is never produced). A single goal has one row named after
+the goal; an indexed goal has one row per instance, named ``<goal>_<key>``.
 
 **Examples**:
 
 .. code-block:: python
 
-   # Scalar goal
+   # Single goal
    {
        "total_cost_target": {
-           "pos": 0.0,      # No over-achievement
-           "neg": 150.5     # Under by 150.5
+           "pos": {"total_cost_target": 0.0},    # No over-achievement
+           "neg": {"total_cost_target": 150.5}   # Under by 150.5
        }
    }
 
-   # Indexed goal
+   # Indexed goal (.indexed_by(lambda p: p.id), ids "A" and "B")
    {
        "demand_target": {
-           "pos": {"product_A": 10.0, "product_B": 0.0},
-           "neg": {"product_A": 0.0, "product_B": 5.0}
+           "pos": {"demand_target_A": 10.0, "demand_target_B": 0.0},
+           "neg": {"demand_target_A": 0.0, "demand_target_B": 5.0}
        }
    }
 
@@ -473,7 +477,7 @@ Test individual methods:
 
    def test_is_goal_satisfied():
        solution = LXSolution(...)
-       solution.goal_deviations["demand"] = {"pos": 0.0, "neg": 0.0}
+       solution.goal_deviations["demand"] = {"pos": {"demand": 0.0}, "neg": {"demand": 0.0}}
 
        assert solution.is_goal_satisfied("demand") is True
 

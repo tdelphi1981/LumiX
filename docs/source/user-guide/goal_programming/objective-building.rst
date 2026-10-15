@@ -33,7 +33,7 @@ Combines all goals into a single objective function:
 
 Where:
 
-- :math:`w_p` = priority weight (e.g., :math:`10^{6-p}`)
+- :math:`w_p` = priority weight (:math:`10^{7-p}`)
 - :math:`w_g` = goal weight
 - :math:`d_g` = undesired deviation(s) for goal :math:`g`
 - :math:`G_p` = set of goals at priority :math:`p`
@@ -107,6 +107,7 @@ Basic Usage
        .ge()
        .rhs(lambda p: p.demand)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    quality_constraint = (
@@ -181,6 +182,12 @@ Understanding Priority-to-Weight Conversion
    #   Priority 1: weight = 1,000,000
    #   Priority 2: weight = 100,000
    #   Priority 3: weight = 10,000
+
+.. note::
+   Weights are ``10 ** (7 - priority)``: priority 6 weighs 10 and priority 7 weighs 1, the
+   same as the model objective. Goals at priority 7 or higher therefore do **not** dominate
+   the objective (priority 8 weighs 0.1). Keep goals that must win at priorities 1–6, or use
+   sequential mode, which is lexicographic.
 
 Building Sequential Objectives
 -------------------------------
@@ -325,34 +332,12 @@ How the final objective is used:
 Extracting Custom Objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``extract_custom_objectives`` filters priority 0 goals from a list of relaxed
-constraints you built yourself with ``relax_constraint``. The goal relaxation of a
-model does not relax priority 0 goals, so use ``final_objective`` for them.
-
-.. code-block:: python
-
-   from lumix.goal_programming import extract_custom_objectives
-
-   # Some goals have priority 0 (custom objectives)
-   profit_goal = (
-       LXConstraint("profit")
-       .expression(profit_expr)
-       .ge()
-       .rhs(0)
-       .as_goal(priority=0, weight=1.0)
-   )
-
-   # After relaxation
-   relaxed_profit = relax_constraint(profit_goal, profit_metadata)
-
-   all_relaxed = [relaxed_demand, relaxed_quality, relaxed_profit]
-
-   # Extract priority 0 goals
-   custom_objs = extract_custom_objectives(all_relaxed)
-
-   # custom_objs contains only relaxed_profit
-   for custom in custom_objs:
-       print(f"Custom objective: {custom.constraint.name}")
+.. deprecated:: 0.3.0
+   ``extract_custom_objectives`` is deprecated and emits a ``DeprecationWarning``.
+   Priority 0 goals are objective terms, not relaxed rows: ``relax_constraints`` and
+   the model skip them, so on their output it always returns an empty list. Use
+   :func:`~lumix.goal_programming.objective_builder.final_objective` instead (see
+   `Final Objective (Priority 0 and the Model Objective)`_).
 
 Using Custom Objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -429,6 +414,7 @@ Multi-Objective Production Planning
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Build model (automatic objective building)

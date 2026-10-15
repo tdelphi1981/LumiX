@@ -267,14 +267,9 @@ def main():
         goal_name = f"production_goal_{product.id}"
         deviations = solution.get_goal_deviations(goal_name)
         if deviations:
-            # Get deviation values (they're indexed by goal ID)
-            neg_dev_dict = deviations.get("neg", {})
-            pos_dev_dict = deviations.get("pos", {})
-
-            # Extract the value for this product's goal
-            goal_id = f"{goal_name}_{product.id}"
-            neg_dev = neg_dev_dict.get(goal_id, 0) if isinstance(neg_dev_dict, dict) else neg_dev_dict
-            pos_dev = pos_dev_dict.get(goal_id, 0) if isinstance(pos_dev_dict, dict) else pos_dev_dict
+            # Deviations are {row name: value} dicts; a single goal has one row
+            neg_dev = sum(deviations["neg"].values())
+            pos_dev = sum(deviations["pos"].values())
 
             satisfied = solution.is_goal_satisfied(goal_name, tolerance=1e-6)
             status = "[SATISFIED]" if satisfied else "[NOT SATISFIED]"
@@ -287,13 +282,8 @@ def main():
     # Overtime goal (non-indexed, single value)
     deviations = solution.get_goal_deviations("overtime_goal")
     if deviations:
-        neg_dev_val = deviations.get("neg", {})
-        pos_dev_val = deviations.get("pos", {})
-
-        # Extract scalar value (indexed by goal ID)
-        goal_id = "overtime_goal"
-        neg_dev = neg_dev_val.get(goal_id, 0) if isinstance(neg_dev_val, dict) else neg_dev_val
-        pos_dev = pos_dev_val.get(goal_id, 0) if isinstance(pos_dev_val, dict) else pos_dev_val
+        neg_dev = sum(deviations["neg"].values())
+        pos_dev = sum(deviations["pos"].values())
 
         satisfied = solution.is_goal_satisfied("overtime_goal")
         status = "[SATISFIED]" if satisfied else "[NOT SATISFIED]"
@@ -306,13 +296,8 @@ def main():
     # Profit goal (non-indexed, single value)
     deviations = solution.get_goal_deviations("profit_goal")
     if deviations:
-        neg_dev_val = deviations.get("neg", {})
-        pos_dev_val = deviations.get("pos", {})
-
-        # Extract scalar value (indexed by goal ID)
-        goal_id = "profit_goal"
-        neg_dev = neg_dev_val.get(goal_id, 0) if isinstance(neg_dev_val, dict) else neg_dev_val
-        pos_dev = pos_dev_val.get(goal_id, 0) if isinstance(pos_dev_val, dict) else pos_dev_val
+        neg_dev = sum(deviations["neg"].values())
+        pos_dev = sum(deviations["pos"].values())
 
         satisfied = solution.is_goal_satisfied("profit_goal")
         status = "[SATISFIED]" if satisfied else "[NOT SATISFIED]"

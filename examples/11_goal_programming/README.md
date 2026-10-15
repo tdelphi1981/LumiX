@@ -84,8 +84,9 @@ solution = optimizer.solve(model)
 deviations = solution.get_goal_deviations("production_target")
 satisfied = solution.is_goal_satisfied("production_target")
 print(f"Goal satisfied: {satisfied}")
-print(f"Negative deviation: {deviations['neg']}")  # Under-production
-print(f"Positive deviation: {deviations['pos']}")  # Over-production
+# Deviations are dicts {row name: value}; a single goal has one row, named after it
+print(f"Negative deviation: {sum(deviations['neg'].values()):.2f}")  # Under-production
+print(f"Positive deviation: {sum(deviations['pos'].values()):.2f}")  # Over-production
 ```
 
 ## Constraint Type Handling
@@ -150,8 +151,11 @@ Priorities are converted to exponentially different weights:
 - Priority 2: weight = 10^5
 - Priority 3: weight = 10^4
 - ...
+- Priority 7: weight = 1 (the same as the model objective)
 
 This ensures higher priorities dominate lower priorities in a single objective function.
+Goals at priority 7 or higher do **not** dominate the model objective (priority 8 weighs
+0.1); keep goals that must win at priorities 1–6, or use sequential mode.
 
 ```python
 # Priority 1 goals (most important)
@@ -264,30 +268,29 @@ for product in PRODUCTS:
 # Check if goal is satisfied
 satisfied = solution.is_goal_satisfied("demand_goal", tolerance=1e-6)
 
-# Get deviation values
+# Get deviation values: {"pos": {row: value}, "neg": {row: value}}
 deviations = solution.get_goal_deviations("demand_goal")
-pos_dev = deviations["pos"]  # Over-achievement
-neg_dev = deviations["neg"]  # Under-achievement
+pos_dev = sum(deviations["pos"].values())  # Over-achievement
+neg_dev = sum(deviations["neg"].values())  # Under-achievement
 
-# Get total deviation
+# Total undesired deviation (the shortfall of a >= goal)
 total = solution.get_total_deviation("demand_goal")
 ```
 
 ### Indexed Goals
 
 ```python
-# For indexed goals, deviations are dictionaries
+# An indexed goal (.indexed_by(lambda p: p.id)) has one row per product,
+# keyed "<goal name>_<id>"
+deviations = solution.get_goal_deviations("demand_goal")
+neg_dev = deviations["neg"]  # {"demand_goal_<id>": value}
+pos_dev = deviations["pos"]
+
 for product in PRODUCTS:
-    goal_name = f"production_goal_{product.id}"
-    deviations = solution.get_goal_deviations(goal_name)
-
-    # Access by index
-    neg_dev = deviations["neg"]  # Dict[product_id, value]
-    pos_dev = deviations["pos"]  # Dict[product_id, value]
-
+    row = f"demand_goal_{product.id}"
     print(f"Product {product.name}:")
-    print(f"  Shortfall: {neg_dev.get(product.id, 0):.2f}")
-    print(f"  Excess: {pos_dev.get(product.id, 0):.2f}")
+    print(f"  Shortfall: {neg_dev.get(row, 0.0):.2f}")
+    print(f"  Excess: {pos_dev.get(row, 0.0):.2f}")
 ```
 
 ## Examples
@@ -344,19 +347,19 @@ Check if model has any goal constraints.
 ### LXSolution Methods
 
 ```python
-.get_goal_deviations(goal_name: str) -> Dict[str, Union[float, Dict[Any, float]]]
+.get_goal_deviations(goal_name: str) -> Optional[Dict[str, Dict[Any, float]]]
 ```
-Get deviation values for a goal (returns dict with 'pos' and 'neg' keys).
+Get deviation values for a goal: `{"pos": {row: value}, "neg": {row: value}}`. The values are always dicts, keyed by the goal name for a single goal and `"<goal>_<key>"` for each row of an indexed goal.
 
 ```python
-.is_goal_satisfied(goal_name: str, tolerance: float = 1e-6) -> bool
+.is_goal_satisfied(goal_name: str, tolerance: float = 1e-6) -> Optional[bool]
 ```
 Check if the goal's undesired deviations are within tolerance (the shortfall of a `>=` goal, the excess of a `<=` goal, both for `==`).
 
 ```python
-.get_total_deviation(goal_name: str) -> float
+.get_total_deviation(goal_name: str) -> Optional[float]
 ```
-Get total absolute deviation for a goal.
+Get the total undesired deviation of a goal: `neg` for `>=`, `pos` for `<=`, both for `==`, summed over all rows (`None` if the goal is not found). Changed in 0.3.0: it used to add the desired side too, so an over-achieved `>=` goal reported a deviation.
 
 ## Implementation Details
 

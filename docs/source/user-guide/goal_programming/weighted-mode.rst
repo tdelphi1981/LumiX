@@ -44,14 +44,23 @@ LumiX automatically scales weights exponentially based on priority:
    Priority 2 → Weight = 10^5
    Priority 3 → Weight = 10^4
    ...
+   Priority 6 → Weight = 10
+   Priority 7 → Weight = 1
+   Priority 8 → Weight = 0.1
 
 This ensures higher priorities **effectively dominate** lower priorities in the objective.
+
+.. note::
+   Weights are ``10 ** (7 - priority)``: priority 6 weighs 10 and priority 7 weighs 1, the
+   same as the model objective. Goals at priority 7 or higher therefore do **not** dominate
+   the objective (priority 8 weighs 0.1). Keep goals that must win at priorities 1–6, or use
+   sequential mode, which is lexicographic.
 
 **Mathematical formulation**:
 
 .. math::
 
-   \text{minimize} \sum_{p=1}^{P} 10^{(6-p)} \sum_{g \in G_p} w_g (d_g^+ + d_g^-)
+   \text{minimize} \sum_{p=1}^{P} 10^{(7-p)} \sum_{g \in G_p} w_g \sum_{s \in U_g} d_g^s
 
 Where:
 
@@ -59,6 +68,7 @@ Where:
 - :math:`G_p` = set of goals at priority :math:`p`
 - :math:`w_g` = weight for goal :math:`g`
 - :math:`d_g^+, d_g^-` = positive/negative deviations
+- :math:`U_g` = the undesired sides of goal :math:`g`: :math:`\{-\}` for ``>=``, :math:`\{+\}` for ``<=``, both for ``==``
 
 Objective Construction
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -139,6 +149,7 @@ Single-Priority Goals
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Build and solve
@@ -176,6 +187,7 @@ Multi-Priority Goals
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Priority 2: Maintain quality
@@ -263,6 +275,7 @@ Asymmetric Deviation Costs
        .rhs(lambda p: p.target_inventory)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Note: EQ goals minimize BOTH pos and neg deviations equally
@@ -276,6 +289,7 @@ Asymmetric Deviation Costs
        .rhs(lambda p: p.target_inventory)
        .as_goal(priority=1, weight=3.0)  # Higher penalty
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Penalize over-stock less
@@ -286,6 +300,7 @@ Asymmetric Deviation Costs
        .rhs(lambda p: p.target_inventory)
        .as_goal(priority=1, weight=1.0)  # Lower penalty
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
 Combining with Custom Objectives
@@ -353,6 +368,7 @@ are combined with the model's objective, with weight ``1``:
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    quality_goal = (
@@ -440,6 +456,7 @@ Production Planning with Multiple Goals
        .le()
        .rhs(lambda r: r.capacity)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
 
    # Priority 0: Maximize profit (custom objective)
@@ -465,6 +482,7 @@ Production Planning with Multiple Goals
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Priority 2: Efficient resource utilization (lower priority)
@@ -479,6 +497,7 @@ Production Planning with Multiple Goals
        .rhs(lambda r: r.capacity * 0.8)
        .as_goal(priority=2, weight=1.0)
        .from_data(resources)
+       .indexed_by(lambda r: r.id)
    )
 
    # Build model
@@ -544,12 +563,8 @@ Production Planning with Multiple Goals
                print(f"  Total Deviation: {total_dev:.2f}")
 
                deviations = solution.get_goal_deviations(goal_name)
-               if isinstance(deviations['pos'], dict):
-                   total_pos = sum(deviations['pos'].values())
-                   total_neg = sum(deviations['neg'].values())
-               else:
-                   total_pos = deviations['pos']
-                   total_neg = deviations['neg']
+               total_pos = sum(deviations['pos'].values())
+               total_neg = sum(deviations['neg'].values())
 
                if total_pos > 1e-6:
                    print(f"  Over-achievement: {total_pos:.2f}")
@@ -582,6 +597,7 @@ Dynamic Weight Calculation
            weight=1.0  # Could use lambda here if API supported it
        )
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
 Conditional Goals
@@ -600,6 +616,7 @@ Conditional Goals
        .where(lambda p: p.is_active)  # Filter
        .as_goal(priority=1, weight=1.0)
        .from_data(active_products)
+       .indexed_by(lambda p: p.id)
    )
 
 Best Practices
@@ -662,6 +679,7 @@ Best Practices
           # Weight 1.0: All customers equally important
           .as_goal(priority=1, weight=1.0)
           .from_data(products)
+          .indexed_by(lambda p: p.id)
       )
 
 Troubleshooting
@@ -730,16 +748,16 @@ Unexpected Deviations
        deviations = solution.get_goal_deviations(goal_name)
 
        print(f"\n{goal_name}:")
-       print(f"  Positive deviation: {deviations['pos']}")
-       print(f"  Negative deviation: {deviations['neg']}")
+       print(f"  Positive deviation: {sum(deviations['pos'].values()):.2f}")
+       print(f"  Negative deviation: {sum(deviations['neg'].values()):.2f}")
+       print(f"  Undesired total: {solution.get_total_deviation(goal_name):.2f}")
 
-       # For indexed goals, show breakdown
-       if isinstance(deviations['pos'], dict):
-           for key in deviations['pos'].keys():
-               pos = deviations['pos'][key]
-               neg = deviations['neg'][key]
-               if pos > 1e-6 or neg > 1e-6:
-                   print(f"    {key}: pos={pos:.2f}, neg={neg:.2f}")
+       # Per-row breakdown: keys are the goal name for a single goal,
+       # "<goal>_<key>" for an indexed goal
+       for row, pos in deviations['pos'].items():
+           neg = deviations['neg'][row]
+           if pos > 1e-6 or neg > 1e-6:
+               print(f"    {row}: pos={pos:.2f}, neg={neg:.2f}")
 
 Next Steps
 ----------

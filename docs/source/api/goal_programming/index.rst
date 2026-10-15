@@ -189,7 +189,7 @@ Objective Building
 - :func:`build_weighted_objective`: Build single weighted objective
 - :func:`build_sequential_objectives`: Build objectives for sequential solving
 - :func:`combine_objectives`: Combine traditional and goal objectives
-- :func:`extract_custom_objectives`: Extract priority 0 custom objectives
+- :func:`extract_custom_objectives`: Deprecated in 0.3.0 (always empty for relaxed goals); use :func:`final_objective`
 - :func:`final_objective`: The model's objective and the priority 0 goals, solved after all goals
 
 Solver
@@ -239,6 +239,7 @@ Basic Weighted Goal Programming
        .rhs(lambda p: p.demand_target)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Build model (goal mode is set by as_goal())
@@ -251,9 +252,10 @@ Basic Weighted Goal Programming
    solution = optimizer.solve(model)
 
    # Access goal deviations
+   # {"pos": {"demand_goal_<id>": value}, "neg": {...}}
    deviations = solution.get_goal_deviations("demand_goal")
-   print(f"Positive deviation: {deviations['pos']}")
-   print(f"Negative deviation: {deviations['neg']}")
+   print(f"Positive deviation: {sum(deviations['pos'].values()):.2f}")
+   print(f"Negative deviation: {sum(deviations['neg'].values()):.2f}")
 
 Multi-Priority Goals
 ~~~~~~~~~~~~~~~~~~~~
@@ -277,6 +279,7 @@ Multi-Priority Goals
        .rhs(lambda p: p.demand)
        .as_goal(priority=1, weight=1.0)
        .from_data(products)
+       .indexed_by(lambda p: p.id)
    )
 
    # Priority 2: Minimize overtime (lower priority)

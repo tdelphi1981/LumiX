@@ -362,7 +362,7 @@ Weighted Mode Calculation
 .. code-block:: python
 
    # Automatic weight calculation
-   priority_weight = 10 ** (6 - priority)
+   priority_weight = 10 ** (7 - priority)
    combined_weight = priority_weight * goal_weight
 
    # Examples:
@@ -371,6 +371,11 @@ Weighted Mode Calculation
    # P3, w=2.0: 10^4 × 2.0 =    20,000
 
 This ensures higher priorities dominate in the objective function.
+
+.. note::
+   Priority 7 weighs 1, the same as the model objective, and priority 8 weighs 0.1, so
+   goals at priority 7 or higher do **not** dominate the objective. Keep goals that must
+   win at priorities 1–6, or use sequential mode, which is lexicographic.
 
 Custom Weights Within Priority
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -394,26 +399,24 @@ Check Individual Goals
    satisfied = solution.is_goal_satisfied("goal_name", tolerance=1e-6)
 
    # Get deviation values
+   # Dicts {row name: value}, also for a single goal
    deviations = solution.get_goal_deviations("goal_name")
-   pos_dev = deviations["pos"]  # Over-achievement
-   neg_dev = deviations["neg"]  # Under-achievement
+   pos_dev = sum(deviations["pos"].values())  # Over-achievement
+   neg_dev = sum(deviations["neg"].values())  # Under-achievement
 
 Indexed Goals
 ~~~~~~~~~~~~~
 
 .. code-block:: python
 
+   # One goal "goal" indexed by entity: its rows are keyed "goal_<id>"
+   deviations = solution.get_goal_deviations("goal")
+
    for entity in ENTITIES:
-       goal_name = f"goal_{entity.id}"
-       deviations = solution.get_goal_deviations(goal_name)
-
-       # Deviations are dictionaries for indexed goals
-       neg_dev_dict = deviations["neg"]
-       pos_dev_dict = deviations["pos"]
-
+       row = f"goal_{entity.id}"
        print(f"{entity.name}:")
-       print(f"  Shortfall: {neg_dev_dict.get(entity.id, 0):.2f}")
-       print(f"  Excess: {pos_dev_dict.get(entity.id, 0):.2f}")
+       print(f"  Shortfall: {deviations['neg'].get(row, 0.0):.2f}")
+       print(f"  Excess: {deviations['pos'].get(row, 0.0):.2f}")
 
 Use Cases
 ---------

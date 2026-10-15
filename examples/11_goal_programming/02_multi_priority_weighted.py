@@ -382,10 +382,8 @@ def main():
         if deviations:
             total_p1 += 1
 
-            # Extract deviation values (indexed by goal ID)
-            neg_dev_dict = deviations.get("neg", {})
-            goal_id = f"{goal_name}_{customer.id}"
-            neg_dev = neg_dev_dict.get(goal_id, 0) if isinstance(neg_dev_dict, dict) else neg_dev_dict
+            # Deviations are {row name: value} dicts; a single goal has one row
+            neg_dev = sum(deviations["neg"].values())
 
             satisfied = solution.is_goal_satisfied(goal_name, tolerance=1e-6)
             if satisfied:
@@ -407,12 +405,9 @@ def main():
         if deviations:
             total_p2 += 1
 
-            # Extract deviation values (indexed by goal ID)
-            neg_dev_dict = deviations.get("neg", {})
-            pos_dev_dict = deviations.get("pos", {})
-            goal_id = f"{goal_name}_{warehouse.id}"
-            neg_dev = neg_dev_dict.get(goal_id, 0) if isinstance(neg_dev_dict, dict) else neg_dev_dict
-            pos_dev = pos_dev_dict.get(goal_id, 0) if isinstance(pos_dev_dict, dict) else pos_dev_dict
+            # Deviations are {row name: value} dicts; a single goal has one row
+            neg_dev = sum(deviations["neg"].values())
+            pos_dev = sum(deviations["pos"].values())
 
             satisfied = solution.is_goal_satisfied(goal_name, tolerance=1e-6)
             if satisfied:
