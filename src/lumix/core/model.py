@@ -298,11 +298,23 @@ class LXModel(Generic[TModel]):
            A second constraint with the same name raises ``ValueError``; it used to be
            accepted and then hid the first one from duals, activity and analysis.
         """
-        if any(c.name == constraint.name for c in self.constraints):
+        names = self._constraint_name_set()
+        if constraint.name in names and any(c.name == constraint.name for c in self.constraints):
             raise ValueError(f"Model '{self.name}' already has a constraint named "
                              f"'{constraint.name}'")
         self.constraints.append(constraint)
+        names.add(constraint.name)
         return self
+
+    def _constraint_name_set(self) -> set:
+        """Names of ``self.constraints``, cached for this list object (rebuilt when the
+        list is replaced or changed outside ``add_constraint``)."""
+        cache = self.__dict__.get("_constraint_names")
+        if (cache is None or cache[0] is not self.constraints
+                or len(cache[1]) != len(self.constraints)):
+            cache = (self.constraints, {c.name for c in self.constraints})
+            self.__dict__["_constraint_names"] = cache
+        return cache[1]
 
     def add_constraints(self, *constraints: LXConstraint) -> Self:
         """

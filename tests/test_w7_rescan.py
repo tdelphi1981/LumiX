@@ -459,3 +459,14 @@ def test_rescan_utils_stern_brocot_matches_the_best_approximation(value, max_den
     got = LXRationalConverter(max_denominator=max_den, method="stern_brocot").to_rational(value)
     best = Fraction(value).limit_denominator(max_den)
     assert abs(float(got) - value) <= abs(float(best) - value) + 1e-15
+
+
+def test_rescan_goals_constraint_name_check_follows_direct_list_changes():
+    x = _var("x")
+    m = LXModel("m").add_variable(x)
+    first = _row("a", LXLinearExpression().add_term(x, 1), "le", 2)
+    m.add_constraint(first)
+    m.constraints.remove(first)
+    m.constraints.append(_row("b", LXLinearExpression().add_term(x, 1), "le", 3))
+    m.add_constraint(_row("a", LXLinearExpression().add_term(x, 1), "le", 4))   # no false duplicate
+    assert [c.name for c in m.constraints] == ["b", "a"]
