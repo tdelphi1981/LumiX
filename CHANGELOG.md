@@ -98,6 +98,7 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `LXModel.add_constraint` raises `ValueError` for a second constraint with the same name (it hid the first one from duals, activity and analysis).
 - `by_percent` in what-if changes moves the right-hand side by a share of its absolute value (`-10` relaxed by 20 % for a `>=` row is `-12`); `tighten_constraint` on an equality lowers the right-hand side (it raised it, like `relax_constraint`).
 - A goal solve without a solution has no goal deviations: `get_goal_deviations` and `is_goal_satisfied` return `None`, and `summary()` has no goal lines.
+- `LXVariable.bounds()` raises `TypeError` for a function (per-instance bounds were documented but crashed at solve time); use an indexed constraint for per-instance limits.
 
 ### Deprecated
 - `LXLinearizerConfig` fields `default_method`, `tolerance`, `verbose_logging`, `prefer_sos2`, `auto_detect_bounds` and `mccormick_tighten_bounds` have no effect and issue a `DeprecationWarning` when set to a non-default value; so do the `prefer_sos2` and `mccormick_tighten_bounds` arguments of `enable_linearization()`. They will be removed in 0.4.0.
@@ -180,6 +181,8 @@ Models that were solved wrongly before now give different (correct) results; eve
 - `row_activity` and sensitivity `slack` / `is_binding` reported a goal's relaxed row (deviations included, always binding) instead of the goal itself.
 - `LXLinearizer(...).linearize_model()` returned a model without the goal mode and the `prepare_goal_programming()` state, so a sequential goal model was solved in weighted mode (or with no objective at all).
 - What-if `relax_constraint` / `tighten_constraint` / `increase_constraint_rhs` / `decrease_constraint_rhs` with `by_percent` moved a negative right-hand side the wrong way, and relaxing a prepared `>=` goal raised its target.
+- `add_abs`, `add_min`, `add_max`, `add_product`, `add_piecewise` and `add_indicator` accepted an expression where a variable is needed and failed at solve time with `AttributeError`; they now raise `TypeError` at once.
+- A variable with data but no `indexed_by` over unhashable instances (a plain `@dataclass`) failed with an internal `TypeError`; the error now says to add `indexed_by`.
 
 ## [0.2.1] - 2026-10-14
 

@@ -344,3 +344,40 @@ def test_rescan_goals_duplicate_constraint_names_raise():
         m.add_constraint(_row("lim", LXLinearExpression().add_term(x, 1), "le", 5))
     with pytest.raises(ValueError, match="already has a constraint named 'lim'"):
         m.add_constraints(_row("lim", LXLinearExpression().add_term(x, 1), "le", 5))
+
+
+# ---------------------------------------------------------------- core
+@pytest.mark.parametrize("call", [
+    lambda e, x, y: e.add_abs(LXLinearExpression().add_term(x, 1)),
+    lambda e, x, y: e.add_min(x, LXLinearExpression().add_term(y, 1)),
+    lambda e, x, y: e.add_max(LXLinearExpression().add_term(y, 1), x),
+    lambda e, x, y: e.add_product(x, LXLinearExpression().add_term(y, 1)),
+    lambda e, x, y: e.add_piecewise(LXLinearExpression().add_term(y, 1), abs),
+    lambda e, x, y: e.add_indicator(LXLinearExpression().add_term(y, 1), True, LXLinearExpression()),
+])
+def test_rescan_linearization_terms_reject_an_expression_where_a_variable_is_needed(call):
+    from lumix import LXNonLinearExpression
+    x, y = _var("x", upper=5), _var("y", "binary")
+    with pytest.raises(TypeError, match="LXVariable"):
+        call(LXNonLinearExpression(), x, y)
+
+
+@pytest.mark.parametrize("bound", ["lower", "upper"])
+def test_rescan_core_callable_bounds_are_rejected_with_a_clear_message(bound):
+    with pytest.raises(TypeError, match="per-instance"):
+        LXVariable("x").continuous().bounds(**{bound: lambda p: 3})
+
+
+def test_rescan_core_unhashable_instances_without_indexed_by_get_a_clear_error():
+    from dataclasses import dataclass
+
+    @dataclass
+    class Product:
+        name: str
+
+    x = LXVariable[Product, float]("x").continuous().bounds(lower=0, upper=1).from_data(
+        [Product("a"), Product("b")])
+    m = LXModel("m").add_variable(x)
+    m.maximize(LXLinearExpression().add_term(x, 1))
+    with pytest.raises(ValueError, match="indexed_by"):
+        m.to_canonical()

@@ -225,7 +225,19 @@ class LXVariable(Generic[TModel, TValue]):
 
         Returns:
             Self for chaining
+
+        Raises:
+            TypeError: If a bound is a function. Bounds apply to the whole family; for
+                per-instance bounds add an indexed constraint
+                (``LXConstraint("cap").expression(...).le().rhs(lambda p: p.capacity)``).
         """
+        for value in (lower, upper):
+            if callable(value):
+                raise TypeError(
+                    f"Variable '{self.name}': bounds are numbers for the whole family; "
+                    "per-instance bounds are not supported. Add an indexed constraint "
+                    "instead, e.g. LXConstraint(...).expression(LXLinearExpression()"
+                    ".add_term(var, 1)).le().rhs(lambda item: item.capacity)")
         self.lower_bound = lower
         self.upper_bound = upper
         return self

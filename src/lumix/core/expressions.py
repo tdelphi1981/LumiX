@@ -684,6 +684,15 @@ class LXQuadraticExpression:
         return (-self) + other
 
 
+def _require_variable(value: Any, method: str) -> None:
+    """Nonlinear terms act on variables; an expression must be named by a variable first."""
+    if not isinstance(value, LXVariable):
+        raise TypeError(
+            f"{method}() takes an LXVariable, got {type(value).__name__}. To apply it to an "
+            "expression, add a variable equal to the expression (a constraint "
+            "'d - expression == 0') and pass that variable")
+
+
 @dataclass
 class LXNonLinearExpression:
     """
@@ -742,10 +751,12 @@ class LXNonLinearExpression:
             Self for chaining
 
         Example:
-            # Minimize absolute deviation
-            expr.add_abs(actual - target)
+            # Minimize the absolute value of a deviation variable
+            expr.add_abs(deviation)
         """
         from ..nonlinear.terms import LXAbsoluteTerm
+
+        _require_variable(var, "add_abs")
 
         self.nonlinear_terms.append(LXAbsoluteTerm(var, coeff))
         return self
@@ -767,6 +778,8 @@ class LXNonLinearExpression:
         """
         from ..nonlinear.terms import LXMinMaxTerm
 
+        for v in vars:
+            _require_variable(v, "add_min")
         coeffs = coefficients or [1.0] * len(vars)
         self.nonlinear_terms.append(LXMinMaxTerm(list(vars), "min", coeffs))
         return self
@@ -788,6 +801,8 @@ class LXNonLinearExpression:
         """
         from ..nonlinear.terms import LXMinMaxTerm
 
+        for v in vars:
+            _require_variable(v, "add_max")
         coeffs = coefficients or [1.0] * len(vars)
         self.nonlinear_terms.append(LXMinMaxTerm(list(vars), "max", coeffs))
         return self
@@ -818,6 +833,8 @@ class LXNonLinearExpression:
         """
         from ..nonlinear.terms import LXBilinearTerm
 
+        _require_variable(var1, "add_product")
+        _require_variable(var2, "add_product")
         self.nonlinear_terms.append(LXBilinearTerm(var1, var2, coeff))
         return self
 
@@ -865,6 +882,7 @@ class LXNonLinearExpression:
         """
         from ..nonlinear.terms import LXIndicatorTerm
 
+        _require_variable(binary_var, "add_indicator")
         if sense not in ("<=", ">=", "=="):
             raise ValueError(f"add_indicator: sense must be '<=', '>=' or '==', not {sense!r}")
         self.nonlinear_terms.append(
@@ -929,6 +947,7 @@ class LXNonLinearExpression:
         """
         from ..nonlinear.terms import LXPiecewiseLinearTerm
 
+        _require_variable(var, "add_piecewise")
         self.nonlinear_terms.append(
             LXPiecewiseLinearTerm(var, func, num_segments, x_min, x_max, adaptive, method,
                                   None if breakpoints is None else list(breakpoints))

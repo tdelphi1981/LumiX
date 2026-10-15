@@ -253,6 +253,13 @@ class LXCanonicalBuilder:
                     "variables and its terms contribute nothing", var.name)
             for instance in instances:
                 key = var.index_key(instance)
+                try:
+                    hash(key)
+                except TypeError:
+                    raise ValueError(
+                        f"Variable '{var.name}' has data but no indexed_by(...), and its "
+                        f"instances ({type(instance).__name__}) are not hashable; add "
+                        ".indexed_by(lambda item: item.id) with a hashable key") from None
                 if key in positions:
                     raise ValueError(
                         f"Variable '{var.name}' has a duplicate index key {key!r}; "
