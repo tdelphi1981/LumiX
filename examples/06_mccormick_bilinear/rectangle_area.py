@@ -281,10 +281,7 @@ def main():
 
     # Create linearizer
     print("Creating linearizer...")
-    config = LXLinearizerConfig(
-        mccormick_tighten_bounds=True,
-        verbose_logging=True,
-    )
+    config = LXLinearizerConfig()
     linearizer = LXLinearizer(model, ORTOOLS_CAPABILITIES, config)
     print(f"  Solver: OR-Tools (needs linearization: {ORTOOLS_CAPABILITIES.needs_linearization_for_bilinear()})")
     print()
@@ -333,6 +330,10 @@ def main():
             print(f"Status: {solution.status}")
             print(f"Maximum Area: {solution.objective_value:.4f} m²")
             print(f"Solve Time: {solution.solve_time:.3f}s")
+            if solution.relaxation:
+                # McCormick envelopes relax length × width: the area above is an upper
+                # bound; check it against length × width below.
+                print("Note: solved as a relaxation (McCormick envelopes)")
             print()
 
             # Get values from indexed variables (returns dict with index as key)

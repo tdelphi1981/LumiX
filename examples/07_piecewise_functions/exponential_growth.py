@@ -151,7 +151,7 @@ def build_investment_model():
     config = LXLinearizerConfig(
         pwl_num_segments=30,
         adaptive_breakpoints=True,
-        prefer_sos2=True,
+        pwl_method="sos2",
     )
     linearizer = LXPiecewiseLinearizer(config)
 
@@ -260,7 +260,7 @@ def demonstrate_piecewise_approximation():
     config = LXLinearizerConfig(
         pwl_num_segments=30,
         adaptive_breakpoints=True,
-        prefer_sos2=True,
+        pwl_method="sos2",
     )
     linearizer = LXPiecewiseLinearizer(config)
 
