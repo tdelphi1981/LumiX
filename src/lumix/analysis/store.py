@@ -10,7 +10,7 @@ Example::
 
     engine = create_engine("sqlite:///results.db")
     LXResultStore.create_tables(engine)
-    with Session(engine) as session:
+    with Session(engine) as session:              # a session of its own for the store
         store = LXResultStore(session, analysis="q3-capacity")
         analyzer = LXScenarioAnalyzer(optimizer=optimizer, model_factory=build_model,
                                       result_store=store)
@@ -84,7 +84,10 @@ class LXResultStore:
         include_sensitivity: Also store shadow prices and reduced costs (LP solves with
             ``enable_sensitivity()``).
         commit: Commit after each recorded run (default). With False the rows are only
-            flushed and the caller commits.
+            flushed and the caller commits. ``session.commit()`` commits everything
+            pending in the session, not only LumiX rows, and with SQLAlchemy's default
+            ``expire_on_commit=True`` expires every instance loaded in it. Give the store
+            its own session, or pass ``commit=False`` and commit yourself.
     """
 
     def __init__(self, session: Any, analysis: Optional[str] = None,
@@ -167,7 +170,12 @@ class LXResultStore:
     def values(self, run_id: int,
                kind: str = "value") -> Dict[str, Union[float, Dict[Any, float]]]:
         """Stored values of one run, shaped like ``LXSolution.variables``:
-        ``{name: value}`` for scalars, ``{name: {key: value}}`` for indexed families."""
+        ``{name: value}`` for scalars, ``{name: {key: value}}`` for indexed families.
+
+        Index keys are stored as JSON: ``None``, bool, int, float, str and tuples of
+        them round-trip (tuples come back as tuples); any other key is stored as
+        ``str(key)``, so keys with equal ``str()`` come back as one entry. Index by a
+        JSON-friendly id (``lambda p: p.id``)."""
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}, got {kind!r}")
         t = self._t

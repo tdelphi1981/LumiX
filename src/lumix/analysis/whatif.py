@@ -130,8 +130,8 @@ class LXWhatIfAnalyzer(Generic[TModel]):
                 called once for the baseline and once per what-if run, so nothing is
                 copied (recommended for ORM-backed models: open a session inside it,
                 eager-load what the lambdas read and close it before returning). It
-                must return a new model on every call; a model built for one run is
-                freed when the run is over.
+                must return a new model, with new constraints and variables, on every
+                call; a model built for one run is freed when the run is over.
             result_store: Optional :class:`~lumix.analysis.store.LXResultStore` that
                 records every solve.
 
@@ -144,6 +144,8 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         self.optimizer = optimizer
         self.result_store = result_store
         self._baseline_solution = baseline_solution
+        # A given baseline is recorded on first use; a computed one when it is solved.
+        self._baseline_recorded = baseline_solution is None
         self._result_cache: Dict[str, LXWhatIfResult[TModel]] = {}
 
     def get_baseline_solution(self, recompute: bool = False) -> LXSolution[TModel]:
@@ -159,6 +161,9 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         if self._baseline_solution is None or recompute:
             self._baseline_solution = self.optimizer.solve(self.model)
             self._record("baseline", self._baseline_solution, self.model)
+        elif not self._baseline_recorded:
+            self._record("baseline", self._baseline_solution, self.model)
+        self._baseline_recorded = True
         return self._baseline_solution
 
     def increase_constraint_rhs(
@@ -450,7 +455,8 @@ class LXWhatIfAnalyzer(Generic[TModel]):
             List of (constraint_name, improvement per unit) sorted best first; improvement
             is positive when relaxing the constraint makes the objective better (larger for
             maximization, smaller for minimization). For an indexed constraint family every
-            row is relaxed by ``test_amount``.
+            row is relaxed by ``test_amount``. An equality row is moved in both directions
+            and the better one is reported.
 
         Examples:
             Find top bottlenecks::
@@ -463,6 +469,7 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         .. versionchanged:: 0.3.0
            Values are improvements in the objective's own direction (minimization used to
            rank backwards) and constraints with a per-row RHS are supported (catalog B12).
+           Equality rows are tried in both directions (they were only raised).
         """
         baseline = self.get_baseline_solution()
         if not baseline.is_feasible():
@@ -472,19 +479,28 @@ class LXWhatIfAnalyzer(Generic[TModel]):
 
         improvements = []
         for constraint in self.model.constraints:
-            result = self.relax_constraint(constraint.name, by=test_amount)
-            solution = result.new_solution
-            if solution.is_feasible():
-                improvement = sign * result.delta_objective / test_amount
-            elif solution.status.lower() == "unbounded":
-                improvement = math.inf
-            else:
+            steps = (1.0, -1.0) if constraint.sense == LXConstraintSense.EQ else (1.0,)
+            best: Optional[float] = None
+            statuses = []
+            for step in steps:
+                result = self.relax_constraint(constraint.name, by=step * test_amount)
+                solution = result.new_solution
+                if solution.is_feasible():
+                    improvement = sign * result.delta_objective / test_amount + 0.0  # no -0.0
+                elif solution.status.lower() == "unbounded":
+                    improvement = math.inf
+                else:
+                    statuses.append(f"'{solution.status}'")
+                    continue
+                if best is None or improvement > best:
+                    best = improvement
+            if best is None:
                 warnings.warn(
                     f"find_bottlenecks: relaxing '{constraint.name}' gave status "
-                    f"'{solution.status}'; it is left out of the ranking",
+                    f"{', '.join(statuses)}; it is left out of the ranking",
                     UserWarning, stacklevel=2)
                 continue
-            improvements.append((constraint.name, improvement))
+            improvements.append((constraint.name, best))
 
         improvements.sort(key=lambda item: item[1], reverse=True)
         return improvements[:top_n]

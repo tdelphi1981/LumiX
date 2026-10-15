@@ -259,12 +259,19 @@ Identifying Binding Constraints
 
 .. code-block:: python
 
-   # Get all binding constraints
-   binding = analyzer.identify_binding_constraints()
+   from lumix import LXSensitivityAnalyzer
+
+   # Binding constraints come from the sensitivity analyzer
+   baseline = analyzer.get_baseline_solution()
+   binding = LXSensitivityAnalyzer(model, baseline).get_binding_constraints()
 
    print("Binding Constraints (Bottleneck Candidates):")
    for constraint_name in binding:
        print(f"  - {constraint_name}")
+
+   # Or rank constraints by the improvement one more unit of right-hand side gives
+   for name, improvement in analyzer.find_bottlenecks(top_n=5):
+       print(f"  {name}: {improvement:+.2f} per unit")
 
 Practical Examples
 ------------------
@@ -367,17 +374,17 @@ Example 4: Exploring Variable Bounds
 
    # Question: "What if we change production limits?"
 
-   # Increase upper bound
-   result = analyzer.increase_variable_upper_bound("production", by=50)
-   print(f"Allowing 50 more units of production: ${result.delta_objective:,.2f}")
+   # modify_variable_bound takes absolute values (there is no ``by=`` form)
+   result = analyzer.modify_variable_bound("production", upper=550)
+   print(f"Raising the production limit to 550: ${result.delta_objective:,.2f}")
 
-   # Decrease lower bound (relax minimum)
-   result = analyzer.decrease_variable_lower_bound("production", by=20)
-   print(f"Reducing minimum production by 20: ${result.delta_objective:,.2f}")
+   # Relax the minimum
+   result = analyzer.modify_variable_bound("production", lower=0)
+   print(f"Removing the minimum production: ${result.delta_objective:,.2f}")
 
-   # Set specific bound
-   result = analyzer.set_variable_bound("production", upper=500)
-   print(f"Setting max production to 500: ${result.delta_objective:,.2f}")
+   # Both bounds at once
+   result = analyzer.modify_variable_bound("production", lower=10, upper=500)
+   print(f"Production between 10 and 500: ${result.delta_objective:,.2f}")
 
 Example 5: Multi-Parameter What-If
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -386,43 +393,43 @@ Example 5: Multi-Parameter What-If
 
    # Question: "What's the combined effect of multiple changes?"
 
-   # Use compare_changes for multiple what-ifs
+   # compare_changes runs one what-if per (name, change_type, amount) tuple;
+   # change types: "increase", "decrease", "relax", "tighten"
    changes = [
        ("capacity", "increase", 100),
        ("capacity", "increase", 200),
-       ("budget", "decrease_pct", 0.10),
-       ("labor", "increase_pct", 0.20),
+       ("budget", "decrease", 1000),
    ]
 
-   results = analyzer.compare_changes(changes)
+   results = analyzer.compare_changes(changes)   # List[LXWhatIfResult]
 
    print("Multi-Parameter What-If Analysis:")
    print("-" * 70)
-   for description, result in results:
-       print(f"{description:50s}: ${result.delta_objective:>10,.2f}")
+   for result in results:
+       print(f"{result.description:50s}: ${result.delta_objective:>10,.2f}")
+
+   # Percent changes use the single-change methods
+   result = analyzer.increase_constraint_rhs("labor", by_percent=0.20)
+
+Each call changes one parameter of a fresh copy of the model; the effects of
+separate calls are not combined. For combined changes use a
+:class:`~lumix.analysis.scenario.LXScenario` with several modifications.
 
 Advanced Features
 -----------------
 
-Custom Change Types
+Exact Values and Change Records
 ~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   from lumix.analysis import LXWhatIfChange
+   # Set a right-hand side to an exact value
+   result = analyzer.increase_constraint_rhs("capacity", to=1500)
 
-   # Create custom change
-   change = LXWhatIfChange(
-       change_type="constraint_rhs",
-       target_name="capacity",
-       description="Capacity increase to 1500",
-       original_value=1000,
-       new_value=1500,
-       delta=500
-   )
-
-   # Apply custom change
-   result = analyzer.apply_change(change)
+   # Every result lists what was changed as LXWhatIfChange records
+   for change in result.changes_applied:
+       print(change.change_type, change.target_name, change.original_value,
+             change.new_value)
 
 Interactive Exploration
 ~~~~~~~~~~~~~~~~~~~~~~~

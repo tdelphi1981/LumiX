@@ -290,8 +290,8 @@ class LXScenarioAnalyzer(Generic[TModel]):
                 It is called once for the baseline and once per scenario, so nothing is
                 copied (recommended for ORM-backed models: open a session inside it,
                 eager-load what the lambdas read and close it before returning). It
-                must return a new model on every call; a model built for one run is
-                freed when the run is over.
+                must return a new model, with new constraints and variables, on every
+                call; a model built for one run is freed when the run is over.
             result_store: Optional :class:`~lumix.analysis.store.LXResultStore` that
                 records every solve.
 

@@ -6,6 +6,11 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, Optional
 
 
+def _parts(model: Any) -> Dict[int, Any]:
+    """Constraint and variable objects of a model, by identity."""
+    return {id(o): o for o in (*model.constraints, *model.variables)}
+
+
 class ModelSource:
     """Hands out an independent model per run, either by deep-copying a base model or by
     calling the user's factory (which must build a new model on every call)."""
@@ -32,6 +37,14 @@ class ModelSource:
             raise ValueError(
                 "model_factory must build a new model on every call; it returned a "
                 "model it had already returned")
+        base_parts = _parts(self.base)
+        shared = [o for i, o in _parts(model).items() if i in base_parts]
+        if shared:
+            raise ValueError(
+                "model_factory must build new constraints and variables on every call; "
+                f"the new model shares {len(shared)} object(s) with the base model "
+                f"(e.g. '{shared[0].name}'), so a what-if or scenario change would "
+                "modify the base model")
         self._seen = {k: r for k, r in self._seen.items() if r() is not None}
         self._seen[id(model)] = weakref.ref(model)
         return model

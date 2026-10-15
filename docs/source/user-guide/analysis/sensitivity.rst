@@ -60,6 +60,11 @@ Binding Constraints
 
 A constraint is **binding** if it's satisfied as an equality at the optimal solution (slack = 0).
 
+.. versionchanged:: 0.3.0
+   ``LXConstraintSensitivity.slack`` is filled from the row's activity at the solution
+   (``rhs - lhs`` for ``<=``, ``lhs - rhs`` for ``>=``), and ``is_binding`` means a zero
+   slack. Both used to depend on the shadow price alone, so ``slack`` was always ``None``.
+
 **Characteristics:**
 
 - Shadow price ≠ 0
@@ -118,8 +123,8 @@ Analyzing Constraints
    capacity_sens = analyzer.analyze_constraint("capacity[3]")
 
    print(f"Shadow Price: ${capacity_sens.shadow_price:.2f}")
-   print(f"Slack: {capacity_sens.slack:.2f}")
-   print(f"Binding: {capacity_sens.is_binding}")
+   print(f"Slack: {capacity_sens.slack:.2f}")       # rhs - lhs for a <= row
+   print(f"Binding: {capacity_sens.is_binding}")    # slack is (numerically) zero
 
    # If solver provides range analysis
    if capacity_sens.allowable_increase:
@@ -166,20 +171,27 @@ Generating Reports
    report = analyzer.generate_report()
    print(report)
 
-   # Example output:
-   # Sensitivity Analysis Report
-   # ============================
-   #
-   # Binding Constraints:
-   #   capacity: shadow price = $50.00, slack = 0.00
-   #   budget: shadow price = $12.50, slack = 0.00
-   #
-   # Non-binding Constraints:
-   #   min_production: slack = 25.00
-   #
-   # Variables with Reduced Costs:
-   #   product_a: value = 100.0, reduced_cost = $0.00
-   #   product_b: value = 0.0, reduced_cost = $-5.00
+Example output (a model with a scalar ``total`` row and an indexed ``cap`` family):
+
+.. code-block:: text
+
+   Sensitivity Analysis Report
+   ================================================================================
+
+   Model: m
+   Objective Value: 36.00
+   Status: optimal
+   Solve Time: 0.000s
+
+   Constraint Sensitivity (Shadow Prices)
+   ================================================================================
+
+   Constraint                        Shadow Price       Status
+   --------------------------------------------------------------------------------
+   total                                 3.000000      Binding
+   cap[b]                                2.000000      Binding
+   cap[a]                                0.000000  Non-binding
+   ...
 
 Identifying Bottlenecks
 -----------------------
@@ -346,7 +358,11 @@ Example 3: Understanding Non-Binding Constraints
 .. code-block:: python
 
    # Check which constraints have slack
-   non_binding = analyzer.get_non_binding_constraints()
+   non_binding = {
+       name: sens
+       for name, sens in analyzer.analyze_all_constraints().items()
+       if not sens.is_binding
+   }
 
    print("Constraints with Slack (Not Limiting):")
    for name, sensitivity in non_binding.items():

@@ -61,11 +61,17 @@ class LXConstraintSensitivity:
     Attributes:
         name: Constraint name
         shadow_price: Shadow price (marginal value of relaxation)
-        slack: Slack or surplus value
+        slack: ``rhs - lhs`` for ``<=``, ``lhs - rhs`` for ``>=``, ``-|lhs - rhs|`` for
+            ``==`` at the solution; None when the solution has no values
         allowable_increase: Maximum RHS increase before basis change (if available)
         allowable_decrease: Maximum RHS decrease before basis change (if available)
-        is_binding: Whether constraint is binding (tight)
+        is_binding: Whether constraint is binding: slack within 1e-6 (relative to the
+            right-hand side); from the shadow price only when the slack is unknown
         is_active: Whether constraint is active at optimum
+
+    .. versionchanged:: 0.3.0
+       ``slack`` is filled from the row activity, and ``is_binding`` follows the slack
+       (it followed a nonzero shadow price, so degenerate binding rows were missed).
     """
 
     name: str
@@ -127,9 +133,29 @@ class LXSensitivityAnalyzer(Generic[TModel]):
         self._constraint_sensitivity_cache: Dict[str, LXConstraintSensitivity] = {}
         self._row_index: Optional[Dict[str, Tuple[str, Any]]] = None
         self._entry_index: Optional[Dict[str, Tuple[str, Any, float]]] = None
+        self._row_signature: Optional[Tuple[int, ...]] = None
+        self._activity: Optional[Dict[str, Any]] = None
+
+    def _refresh(self) -> None:
+        """Drop the row caches when the model's constraint list has changed."""
+        signature = tuple(id(c) for c in self.model.constraints)
+        if self._row_signature != signature:
+            self._row_signature = signature
+            self._row_index = None
+            self._activity = None
+            self._constraint_sensitivity_cache.clear()
+
+    def _row_activity(self) -> Dict[str, Any]:
+        """Row name -> :class:`~lumix.solution.activity.LXRowActivity` at the solution."""
+        self._refresh()
+        if self._activity is None:
+            from ..solution.activity import row_activity
+            self._activity = row_activity(self.model, self.solution)
+        return self._activity
 
     def _rows(self) -> Dict[str, Tuple[str, Any]]:
         """Row name -> (constraint family name, key), in model order."""
+        self._refresh()
         if self._row_index is None:
             self._row_index = {
                 row: (c.name, key)
@@ -212,6 +238,7 @@ class LXSensitivityAnalyzer(Generic[TModel]):
            Indexed families are analyzed per row; a family name used to report no shadow
            price (catalog B11).
         """
+        self._refresh()
         if constraint_name in self._constraint_sensitivity_cache:
             return self._constraint_sensitivity_cache[constraint_name]
         family = self.model.get_constraint(constraint_name)
@@ -222,13 +249,18 @@ class LXSensitivityAnalyzer(Generic[TModel]):
                 f"Constraint '{constraint_name}' is indexed ({len(rows)} rows); analyze "
                 f"one row, e.g. analyze_constraint('{example}'), or use "
                 f"analyze_constraint_family('{constraint_name}')")
-        if constraint_name not in self._rows():
+        if family is None and constraint_name not in self._rows():
             raise ValueError(f"Constraint '{constraint_name}' not found in model")
 
         shadow_price = self.solution.get_shadow_price(constraint_name)
-        is_binding = shadow_price is not None and abs(shadow_price) > 1e-6
+        act = self._row_activity().get(constraint_name)
+        if act is not None:
+            slack, is_binding = act.slack, act.binding
+        else:
+            slack = None
+            is_binding = shadow_price is not None and abs(shadow_price) > 1e-6
         sensitivity = LXConstraintSensitivity(
-            name=constraint_name, shadow_price=shadow_price,
+            name=constraint_name, shadow_price=shadow_price, slack=slack,
             is_binding=is_binding, is_active=is_binding)
         self._constraint_sensitivity_cache[constraint_name] = sensitivity
         return sensitivity
