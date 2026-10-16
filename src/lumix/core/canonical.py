@@ -106,9 +106,25 @@ _BUILTIN_ROWS = (tuple, list, dict, set, frozenset, str, bytes, int, float, bool
 
 
 def _difference(a: float, b: float) -> float:
-    """``a - b`` with cancellation noise (0.3 - (0.1 + 0.2)) snapped to 0."""
+    """``a - b`` with cancellation noise (0.3 - (0.1 + 0.2)) snapped to 0.
+    A non-finite difference is returned as it is."""
     d = a - b
+    if not math.isfinite(d):
+        return d
     return 0.0 if abs(d) <= NOISE * max(abs(a), abs(b)) else d
+
+
+def _vacuous(constraint: Any, name: str, rhs: float) -> bool:
+    """True for a row an infinite RHS makes bound nothing (``<= +inf``, ``>= -inf``),
+    which is dropped. Raises for a NaN RHS and for a row no point can satisfy."""
+    if math.isnan(rhs):
+        raise ValueError(f"Constraint '{name}' has a NaN right-hand side")
+    if (constraint.sense == LXConstraintSense.LE and rhs > 0) or \
+            (constraint.sense == LXConstraintSense.GE and rhs < 0):
+        return True
+    raise ValueError(
+        f"Constraint '{name}' can never hold: its right-hand side is infinite "
+        f"({constraint.sense.name} {rhs}, after moving any constant of the expression)")
 
 
 def _accept_all(*instance: Any) -> bool:
@@ -311,9 +327,12 @@ class LXCanonicalBuilder:
                 rhs = constraint.rhs_func(instance)
             else:
                 raise ValueError(f"Constraint '{constraint.name}' has no RHS value")
+            name = f"{constraint.name}[{key}]" if indexed else constraint.name
+            value = _difference(float(rhs), constant)
+            if not math.isfinite(value) and _vacuous(constraint, name, value):
+                continue
             rows.append(LXCanonicalRow(
-                name=f"{constraint.name}[{key}]" if indexed else constraint.name,
-                coeffs=coeffs, sense=constraint.sense, rhs=_difference(float(rhs), constant),
+                name=name, coeffs=coeffs, sense=constraint.sense, rhs=value,
                 family=constraint.name, key=key, indexed=indexed))
         return rows
 
