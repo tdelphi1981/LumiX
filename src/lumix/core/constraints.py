@@ -207,6 +207,10 @@ class LXConstraint(Generic[TModel]):
         """
         Set RHS (constant or function).
 
+        An infinite RHS that bounds nothing (``le()`` with ``math.inf``, ``ge()`` with
+        ``-math.inf``) drops the row; one no point can satisfy, and a NaN RHS, raise a
+        ValueError when the model is built.
+
         Args:
             value: Right-hand side value (constant or function)
 

@@ -71,7 +71,7 @@ import logging as _logging
 
 _logging.getLogger("lumix").addHandler(_logging.NullHandler())
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 # Core classes
 from .core.canonical import LXCanonicalModel, LXCanonicalNonlinear, LXCanonicalRow, LXCanonicalVariable

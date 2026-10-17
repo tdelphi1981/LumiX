@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-16
+
+### Fixed
+- A constraint with an infinite right-hand side was solved as if the right-hand side were 0 on every solver: `.le().rhs(math.inf)` became `<= 0`. The canonical model now drops a row that an infinite right-hand side makes bound nothing (`<= +inf`, `>= -inf`), so no solver receives an infinite value, and raises a `ValueError` naming the row for one that no point can satisfy (`>= +inf`, `<= -inf`, `== +-inf`). An infinite constant in the expression counts the same way.
+- A NaN right-hand side was accepted silently. It now raises a `ValueError` naming the row.
+
+### Changed
+- A dropped row has no shadow price: `solution.get_shadow_price(name)` returns `None` for it.
+
 ## [0.3.0] - 2026-10-15
 
 ### Added
