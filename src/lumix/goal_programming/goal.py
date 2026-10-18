@@ -168,6 +168,11 @@ def priority_to_weight(priority: int, base: float = 10.0, exponent_offset: int =
     Returns:
         Weight value for the priority level
 
+    Note:
+        With the defaults, priority 7 gets weight 1.0 and higher priorities less,
+        no more than the model's own objective (priority 0, weight 1.0), so they no
+        longer dominate it. Use priorities 1-6 for goals that must dominate.
+
     Examples:
         >>> priority_to_weight(1)
         1000000.0

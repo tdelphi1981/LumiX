@@ -1,6 +1,6 @@
 """Constraint relaxation for goal programming."""
 
-from typing import Any, Callable, Dict, Generic, List, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from lumix.core.constraints import LXConstraint
 from lumix.core.enums import LXConstraintSense
@@ -96,6 +96,8 @@ def relax_constraint(
     - LE (expr <= rhs): expr + neg_dev - pos_dev == rhs (minimize pos_dev)
     - GE (expr >= rhs): expr + neg_dev - pos_dev == rhs (minimize neg_dev)
     - EQ (expr == rhs): expr + neg_dev - pos_dev == rhs (minimize both)
+    - A goal with nonlinear terms and sense LE/GE: ``expr - pos_dev <= rhs`` /
+      ``expr + neg_dev >= rhs``, the other deviation fixed to 0 (0.3.2)
 
     Args:
         constraint: Original goal constraint to relax
@@ -228,17 +230,30 @@ def relax_constraint(
         raise ValueError(
             f"Goal '{constraint.name}' has a {type(lhs).__name__} expression; goals take "
             "LXLinearExpression or LXNonLinearExpression")
+    # A one-sided goal with nonlinear terms (|x| <= 3) is relaxed one-sided, so a
+    # convex term stays convex: lhs - d+ <= rhs (.le) or lhs + d- >= rhs (.ge); the
+    # deviation that cannot occur is fixed to 0. Linear goals keep the equality form.
+    one_sided = (isinstance(lhs, LXNonLinearExpression) and bool(lhs.nonlinear_terms)
+                 and constraint.sense != LXConstraintSense.EQ)
+    used_neg = not one_sided or constraint.sense == LXConstraintSense.GE
+    used_pos = not one_sided or constraint.sense == LXConstraintSense.LE
+    if not used_neg:
+        neg_deviation.bounds(lower=0.0, upper=0.0)
+    if not used_pos:
+        pos_deviation.bounds(lower=0.0, upper=0.0)
     if is_indexed:
         _add_own_deviations(linear, constraint.name, constraint.index_func,
-                            neg_deviation, pos_deviation)
+                            neg_deviation if used_neg else None,
+                            pos_deviation if used_pos else None)
     else:
-        linear.add_term(neg_deviation, coeff=1.0)    # + neg_dev
-        linear.add_term(pos_deviation, coeff=-1.0)   # - pos_dev
+        if used_neg:
+            linear.add_term(neg_deviation, coeff=1.0)    # + neg_dev
+        if used_pos:
+            linear.add_term(pos_deviation, coeff=-1.0)   # - pos_dev
 
-    # Create relaxed constraint (always equality)
     relaxed_constraint = LXConstraint[TModel](constraint.name)
     relaxed_constraint.lhs = relaxed_expr
-    relaxed_constraint.sense = LXConstraintSense.EQ
+    relaxed_constraint.sense = constraint.sense if one_sided else LXConstraintSense.EQ
     relaxed_constraint.rhs_value = constraint.rhs_value
     relaxed_constraint.rhs_func = constraint.rhs_func
     relaxed_constraint.model_type = constraint.model_type
@@ -256,7 +271,7 @@ def relax_constraint(
 
 
 def _add_own_deviations(expr: LXLinearExpression, name: str, index_func: Callable[[Any], Any],
-                        neg: LXVariable, pos: LXVariable) -> None:
+                        neg: Optional[LXVariable], pos: Optional[LXVariable]) -> None:
     """Row ``r`` of an indexed goal gets only the deviations of its own goal ``name_<key>``
     (A22). The filter lets the canonical builder look that goal up by key; the
     two-argument coefficient gives the same rows to readers that call the filter
@@ -265,6 +280,9 @@ def _add_own_deviations(expr: LXLinearExpression, name: str, index_func: Callabl
         return f"{name}_{index_func(row)}"
 
     for var, sign in ((neg, 1.0), (pos, -1.0)):
+        if var is None:
+            continue
+
         def coeff(g: LXGoal, row: Any, sign: float = sign) -> float:
             return sign if g.id == row_key(row) else 0.0
         expr.add_term(var, coeff=coeff, where=LXRowKeyFilter(var, row_key))

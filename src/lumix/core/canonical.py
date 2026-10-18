@@ -75,6 +75,9 @@ class LXCanonicalModel:
     #: ``{(i, j): c}`` with ``i <= j``: the objective term ``c * x_i * x_j``.
     objective_quadratic: Dict[Tuple[int, int], float] = field(default_factory=dict)
     goal_stages: Tuple[Dict[int, float], ...] = ()
+    #: ``(goal row family, positive deviation family, negative deviation family)`` per
+    #: relaxed goal (weighted or sequential), in relaxation order (0.3.2).
+    goal_deviations: Tuple[Tuple[str, str, str], ...] = ()
     schema_version: int = SCHEMA_VERSION
 
 
@@ -268,7 +271,14 @@ class LXCanonicalBuilder:
             scalar_families=tuple(self.scalars),
             objective_quadratic=self.quadratic,
             goal_stages=goal_stages,
+            goal_deviations=self._goal_deviations(),
         )
+
+    def _goal_deviations(self) -> Tuple[Tuple[str, str, str], ...]:
+        if not getattr(self.model, "_goal_programming_prepared", False):
+            return ()
+        return tuple((rc.constraint.name, rc.pos_deviation.name, rc.neg_deviation.name)
+                     for rc in self.model._relaxed_constraints)
 
     def _goal_stages(self) -> Tuple[Dict[int, float], ...]:
         """Sequential goal programming: the stage objectives in priority order (spec
