@@ -83,6 +83,9 @@ def canonical_bounds(var: "LXVariable") -> Tuple[float, float]:
     are intersected with [0, 1]; integer bounds are rounded inward."""
     lower = -math.inf if var.lower_bound is None else float(var.lower_bound)
     upper = math.inf if var.upper_bound is None else float(var.upper_bound)
+    if math.isnan(lower) or math.isnan(upper) or lower == math.inf or upper == -math.inf:
+        raise ValueError(f"Variable '{var.name}' has bounds [{var.lower_bound}, "
+                         f"{var.upper_bound}], which no value satisfies")
     if var.var_type == LXVarType.BINARY:
         lower, upper = max(lower, 0.0), min(upper, 1.0)
     if var.var_type in (LXVarType.INTEGER, LXVarType.BINARY):
@@ -112,6 +115,21 @@ def _difference(a: float, b: float) -> float:
     if not math.isfinite(d):
         return d
     return 0.0 if abs(d) <= NOISE * max(abs(a), abs(b)) else d
+
+
+def _finite_coefficient(value: float, var: Any, instance: Any, where: str) -> None:
+    """A coefficient must be a finite number: inf or NaN would otherwise be dropped
+    by the noise filter (inf > inf is False), solving a different model."""
+    if not math.isfinite(value):
+        name = var.name if var.is_scalar else f"{var.name}[{var.index_key(instance)}]"
+        raise ValueError(f"{where[0].upper()}{where[1:]}: coefficient of '{name}' is {value}")
+
+
+def _finite_term_coeff(value: Any, what: str, where: str) -> float:
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"{where[0].upper()}{where[1:]}: {what} coefficient is {value}")
+    return value
 
 
 def _vacuous(constraint: Any, name: str, rhs: float) -> bool:
@@ -358,12 +376,15 @@ class LXCanonicalBuilder:
                     "before solving")
             self.nonlinear_items = self.nonlinear(expr, "the objective")
             coeffs, constant = self.linear_row(expr.linear_terms, None, where="the objective")
-            return coeffs, constant + float(expr.constant), self.model.objective_sense
-        if isinstance(expr, LXQuadraticExpression):
+            constant += float(expr.constant)
+        elif isinstance(expr, LXQuadraticExpression):
             coeffs, constant = self.linear_row(expr.linear_terms, None, where="the objective")
             self.quadratic = self._quadratic(expr)
-            return coeffs, constant + float(expr.constant), self.model.objective_sense
-        coeffs, constant = self.linear_row(expr, None, where="the objective")
+            constant += float(expr.constant)
+        else:
+            coeffs, constant = self.linear_row(expr, None, where="the objective")
+        if not math.isfinite(constant):
+            raise ValueError(f"The objective: its constant is {constant}")
         return coeffs, constant, self.model.objective_sense
 
     def linear_row(self, expr: Any, row: Any = None,
@@ -387,6 +408,7 @@ class LXCanonicalBuilder:
                     if not call_with_row(keep, instance, row):
                         continue
                     value = float(call_with_row(coeff, instance, row))
+                    _finite_coefficient(value, var, instance, where)
                     if value:
                         slot = positions[var.index_key(instance)]
                         acc[slot] = acc.get(slot, 0.0) + value
@@ -400,6 +422,7 @@ class LXCanonicalBuilder:
                 if keep is not None and not keep(*args):
                     continue
                 value = float(coeff(*args))
+                _finite_coefficient(value, var, instance, where)
                 if value:
                     slot = positions[var.index_key(instance)]
                     acc[slot] = acc.get(slot, 0.0) + value
@@ -420,11 +443,12 @@ class LXCanonicalBuilder:
             if isinstance(term, LXIndicatorTerm):
                 continue
             if isinstance(term, LXAbsoluteTerm):
+                coeff = _finite_term_coeff(term.coefficient, "abs()", where)
                 for key, ps in self._aligned([term.var], where):
-                    items.append(LXCanonicalNonlinear("abs", ps, float(term.coefficient), {},
-                                                      index, key))
+                    items.append(LXCanonicalNonlinear("abs", ps, coeff, {}, index, key))
             elif isinstance(term, LXMinMaxTerm):
-                coeffs = tuple(float(c) for c in (term.coefficients or [1.0] * len(term.vars)))
+                coeffs = tuple(_finite_term_coeff(c, f"{term.operation}()", where)
+                               for c in (term.coefficients or [1.0] * len(term.vars)))
                 if len(coeffs) != len(term.vars):
                     raise ValueError(f"{where.capitalize()}: {term.operation}() has "
                                      f"{len(term.vars)} variables but {len(coeffs)} coefficients")
@@ -432,9 +456,9 @@ class LXCanonicalBuilder:
                     items.append(LXCanonicalNonlinear(term.operation, ps, 1.0,
                                                       {"coefficients": coeffs}, index, key))
             elif isinstance(term, LXBilinearTerm):
+                coeff = _finite_term_coeff(term.coefficient, "product", where)
                 for key, ps in self._aligned([term.var1, term.var2], where):
-                    items.append(LXCanonicalNonlinear("product", ps, float(term.coefficient), {},
-                                                      index, key))
+                    items.append(LXCanonicalNonlinear("product", ps, coeff, {}, index, key))
             elif isinstance(term, LXPiecewiseLinearTerm):
                 params = self._piecewise_params(term)
                 for key, ps in self._aligned([term.var], where):
@@ -509,7 +533,12 @@ class LXCanonicalBuilder:
                 a = p1[term.var1.index_key(i)]
                 b = p2[term.var2.index_key(j)]
                 key = (min(a, b), max(a, b))
-                acc[key] = acc.get(key, 0.0) + float(value)
+                value = float(value)
+                if not math.isfinite(value):
+                    raise ValueError(
+                        f"The objective: quadratic coefficient of '{term.var1.name}' x "
+                        f"'{term.var2.name}' is {value}")
+                acc[key] = acc.get(key, 0.0) + value
         return {k: v for k, v in acc.items() if v}
 
     @staticmethod
