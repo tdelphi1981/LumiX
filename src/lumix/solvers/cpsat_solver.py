@@ -105,7 +105,6 @@ class LXCPSATSolver(LXSolverInterface):
         self._has_objective = False
         self._approximate = False
         self._approximation_error = 0.0
-        self._open_divisor = 1        # 2 while probing for unboundedness (0.3.2)
         self._relax_grid = 0          # equalities on scaled continuous variables as bands
         self._grid_relaxed = False
 
@@ -154,8 +153,7 @@ class LXCPSATSolver(LXSolverInterface):
         self._handles, self._open = [], {}
         for pos, v in enumerate(canon.variables):
             scale = self._scales[pos]
-            open_bound = max(1, min(self.OPEN_BOUND, self.ROW_BUDGET // weight[pos])
-                             // self._open_divisor)
+            open_bound = max(1, min(self.OPEN_BOUND, self.ROW_BUDGET // weight[pos]))
             lo = self._int_bound(v.lower * scale, math.ceil, pos, open_bound)
             hi = self._int_bound(v.upper * scale, math.floor, pos, open_bound)
             if lo > hi:
@@ -364,6 +362,8 @@ class LXCPSATSolver(LXSolverInterface):
 
         previous_scale = self._scaling_factor
         if scaling_factor is not None:
+            if not float(scaling_factor).is_integer() or scaling_factor < 1:
+                raise ValueError(f"scaling_factor must be an integer >= 1, got {scaling_factor!r}")
             self._scaling_factor = int(scaling_factor)
         try:
             cpsat_model = self.build_model(model)
@@ -393,28 +393,52 @@ class LXCPSATSolver(LXSolverInterface):
 
     def _unbounded_past_open_bound(self, model: LXModel, solver: Any, status: int,
                                    time_limit: Optional[float]) -> bool:
-        """An open variable on the ±open-bound cap of an optimal solve: solve again with
-        half the cap. An objective that moves with the cap has no finite optimum."""
+        """An optimal solve with an open variable on the ±open-bound cap is unbounded
+        when the LP relaxation of the canonical model is unbounded (a feasible model
+        with rational data and an unbounded relaxation has no finite optimum). An
+        optimum that only lies beyond the cap (a large finite bound or row) stays
+        "feasible" with the warning of _parse_solution."""
         if status != cp_model.OPTIMAL or not self._has_objective or not any(
                 abs(solver.Value(self._handles[p])) >= b for p, b in self._open.items()):
             return False
-        full = solver.ObjectiveValue()
-        probe = cp_model.CpSolver()
-        if time_limit is not None:
-            probe.parameters.max_time_in_seconds = time_limit
-        self._open_divisor = 2
-        try:
-            if probe.Solve(self.build_model(model)) != cp_model.OPTIMAL:
-                return False
-            moved = abs(probe.ObjectiveValue() - full) > 1e-9 * max(1.0, abs(full))
-        finally:
-            self._open_divisor = 1
-            self.build_model(model)          # leave the full model as the built one
-        if moved:
+        unbounded = self._lp_relaxation_unbounded()
+        if unbounded:
             self.logger.logger.warning(
-                "CP-SAT: the objective improves with the open-bound cap; the model is "
-                "unbounded")
-        return moved
+                "CP-SAT: a variable reached the open-bound cap and the LP relaxation is "
+                "unbounded; the model is unbounded")
+        return unbounded
+
+    def _lp_relaxation_unbounded(self) -> bool:
+        from ortools.linear_solver import pywraplp
+
+        canon = self._canonical
+        lp = pywraplp.Solver.CreateSolver("GLOP")
+        inf = lp.infinity()
+        xs = [lp.NumVar(v.lower if math.isfinite(v.lower) else -inf,
+                        v.upper if math.isfinite(v.upper) else inf, f"x{i}")
+              for i, v in enumerate(canon.variables)]
+        for row in canon.rows:
+            lo = -inf if row.sense == LXConstraintSense.LE else row.rhs
+            hi = inf if row.sense == LXConstraintSense.GE else row.rhs
+            ct = lp.RowConstraint(lo, hi, "")
+            for i, c in row.coeffs.items():
+                ct.SetCoefficient(xs[i], c)
+        obj = lp.Objective()
+        for i, c in canon.objective.items():
+            obj.SetCoefficient(xs[i], c)
+        if canon.sense == LXObjectiveSense.MAXIMIZE:
+            obj.SetMaximization()
+        else:
+            obj.SetMinimization()
+        result = lp.Solve()
+        if result == pywraplp.Solver.INFEASIBLE:
+            # GLOP's presolve reports some unbounded LPs as infeasible; this one has a
+            # feasible point (CP-SAT found it), so ask once more without presolve.
+            params = pywraplp.MPSolverParameters()
+            params.SetIntegerParam(pywraplp.MPSolverParameters.PRESOLVE,
+                                   pywraplp.MPSolverParameters.PRESOLVE_OFF)
+            result = lp.Solve(params)
+        return result == pywraplp.Solver.UNBOUNDED
 
     def get_solver_model(self) -> cp_model.CpModel:
         """

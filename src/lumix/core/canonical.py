@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import numbers
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
@@ -111,6 +112,12 @@ def canonical_bounds(var: "LXVariable") -> Tuple[float, float]:
 _BUILTIN_ROWS = (tuple, list, dict, set, frozenset, str, bytes, int, float, bool, complex)
 
 
+def _record(value: Any) -> bool:
+    """A row value that is compared by value only against its own type."""
+    return hasattr(value, "_fields") or not isinstance(
+        value, (numbers.Number, str, bytes, tuple, frozenset))
+
+
 def _difference(a: float, b: float) -> float:
     """``a - b`` with cancellation noise (0.3 - (0.1 + 0.2)) snapped to 0.
     A non-finite difference is returned as it is."""
@@ -165,8 +172,10 @@ class LXInstanceCache:
 
     def contains(self, var: "LXVariable", row: Any) -> bool:
         """``row`` is one of the instances of ``var``: found by identity in O(1); other
-        rows are compared by value only when they have the instances' type or are of
-        a built-in type (an equal NamedTuple of another type is a different row)."""
+        rows are compared by value, except a record (a NamedTuple, dataclass or other
+        object) against instances of another type: an equal NamedTuple of another type
+        is a different row. Numbers (numpy's included), strings and plain tuples
+        compare by value."""
         slot = id(var)
         ids = self._identities.get(slot)
         if ids is None:
@@ -174,8 +183,8 @@ class LXInstanceCache:
         if id(row) in ids:
             return True
         instances = self.instances(var)
-        if type(row) not in _BUILTIN_ROWS and not (
-                instances and type(instances[0]) is type(row)):
+        if instances and type(instances[0]) is not type(row) and (
+                _record(row) or _record(instances[0])):
             return False
         return row in instances
 

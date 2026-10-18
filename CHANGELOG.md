@@ -12,11 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `LXCanonicalModel.goal_deviations`: for each relaxed goal, the names of its goal row family and of its positive and negative deviation families. Empty for a model without goals. `schema_version` stays 1.
 - `lumix.disable_logging()` removes the handler `enable_logging()` added and lets `lumix` records propagate again.
-- `LXCPSATSolver.solve(..., scaling_factor=...)` sets the grid of continuous variables for one solve; it is also reachable as `LXOptimizer().use_solver("cpsat", scaling_factor=...)`.
+- `LXCPSATSolver.solve(..., scaling_factor=...)` sets the grid of continuous variables for one solve; it is also reachable as `LXOptimizer().use_solver("cpsat", scaling_factor=...)`; it must be an integer >= 1.
 
 ### Fixed
 - An infinite or NaN coefficient (linear, quadratic, `abs`/`min`/`max`/product) was dropped silently by the noise filter, so a different model was solved. It now raises a `ValueError` naming the place and the variable instance. An infinite objective constant and variable bounds that no value satisfies (`[inf, inf]`, NaN) raise as well. Open bounds (`None`, `±inf`) are unchanged.
-- CP-SAT reported an unbounded integer model as `feasible` at its open-bound cap. When a variable sits on the cap of an optimal solve, CP-SAT now solves again with half the cap; an objective that moves with it is reported `unbounded`.
+- CP-SAT reported an unbounded integer model as `feasible` at its open-bound cap. When a variable sits on the cap of an optimal solve, LumiX now solves the LP relaxation of the model with GLOP; if it is unbounded, the model is reported `unbounded`.
 - OR-Tools/SCIP reported some unbounded MIPs as `optimal` with values near SCIP's infinity (objective -1.97e19). An optimum with a value of 1e18 or more, or an objective of 1e19 or more, is now reported `unbounded`.
 - CP-SAT's overflow error for a row with a huge value talked about a "common denominator of 1"; it now names the value and the 64-bit limit.
 - CPLEX solved every quadratic objective for the global optimum (optimality target 3), which gives no duals, so a convex QP had no shadow prices. The global target is now used only when CPLEX reports the objective is not convex.
@@ -44,7 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `enable_logging()` sets `propagate = False` on the `lumix` logger while its handler is attached.
 - `LXVisualizationConfig.template` and `color_sequence` are kept when given; when left out, they follow `theme`, so non-default themes now use their own colours.
 - Constraint utilization is shown only for `<=` rows with a positive right-hand side (other rows have no percentage).
-- CP-SAT reports `unbounded` instead of `feasible` for a model whose objective moves with the open-bound cap.
+- CP-SAT reports `unbounded` instead of `feasible` when a variable reaches the open-bound cap and the model's LP relaxation is unbounded. An optimum that only lies beyond the cap (a large finite bound or row) stays `feasible` with a warning.
+- OR-Tools/SCIP reports `unbounded` instead of `optimal` when a value reaches 1e18 or the objective 1e19.
+- `LXVisualizationConfig(template=...)` defaults to `None` (filled from `theme`).
+- Charts that set their own height keep it: `configure(height=...)` sizes only charts without one.
+- The scenario comparison shows `-` / `N/A` instead of a percentage for an infeasible scenario or a zero baseline.
+- `get_binding_constraints(threshold=t)` with an explicit threshold also requires zero slack, so it can return fewer rows than before.
+- `LXNonLinearFunctions.custom(adaptive=...)` defaults to the config's `adaptive_breakpoints` (it was `True`).
+- `pwl_num_segments` and `num_segments` must be integers >= 1.
+- `LXVariableSensitivity.is_at_bound` uses the bounds the model solves with, so a binary at 0 or 1 is at its bound.
+- `pct_change` reports a change below 1e-9 percent as 0, so tables never print `-0.0%`.
 - The unused `LXSolverInterface._candidates` helper is removed.
 - Non-finite coefficients, objective constants and impossible bounds raise a `ValueError`.
 

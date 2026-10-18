@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
@@ -200,11 +201,12 @@ class LXSensitivityAnalyzer(Generic[TModel]):
 
         reduced_cost = self.solution.get_reduced_cost(var_name)
         variable = self.model.get_variable(family)
-        lower_bound = variable.lower_bound if variable else None
-        upper_bound = variable.upper_bound if variable else None
+        # The bounds the model solves with (binary: intersected with [0, 1]).
+        from ..core.canonical import canonical_bounds
+        lower_bound, upper_bound = canonical_bounds(variable) if variable else (-math.inf, math.inf)
         is_at_bound = (
-            (lower_bound is not None and abs(value - float(lower_bound)) < 1e-6)
-            or (upper_bound is not None and abs(value - float(upper_bound)) < 1e-6))
+            (math.isfinite(lower_bound) and abs(value - lower_bound) < 1e-6)
+            or (math.isfinite(upper_bound) and abs(value - upper_bound) < 1e-6))
         is_basic = reduced_cost is None or abs(reduced_cost) < 1e-6
 
         sensitivity = LXVariableSensitivity(
