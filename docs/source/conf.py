@@ -15,8 +15,8 @@ project = "LumiX"
 copyright = "2024, LumiX Contributors"
 # For specific author information, see the AUTHORS file in the project root
 author = "LumiX Contributors"
-release = "0.3.1"
-version = "0.3.1"
+release = "0.3.2"
+version = "0.3.2"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

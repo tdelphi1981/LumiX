@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-18
+
+### Added
+- `LXCanonicalModel.goal_deviations`: for each relaxed goal, the names of its goal row family and of its positive and negative deviation families. Empty for a model without goals. `schema_version` stays 1.
+- `lumix.disable_logging()` removes the handler `enable_logging()` added and lets `lumix` records propagate again.
+- `LXCPSATSolver.solve(..., scaling_factor=...)` sets the grid of continuous variables for one solve; it is also reachable as `LXOptimizer().use_solver("cpsat", scaling_factor=...)`.
+
+### Fixed
+- An infinite or NaN coefficient (linear, quadratic, `abs`/`min`/`max`/product) was dropped silently by the noise filter, so a different model was solved. It now raises a `ValueError` naming the place and the variable instance. An infinite objective constant and variable bounds that no value satisfies (`[inf, inf]`, NaN) raise as well. Open bounds (`None`, `±inf`) are unchanged.
+- CP-SAT reported an unbounded integer model as `feasible` at its open-bound cap. When a variable sits on the cap of an optimal solve, CP-SAT now solves again with half the cap; an objective that moves with it is reported `unbounded`.
+- OR-Tools/SCIP reported some unbounded MIPs as `optimal` with values near SCIP's infinity (objective -1.97e19). An optimum with a value of 1e18 or more, or an objective of 1e19 or more, is now reported `unbounded`.
+- CP-SAT's overflow error for a row with a huge value talked about a "common denominator of 1"; it now names the value and the 64-bit limit.
+- CPLEX solved every quadratic objective for the global optimum (optimality target 3), which gives no duals, so a convex QP had no shadow prices. The global target is now used only when CPLEX reports the objective is not convex.
+- A row of one NamedTuple type was narrowed by value against instances of another NamedTuple type with equal fields.
+- `piecewise_points` and `LXLinearizerConfig` accepted 0 or a negative number of segments; a function value that is not finite at a breakpoint was used as it is. Both now raise a `ValueError`.
+- `LXNonLinearFunctions.log`, `sqrt` and `tan` used sentinel values (±1e10, 0) outside their domain. They now raise a `ValueError` naming the domain.
+- `LXIndicatorTerm` accepted any sense string and failed later with a `KeyError`; it now raises a `ValueError` at construction.
+- A goal `|x| <= 3` on a free variable could not be linearized (an equality on a convex term needs finite bounds). One-sided goals with nonlinear terms are relaxed one-sided, so the term stays convex.
+- `solve_goal_programming(..., mode="weighted")` ran the sequential mode: a string never equalled the enum. Strings are accepted in any case, and an unknown mode raises a `ValueError`.
+- `LXWhatIfAnalyzer`, the scenario comparison report and the scenario charts computed the percent change in three ways; the sign was wrong for a negative baseline. They now share one definition, `(new - base) / |base| * 100`.
+- `LXSensitivityAnalyzer.get_binding_constraints()` returned nothing without duals (MIPs, CP-SAT). Binding now means zero slack.
+- `enable_logging("VERBOSE")` attached its handler before failing, and records were printed twice when the root logger also had a handler.
+- Warnings raised from code run with `python -c` pointed at `sys:1` instead of the caller's line. The three deepcopy warnings now point at the user's code too.
+- Visualization: a `template` given to `LXVisualizationConfig` was overwritten, and theme colours were never used; the dashboard summary and other fixed-height charts were resized to the default height; `interactive=False` had no effect; the "enable sensitivity analysis" hint sat on the wrong panel; an infeasible solution was titled "Objective: 0.00"; utilization percentages were drawn for `>=`, `==` and non-positive rows; `plot_satisfaction_status(tolerance=0)` used the default tolerance; waterfall and shadow-price colours ignored the objective sense.
+- Docs: the rational conversion guide showed outputs from another algorithm (`355/113`); the quickstart showed a non-optimal plan; example 04 required CPLEX and exited with code 0 on errors.
+
+### Behavior changes
+- `binary()` keeps bounds set before it (the model intersects them with [0, 1]); it used to reset them to [0, 1].
+- Rows are narrowed by value only when they have the type of the variable's instances or a built-in type.
+- `get_binding_constraints()` is slack-based, and `threshold` defaults to `None` (a threshold filters by `|shadow price|`).
+- `LXWhatIfResult.delta_percentage` is relative to `|baseline|`, so its sign changes for a negative baseline, and it is `nan` for a zero baseline (it was 0.0).
+- `LXNonLinearFunctions` helpers follow the linearizer config's `pwl_num_segments` and `adaptive_breakpoints` unless `segments` is given (each helper had its own fixed count, 20-50).
+- A one-sided goal with nonlinear terms has one deviation; the other is fixed to 0. Linear goals are unchanged.
+- The auxiliary families of a linearized `add_quadratic` are keyed by the index keys `(key_i, key_j)` instead of the canonical positions.
+- `enable_logging()` sets `propagate = False` on the `lumix` logger while its handler is attached.
+- `LXVisualizationConfig.template` and `color_sequence` are kept when given; when left out, they follow `theme`, so non-default themes now use their own colours.
+- Constraint utilization is shown only for `<=` rows with a positive right-hand side (other rows have no percentage).
+- CP-SAT reports `unbounded` instead of `feasible` for a model whose objective moves with the open-bound cap.
+- The unused `LXSolverInterface._candidates` helper is removed.
+- Non-finite coefficients, objective constants and impossible bounds raise a `ValueError`.
+
 ## [0.3.1] - 2026-10-16
 
 ### Fixed

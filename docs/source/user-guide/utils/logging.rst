@@ -38,6 +38,16 @@ In a script or notebook, turn the messages on with one call:
    lumix.enable_logging()            # INFO and above, to stderr
    lumix.enable_logging("DEBUG")     # calling again replaces the handler
 
+While the handler of ``enable_logging()`` is attached, ``lumix`` records do not
+propagate to the root logger, so they are printed once even when the application
+also configured the root logger. :func:`lumix.disable_logging` removes the handler
+and restores propagation. An unknown level name raises ``ValueError`` before
+anything changes.
+
+.. versionchanged:: 0.3.2
+   ``enable_logging()`` sets ``propagate = False`` and checks the level first;
+   :func:`lumix.disable_logging` is new.
+
 Applications that configure :mod:`logging` themselves (``logging.basicConfig``,
 ``dictConfig``) see LumiX's records through their own handlers, once each.
 Silence LumiX with ``logging.getLogger("lumix").setLevel(logging.WARNING)``;

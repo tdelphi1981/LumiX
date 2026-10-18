@@ -96,8 +96,7 @@ def relax_constraint(
     - LE (expr <= rhs): expr + neg_dev - pos_dev == rhs (minimize pos_dev)
     - GE (expr >= rhs): expr + neg_dev - pos_dev == rhs (minimize neg_dev)
     - EQ (expr == rhs): expr + neg_dev - pos_dev == rhs (minimize both)
-    - A goal with nonlinear terms and sense LE/GE: ``expr - pos_dev <= rhs`` /
-      ``expr + neg_dev >= rhs``, the other deviation fixed to 0 (0.3.2)
+    - Nonlinear LE/GE goal (0.3.2): expr - pos_dev <= rhs / expr + neg_dev >= rhs
 
     Args:
         constraint: Original goal constraint to relax

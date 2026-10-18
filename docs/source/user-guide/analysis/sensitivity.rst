@@ -227,12 +227,17 @@ Getting Binding Constraints
 
 .. code-block:: python
 
-   # Get all binding constraints with their shadow prices
+   # Rows with zero slack at the solution
    binding = analyzer.get_binding_constraints()
 
    for name, sensitivity in binding.items():
-       if sensitivity.shadow_price > 0:  # For maximization
+       if sensitivity.shadow_price is not None and sensitivity.shadow_price > 0:  # max
            print(f"{name} is a bottleneck worth ${sensitivity.shadow_price:.2f}/unit")
+
+.. versionchanged:: 0.3.2
+   Binding means zero slack, so MIPs and solvers without duals report their binding
+   rows too; it used to mean a non-zero shadow price. ``threshold`` defaults to
+   ``None``; a value keeps only rows whose ``|shadow price|`` is above it.
 
 Practical Examples
 ------------------

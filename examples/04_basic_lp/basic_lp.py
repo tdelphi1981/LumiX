@@ -59,6 +59,8 @@ See Also:
     - User Guide: Variables and Expressions sections
 """
 
+import os
+import sys
 from dataclasses import dataclass
 from typing import Tuple
 
@@ -95,7 +97,8 @@ MIN_PROTEIN = 50  # grams
 MIN_CALCIUM = 800  # mg
 
 
-solver_to_use = "cplex"
+# Any installed solver: ortools, gurobi, cplex or glpk (LUMIX_SOLVER=gurobi python basic_lp.py)
+solver_to_use = os.environ.get("LUMIX_SOLVER", "ortools")
 
 # ==================== MODEL BUILDING ====================
 
@@ -192,7 +195,8 @@ def visualize_diet(model: LXModel, solution: LXSolution) -> None:
         print("=" * 60)
 
         viz = LXSolutionVisualizer(solution, model)
-        viz.show()
+        if not os.environ.get("LUMIX_NO_SHOW"):     # set in tests: no browser window
+            viz.show()
 
     except ImportError:
         print("\nVisualization skipped (install with: pip install lumix-opt[viz])")
@@ -285,12 +289,14 @@ def main():
 
     except ImportError as e:
         print(f"ERROR: {e}")
-        print("\nPlease install OR-Tools:")
-        print("  pip install ortools")
+        print("Install the solver it names, or set LUMIX_SOLVER to an installed one "
+              "(ortools, gurobi, cplex, glpk)")
+        sys.exit(1)
     except Exception as e:
         print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

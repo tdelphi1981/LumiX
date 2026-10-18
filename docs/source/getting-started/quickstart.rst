@@ -217,8 +217,8 @@ Expected Output
 .. code-block:: text
 
    Optimal profit: $2000.00
-   Produce 20.00 units of Product A
-   Produce 30.00 units of Product B
+   Produce 40.00 units of Product A
+   Produce 20.00 units of Product B
 
 Understanding the Code
 ----------------------
@@ -295,10 +295,10 @@ Output:
 
 .. code-block:: text
 
-   Model: production_plan
-   Variables: 1 family (2 instances)
-   Constraints: 2
-   Objective: MAXIMIZE
+   LXModel: production_plan
+     Variable Families: 1
+     Constraint Families: 2
+     Objective: max
 
 Next Steps
 ----------

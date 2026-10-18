@@ -22,4 +22,10 @@
 
    
    
+   .. rubric:: Attributes
+
+   .. autosummary::
+   
+      ~LXORToolsSolver.SCIP_ARTIFACT
+   
    

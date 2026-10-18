@@ -33,6 +33,14 @@ Structure (``schema_version`` 1):
   instance (see `Nonlinear objective items`_).
 - ``goal_stages``: the stage objectives of sequential goal programming, empty
   otherwise (see `Goal programming`_).
+- ``goal_deviations``: one ``(goal row family, positive deviation family, negative
+  deviation family)`` per relaxed goal, weighted or sequential, in relaxation order;
+  empty for a model without goals. The goal rows are the rows whose ``family`` is
+  the first name; each has at most one column of each deviation family (``-1`` for
+  the positive, ``+1`` for the negative deviation). A heuristic can compute the
+  deviations from the other columns instead of searching them.
+
+  .. versionadded:: 0.3.2
 
 Adding fields keeps the schema version; changing or removing fields increments it.
 
