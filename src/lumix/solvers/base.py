@@ -61,15 +61,6 @@ class LXSolverInterface(ABC, Generic[TModel]):
         every ``build_model`` so data changed between solves is picked up."""
         self._instance_cache = LXInstanceCache()
 
-    def _candidates(
-        self, lx_var: Any, where_func: Any, constraint_instance: Any = None
-    ) -> Tuple[List[Any], Any]:
-        """See :meth:`lumix.core.canonical.LXInstanceCache.candidates`."""
-        if not hasattr(self, "_instance_cache"):
-            self._reset_instance_cache()
-        return self._instance_cache.candidates(lx_var, where_func, constraint_instance)
-
-
     # ---- canonical build helpers (0.3.0) ----------------------------------
     def _canonicalize(self, model: LXModel) -> LXCanonicalModel:
         """Canonical form of ``model`` for this build; resets per-build state."""

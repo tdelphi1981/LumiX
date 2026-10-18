@@ -161,13 +161,20 @@ class LXInstanceCache:
         self._identities: Dict[int, set] = {}
 
     def contains(self, var: "LXVariable", row: Any) -> bool:
-        """``row in self.instances(var)``: a row that is one of the instance objects is
-        found by identity in O(1); only other rows are compared by value."""
+        """``row`` is one of the instances of ``var``: found by identity in O(1); other
+        rows are compared by value only when they have the instances' type or are of
+        a built-in type (an equal NamedTuple of another type is a different row)."""
         slot = id(var)
         ids = self._identities.get(slot)
         if ids is None:
             ids = self._identities[slot] = {id(i) for i in self.instances(var)}
-        return id(row) in ids or row in self.instances(var)
+        if id(row) in ids:
+            return True
+        instances = self.instances(var)
+        if type(row) not in _BUILTIN_ROWS and not (
+                instances and type(instances[0]) is type(row)):
+            return False
+        return row in instances
 
     def instances(self, var: "LXVariable") -> List[Any]:
         slot = id(var)

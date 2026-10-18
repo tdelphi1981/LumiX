@@ -90,3 +90,49 @@ def test_w9_infinite_bounds_still_solve(solver):
     m.maximize(LXLinearExpression().add_term(x, 1.0))
     s = solve_with(solver, m)
     assert s.is_optimal() and s.objective_value == pytest.approx(7.0)
+
+
+class _A(NamedTuple):
+    id: int
+
+
+class _B(NamedTuple):
+    id: int
+
+
+def test_w9_rows_of_another_namedtuple_type_are_not_narrowed():
+    x = (LXVariable[_A, float]("x").continuous().bounds(0, 1)
+         .indexed_by(lambda a: a.id).from_data([_A(1), _A(2)]))
+    c = (LXConstraint[_B]("c").expression(LXLinearExpression().add_term(x, 1.0))
+         .le().rhs(1).from_data([_B(1), _B(2)]).indexed_by(lambda b: b.id))
+    canon = LXModel("m").add_variable(x).add_constraint(c).to_canonical()
+    assert [r.coeffs for r in canon.rows] == [{0: 1.0, 1: 1.0}, {0: 1.0, 1: 1.0}]
+
+
+def test_w9_builtin_rows_still_narrow_by_value():
+    # I7 (test_w1_review.py::test_i7) keeps value narrowing for built-in rows.
+    x = LXVariable[int, float]("x").continuous().bounds(0, 1) \
+        .indexed_by(lambda k: k).from_data([1, 2, 3])
+    c = (LXConstraint[int]("c").expression(LXLinearExpression().add_term(x, 1.0))
+         .le().rhs(1).from_data([2, 3]).indexed_by(lambda k: k))
+    canon = LXModel("m").add_variable(x).add_constraint(c).to_canonical()
+    assert [r.coeffs for r in canon.rows] == [{1: 1.0}, {2: 1.0}]
+
+
+def test_w9_binary_keeps_bounds_set_before_it():
+    b = LXVariable[None, int]("b").bounds(0, 0).binary()
+    assert (b.lower_bound, b.upper_bound) == (0, 0)
+    m = LXModel("m").add_variable(b).maximize(LXLinearExpression().add_term(b, 1.0))
+    assert solve_with("ortools", m).objective_value == pytest.approx(0.0)
+
+
+def test_w9_binary_without_bounds_is_zero_one():
+    b = LXVariable[None, int]("b").binary()
+    m = LXModel("m").add_variable(b)
+    v = m.to_canonical().variables[0]
+    assert (v.lower, v.upper) == (0.0, 1.0)
+
+
+def test_w9_solver_base_has_no_stale_candidates_helper():
+    from lumix.solvers.base import LXSolverInterface
+    assert not hasattr(LXSolverInterface, "_candidates")
