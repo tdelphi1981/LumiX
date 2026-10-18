@@ -71,7 +71,7 @@ import logging as _logging
 
 _logging.getLogger("lumix").addHandler(_logging.NullHandler())
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 # Core classes
 from .core.canonical import LXCanonicalModel, LXCanonicalNonlinear, LXCanonicalRow, LXCanonicalVariable
@@ -149,6 +149,7 @@ from .utils import (
     LXORMModel,
     LXRationalConverter,
     LXTypedQuery,
+    disable_logging,
     enable_logging,
 )
 
@@ -248,6 +249,7 @@ __all__ = [
     "LXTypedQuery",
     "LXRationalConverter",
     "LXModelLogger",
+    "disable_logging",
     "enable_logging",
     # Goal Programming
     "LXGoal",

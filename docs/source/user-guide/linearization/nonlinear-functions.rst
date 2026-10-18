@@ -69,12 +69,17 @@ The simpler alternative is a piecewise term in an expression; with
 
 .. note::
 
-   The number of segments is the function's ``segments`` argument, and the
-   breakpoint placement is fixed per function: adaptive for ``exp``, ``log``,
-   ``sigmoid`` and ``tan``, uniform for ``sqrt``, ``sin`` and ``cos``, adaptive
-   for ``power`` when ``|exponent| > 2``, and the ``adaptive`` argument for
-   ``custom``. Of :class:`~lumix.linearization.config.LXLinearizerConfig`, only
-   ``pwl_method`` applies to these functions.
+   The number of segments is the function's ``segments`` argument, or the
+   config's ``pwl_num_segments`` when it is left out; breakpoints are adaptive
+   when the config's ``adaptive_breakpoints`` is set (``custom`` also takes an
+   ``adaptive`` argument). ``log``, ``sqrt`` and ``tan`` raise ``ValueError`` when
+   the variable's bounds reach outside their domain (``x > 0``, ``x >= 0``, no
+   pole ``pi/2 + k*pi``).
+
+.. versionchanged:: 0.3.2
+   The helpers follow the linearizer's config; each had its own fixed segment
+   count (20-50) and breakpoint placement, and ``log``, ``sqrt`` and ``tan`` used
+   sentinel values outside their domain.
 
 Available Functions
 -------------------
@@ -85,7 +90,7 @@ auxiliaries to the model as shown there.
 Exponential Function
 ~~~~~~~~~~~~~~~~~~~~
 
-.. py:staticmethod:: exp(var, linearizer, segments=30)
+.. py:staticmethod:: exp(var, linearizer, segments=None)
 
    Exponential function: e^x
 
@@ -108,7 +113,7 @@ Exponential Function
 Logarithm Function
 ~~~~~~~~~~~~~~~~~~
 
-.. py:staticmethod:: log(var, linearizer, base=math.e, segments=30)
+.. py:staticmethod:: log(var, linearizer, base=math.e, segments=None)
 
    Logarithm: log_base(x)
 
@@ -138,7 +143,7 @@ Logarithm Function
 Square Root Function
 ~~~~~~~~~~~~~~~~~~~~
 
-.. py:staticmethod:: sqrt(var, linearizer, segments=20)
+.. py:staticmethod:: sqrt(var, linearizer, segments=None)
 
    Square root: √x
 
@@ -173,7 +178,7 @@ Square Root Function
 Power Function
 ~~~~~~~~~~~~~~
 
-.. py:staticmethod:: power(var, exponent, linearizer, segments=25)
+.. py:staticmethod:: power(var, exponent, linearizer, segments=None)
 
    Power function: x^n
 
@@ -217,7 +222,7 @@ Power Function
 Sigmoid Function
 ~~~~~~~~~~~~~~~~
 
-.. py:staticmethod:: sigmoid(var, linearizer, segments=40)
+.. py:staticmethod:: sigmoid(var, linearizer, segments=None)
 
    Sigmoid function: 1 / (1 + e^(-x))
 
@@ -241,9 +246,9 @@ Sigmoid Function
 Trigonometric Functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. py:staticmethod:: sin(var, linearizer, segments=50)
-.. py:staticmethod:: cos(var, linearizer, segments=50)
-.. py:staticmethod:: tan(var, linearizer, segments=40)
+.. py:staticmethod:: sin(var, linearizer, segments=None)
+.. py:staticmethod:: cos(var, linearizer, segments=None)
+.. py:staticmethod:: tan(var, linearizer, segments=None)
 
    Trigonometric functions: sin(x), cos(x), tan(x)
 
@@ -280,7 +285,7 @@ Trigonometric Functions
 Custom Functions
 ~~~~~~~~~~~~~~~~
 
-.. py:staticmethod:: custom(var, func, linearizer, segments=30, adaptive=True)
+.. py:staticmethod:: custom(var, func, linearizer, segments=None, adaptive=None)
 
    Custom user-defined function
 

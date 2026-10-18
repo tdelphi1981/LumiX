@@ -136,8 +136,8 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
 
         Args:
             top_n: Number of items to show (default: configured top_n).
-            show_positive: Show positive shadow prices.
-            show_negative: Show negative shadow prices.
+            show_positive: Show rows where raising the RHS improves the objective.
+            show_negative: Show rows where raising the RHS worsens the objective.
 
         Returns:
             Plotly Figure.
@@ -151,6 +151,7 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
         top_constraints = self.analyzer.get_most_sensitive_constraints(top_n=n)
         colors = self._get_colors()
 
+        improves = self._improves()
         names: List[str] = []
         positive_values: List[float] = []
         negative_values: List[float] = []
@@ -159,7 +160,7 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
             if sens.shadow_price is None:
                 continue
             names.append(name)
-            if sens.shadow_price >= 0:
+            if improves(sens.shadow_price):
                 positive_values.append(sens.shadow_price if show_positive else 0)
                 negative_values.append(0)
             else:
@@ -174,7 +175,7 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
                 y=names,
                 x=positive_values,
                 orientation="h",
-                name="Positive Impact",
+                name="Raising RHS improves",
                 marker_color=colors[4],  # Green
                 hovertemplate="<b>%{y}</b><br>Shadow Price: %{x:.4f}<extra></extra>",
             )
@@ -186,7 +187,7 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
                 y=names,
                 x=negative_values,
                 orientation="h",
-                name="Negative Impact",
+                name="Raising RHS worsens",
                 marker_color=colors[3],  # Red
                 hovertemplate="<b>%{y}</b><br>Shadow Price: %{x:.4f}<extra></extra>",
             )
@@ -356,6 +357,15 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
 
         return self._apply_theme(fig)
 
+    def _improves(self) -> Any:
+        """``improves(dual)``: raising the row's RHS improves the objective. The dual is
+        d objective / d rhs on every adapter, so that is ``dual > 0`` when maximizing
+        and ``dual < 0`` when minimizing (0.3.2)."""
+        from ..analysis._sense import solved_sense
+        from ..core.enums import LXObjectiveSense
+        maximize = solved_sense(self.analyzer.model) == LXObjectiveSense.MAXIMIZE
+        return (lambda v: v > 0) if maximize else (lambda v: v < 0)
+
     def _add_tornado_trace(self, fig: Any, row: int, col: int) -> None:
         """Add tornado chart trace to subplot."""
         top_constraints = self.analyzer.get_most_sensitive_constraints(top_n=10)
@@ -364,7 +374,8 @@ class LXSensitivityPlot(LXBaseVisualizer[TModel], Generic[TModel]):
         names = [name for name, _ in reversed(top_constraints)]
         values = [sens.shadow_price or 0 for _, sens in reversed(top_constraints)]
 
-        bar_colors = [colors[4] if v >= 0 else colors[3] for v in values]
+        improves = self._improves()
+        bar_colors = [colors[4] if improves(v) else colors[3] for v in values]
 
         fig.add_trace(
             go.Bar(

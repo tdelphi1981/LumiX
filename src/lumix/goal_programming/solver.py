@@ -164,7 +164,7 @@ class LXGoalProgrammingSolver:
 def solve_goal_programming(
     model: LXModel[TModel],
     optimizer: LXOptimizer,
-    mode: LXGoalMode = LXGoalMode.WEIGHTED,
+    mode: "LXGoalMode | str" = LXGoalMode.WEIGHTED,
     **solver_params: Any,
 ) -> LXSolution[TModel]:
     """
@@ -173,7 +173,8 @@ def solve_goal_programming(
     Args:
         model: LXModel with goal constraints (marked with .as_goal())
         optimizer: Configured optimizer
-        mode: Goal programming mode (WEIGHTED or SEQUENTIAL)
+        mode: Goal programming mode (WEIGHTED or SEQUENTIAL), or its name as a
+            string (``"weighted"``, ``"sequential"``, any case)
         **solver_params: Additional solver parameters
 
     Returns:
@@ -190,7 +191,17 @@ def solve_goal_programming(
         ... )
         >>> optimizer = LXOptimizer().use_solver("gurobi")
         >>> solution = solve_goal_programming(model, optimizer, mode=LXGoalMode.WEIGHTED)
+
+    .. versionchanged:: 0.3.2
+       ``mode`` also takes a string; an unknown mode raises ``ValueError`` (a string
+       used to fall through to sequential).
     """
+    if isinstance(mode, str):
+        try:
+            mode = LXGoalMode(mode.lower())
+        except ValueError:
+            raise ValueError(f"Unknown goal programming mode {mode!r}; use 'weighted' or "
+                             "'sequential' (or LXGoalMode)") from None
     gp_solver = LXGoalProgrammingSolver(optimizer)
     if mode == LXGoalMode.WEIGHTED:
         return gp_solver.solve_weighted(model, **solver_params)

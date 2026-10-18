@@ -259,6 +259,11 @@ argument; it overrides the model's mode without changing ``model.goal_mode``:
    from lumix import LXGoalMode, solve_goal_programming
 
    solution = solve_goal_programming(model, optimizer, mode=LXGoalMode.SEQUENTIAL)
+   solution = solve_goal_programming(model, optimizer, mode="sequential")  # same
+
+.. versionchanged:: 0.3.2
+   ``mode`` also takes the mode's name as a string, in any case; an unknown name
+   raises ``ValueError``. A string used to run the sequential mode whatever it said.
 
 A model already relaxed with ``prepare_goal_programming()`` for the other mode
 raises ``ValueError``.

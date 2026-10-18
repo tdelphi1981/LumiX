@@ -342,6 +342,12 @@ same data.
    ``plot_constraint_utilization()`` needs the model and no longer needs duals. It
    used to draw every non-binding row at a fixed 50 %.
 
+.. versionchanged:: 0.3.2
+   Utilization is drawn only for ``<=`` rows with a positive right-hand side; other
+   rows have no percentage of their right-hand side. Visualization configs keep a
+   ``template`` and ``color_sequence`` given by the user; when left out they follow
+   ``theme``.
+
 Solution Summary
 ~~~~~~~~~~~~~~~~
 

@@ -80,6 +80,19 @@ Different constraint senses require different deviation penalties:
    - Want exactly 50000
    - Both over and under are penalized
 
+**Nonlinear one-sided goals**: a goal whose expression has nonlinear terms
+(``|x| <= 3``) is relaxed one-sided, so a convex term stays convex and needs no
+finite bounds:
+
+.. code-block:: text
+
+   LE:  expr - pos_dev <= rhs   (neg_dev fixed to 0)
+   GE:  expr + neg_dev >= rhs   (pos_dev fixed to 0)
+
+.. versionchanged:: 0.3.2
+   One-sided goals with nonlinear terms are relaxed one-sided; they used to be
+   equalities, which an ``abs`` of a free variable could not linearize.
+
 Automatic Relaxation
 --------------------
 

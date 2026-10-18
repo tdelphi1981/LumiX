@@ -4,7 +4,7 @@ Pre-built piecewise-linear approximations for common nonlinear functions.
 """
 
 import math
-from typing import Callable
+from typing import Callable, Optional
 
 from ..core.variables import LXVariable
 from .techniques.piecewise import LXPiecewiseLinearizer
@@ -14,8 +14,14 @@ class LXNonLinearFunctions:
     """
     Pre-built approximations for common nonlinear functions.
 
-    All functions use piecewise-linear approximation with adaptive
-    breakpoint generation for improved accuracy.
+    All functions use piecewise-linear approximation; the number of segments and
+    adaptive breakpoints come from the linearizer's config unless ``segments`` is
+    given.
+
+    .. versionchanged:: 0.3.2
+       Segments and adaptive breakpoints follow the linearizer's config (they were
+       fixed per function). ``log``, ``sqrt`` and ``tan`` raise ``ValueError`` on a
+       domain where they are undefined instead of using sentinel values.
 
     Example:
         # Create linearizer
@@ -30,7 +36,7 @@ class LXNonLinearFunctions:
 
     @staticmethod
     def exp(
-        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: int = 30
+        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: Optional[int] = None
     ) -> LXVariable:
         """
         Exponential function: e^x
@@ -38,7 +44,7 @@ class LXNonLinearFunctions:
         Args:
             var: Input variable
             linearizer: Piecewise linearizer instance
-            segments: Number of segments (default: 30 for good accuracy)
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing exp(var)
@@ -48,7 +54,7 @@ class LXNonLinearFunctions:
             population = LXNonLinearFunctions.exp(time, linearizer)
         """
         return linearizer.approximate_function(
-            lambda x: math.exp(x), var, num_segments=segments, adaptive=True  # Exponential curves sharply
+            lambda x: math.exp(x), var, num_segments=segments, adaptive=None,
         )
 
     @staticmethod
@@ -56,7 +62,7 @@ class LXNonLinearFunctions:
         var: LXVariable,
         linearizer: LXPiecewiseLinearizer,
         base: float = math.e,
-        segments: int = 30,
+        segments: Optional[int] = None,
     ) -> LXVariable:
         """
         Logarithm: log_base(x)
@@ -65,7 +71,7 @@ class LXNonLinearFunctions:
             var: Input variable (must be positive)
             linearizer: Piecewise linearizer instance
             base: Logarithm base (default: e for natural log)
-            segments: Number of segments
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing log(var)
@@ -79,18 +85,17 @@ class LXNonLinearFunctions:
         """
 
         def log_func(x: float) -> float:
-            if x > 0:
-                return math.log(x, base)
-            else:
-                return -1e10  # Very large negative value for x <= 0
+            if x <= 0:
+                raise ValueError(f"log is undefined at x = {x}; restrict the variable to x > 0")
+            return math.log(x, base)
 
         return linearizer.approximate_function(
-            log_func, var, num_segments=segments, adaptive=True  # Log curves sharply near 0
+            log_func, var, num_segments=segments, adaptive=None,
         )
 
     @staticmethod
     def sqrt(
-        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: int = 20
+        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: Optional[int] = None
     ) -> LXVariable:
         """
         Square root: √x
@@ -98,7 +103,7 @@ class LXNonLinearFunctions:
         Args:
             var: Input variable (must be non-negative)
             linearizer: Piecewise linearizer instance
-            segments: Number of segments
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing sqrt(var)
@@ -112,13 +117,15 @@ class LXNonLinearFunctions:
         """
 
         def sqrt_func(x: float) -> float:
-            return math.sqrt(x) if x >= 0 else 0
+            if x < 0:
+                raise ValueError(f"sqrt is undefined at x = {x}; restrict the variable to x >= 0")
+            return math.sqrt(x)
 
         return linearizer.approximate_function(
             sqrt_func,
             var,
             num_segments=segments,
-            adaptive=False,  # Square root is smooth, uniform breakpoints OK
+            adaptive=None,
         )
 
     @staticmethod
@@ -126,7 +133,7 @@ class LXNonLinearFunctions:
         var: LXVariable,
         exponent: float,
         linearizer: LXPiecewiseLinearizer,
-        segments: int = 25,
+        segments: Optional[int] = None,
     ) -> LXVariable:
         """
         Power function: x^n
@@ -135,7 +142,7 @@ class LXNonLinearFunctions:
             var: Input variable
             exponent: Power to raise variable to
             linearizer: Piecewise linearizer instance
-            segments: Number of segments
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing var^exponent
@@ -162,12 +169,12 @@ class LXNonLinearFunctions:
             power_func,
             var,
             num_segments=segments,
-            adaptive=abs(exponent) > 2,  # More adaptive for higher powers
+            adaptive=None,
         )
 
     @staticmethod
     def sigmoid(
-        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: int = 40
+        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: Optional[int] = None
     ) -> LXVariable:
         """
         Sigmoid function: 1 / (1 + e^(-x))
@@ -177,7 +184,7 @@ class LXNonLinearFunctions:
         Args:
             var: Input variable
             linearizer: Piecewise linearizer instance
-            segments: Number of segments (higher for sharper transition)
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing sigmoid(var) ∈ [0, 1]
@@ -198,12 +205,12 @@ class LXNonLinearFunctions:
                 return 0.0 if x < 0 else 1.0
 
         return linearizer.approximate_function(
-            sigmoid_func, var, num_segments=segments, adaptive=True  # Sigmoid curves sharply around x=0
+            sigmoid_func, var, num_segments=segments, adaptive=None,
         )
 
     @staticmethod
     def sin(
-        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: int = 50
+        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: Optional[int] = None
     ) -> LXVariable:
         """
         Sine function: sin(x)
@@ -213,7 +220,7 @@ class LXNonLinearFunctions:
         Args:
             var: Input variable (typically in radians)
             linearizer: Piecewise linearizer instance
-            segments: Number of segments
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing sin(var) ∈ [-1, 1]
@@ -224,12 +231,12 @@ class LXNonLinearFunctions:
             seasonal_factor = LXNonLinearFunctions.sin(day_angle, linearizer)
         """
         return linearizer.approximate_function(
-            math.sin, var, num_segments=segments, adaptive=False  # Sine is smooth
+            math.sin, var, num_segments=segments, adaptive=None,
         )
 
     @staticmethod
     def cos(
-        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: int = 50
+        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: Optional[int] = None
     ) -> LXVariable:
         """
         Cosine function: cos(x)
@@ -239,7 +246,7 @@ class LXNonLinearFunctions:
         Args:
             var: Input variable (typically in radians)
             linearizer: Piecewise linearizer instance
-            segments: Number of segments
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing cos(var) ∈ [-1, 1]
@@ -249,12 +256,12 @@ class LXNonLinearFunctions:
             seasonal_factor = LXNonLinearFunctions.cos(day_angle, linearizer)
         """
         return linearizer.approximate_function(
-            math.cos, var, num_segments=segments, adaptive=False  # Cosine is smooth
+            math.cos, var, num_segments=segments, adaptive=None,
         )
 
     @staticmethod
     def tan(
-        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: int = 40
+        var: LXVariable, linearizer: LXPiecewiseLinearizer, segments: Optional[int] = None
     ) -> LXVariable:
         """
         Tangent function: tan(x)
@@ -264,7 +271,7 @@ class LXNonLinearFunctions:
         Args:
             var: Input variable (in radians, avoid discontinuities)
             linearizer: Piecewise linearizer instance
-            segments: Number of segments
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
 
         Returns:
             Output variable representing tan(var)
@@ -274,15 +281,16 @@ class LXNonLinearFunctions:
             slope = LXNonLinearFunctions.tan(angle, linearizer)
         """
 
-        def tan_func(x: float) -> float:
-            try:
-                return math.tan(x)
-            except (ValueError, OverflowError):
-                # Handle discontinuities
-                return 1e10 if math.cos(x) > 0 else -1e10
+        lo, hi = var.lower_bound, var.upper_bound
+        if lo is not None and hi is not None:
+            k_lo = math.ceil((float(lo) - math.pi / 2) / math.pi)
+            if math.pi / 2 + k_lo * math.pi <= float(hi):
+                raise ValueError(
+                    f"tan has a pole at {math.pi / 2 + k_lo * math.pi:.6g} inside "
+                    f"[{lo}, {hi}]; restrict the variable to avoid pi/2 + k*pi")
 
         return linearizer.approximate_function(
-            tan_func, var, num_segments=segments, adaptive=True  # Tan has sharp curves
+            math.tan, var, num_segments=segments, adaptive=None,
         )
 
     @staticmethod
@@ -290,8 +298,8 @@ class LXNonLinearFunctions:
         var: LXVariable,
         func: Callable[[float], float],
         linearizer: LXPiecewiseLinearizer,
-        segments: int = 30,
-        adaptive: bool = True,
+        segments: Optional[int] = None,
+        adaptive: Optional[bool] = None,
     ) -> LXVariable:
         """
         Custom user-defined function.
@@ -302,8 +310,8 @@ class LXNonLinearFunctions:
             var: Input variable
             func: Custom function to approximate
             linearizer: Piecewise linearizer instance
-            segments: Number of segments
-            adaptive: Use adaptive breakpoints
+            segments: Number of segments (default: the config's ``pwl_num_segments``)
+            adaptive: Use adaptive breakpoints (default: the config's ``adaptive_breakpoints``)
 
         Returns:
             Output variable representing func(var)
@@ -332,7 +340,7 @@ class LXNonLinearFunctions:
             )
         """
         return linearizer.approximate_function(
-            func, var, num_segments=segments, adaptive=adaptive
+            func, var, num_segments=segments, adaptive=adaptive,
         )
 
 

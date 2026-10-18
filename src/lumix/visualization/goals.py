@@ -147,7 +147,7 @@ class LXGoalProgressChart(LXBaseVisualizer[TModel], Generic[TModel]):
         Returns:
             Plotly Figure.
         """
-        tol = tolerance or self._tolerance
+        tol = self._tolerance if tolerance is None else tolerance
         colors = self._get_colors()
 
         goals = list(self.solution.goal_deviations.keys())

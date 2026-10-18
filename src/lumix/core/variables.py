@@ -135,11 +135,10 @@ class LXVariable(Generic[TModel, TValue]):
                 instances = self.get_instances()
                 result._data = list(instances)
             except Exception as e:
-                import warnings
-                warnings.warn(
+                from ..utils._warn import warn_user
+                warn_user(
                     f"Failed to materialize variable data for '{self.name}': {e}. "
                     f"Variable will be empty in the copy.",
-                    UserWarning
                 )
                 result._data = []
             result._session = None
@@ -209,10 +208,14 @@ class LXVariable(Generic[TModel, TValue]):
         return self
 
     def binary(self) -> Self:
-        """Set as binary variable. Returns self for chaining."""
+        """Set as binary variable. Returns self for chaining.
+
+        Bounds set before or after are kept; the model intersects them with [0, 1].
+
+        .. versionchanged:: 0.3.2
+           Bounds set before ``binary()`` are no longer reset to [0, 1].
+        """
         self.var_type = LXVarType.BINARY
-        self.lower_bound = 0  # type: ignore
-        self.upper_bound = 1  # type: ignore
         return self
 
     def bounds(self, lower: Optional[TValue] = None, upper: Optional[TValue] = None) -> Self:

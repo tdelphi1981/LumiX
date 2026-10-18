@@ -42,8 +42,8 @@ Basic Conversion
 
    # Convert float to fraction
    frac = converter.to_rational(3.14159)
-   print(frac)  # Fraction(355, 113)
-   print(f"Approximation: {float(frac):.6f}")  # 3.141593
+   print(frac)  # 9563/3044
+   print(f"Approximation: {float(frac):.6f}")  # 3.141590
 
 Batch Conversion
 ~~~~~~~~~~~~~~~~
@@ -61,10 +61,10 @@ Batch Conversion
    int_coeffs, common_denom = converter.convert_coefficients(coeffs)
 
    print(f"Integer coefficients: {int_coeffs}")
-   # {'x1': 42, 'x2': 28, 'x3': 15, 'x4': 8}
+   # {'x1': 3500, 'x2': 2333, 'x3': 1250, 'x4': 666}
 
    print(f"Common denominator: {common_denom}")
-   # 12
+   # 1000
 
    # Verify: int_coeffs[key] / common_denom ≈ coeffs[key]
 
@@ -81,12 +81,12 @@ Controls the trade-off between approximation accuracy and denominator size:
    # Smaller denominator - faster, less accurate
    converter = LXRationalConverter(max_denominator=100)
    frac = converter.to_rational(3.14159)
-   print(frac)  # Fraction(22, 7) = 3.142857...
+   print(frac)  # 311/99 = 3.141414...
 
    # Larger denominator - slower, more accurate
    converter = LXRationalConverter(max_denominator=100000)
    frac = converter.to_rational(3.14159)
-   print(frac)  # Fraction(355, 113) = 3.141593...
+   print(frac)  # 66586/21195 = 3.141590...
 
 **Guidelines:**
 
@@ -193,7 +193,7 @@ Classic continued fraction expansion algorithm. Good balance of speed and accura
 
    converter = LXRationalConverter(method="continued_fraction")
    frac = converter.to_rational(3.14159)
-   print(frac)  # Fraction(355, 113)
+   print(frac)  # 9563/3044
 
 Stern-Brocot Tree Method
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -207,7 +207,7 @@ but offers alternative algorithmic framing.
 
    converter = LXRationalConverter(method="stern_brocot")
    frac = converter.to_rational(3.14159)
-   print(frac)  # Fraction(355, 113)
+   print(frac)  # 9563/3044
 
 Error Tracking
 --------------
@@ -239,12 +239,12 @@ Compare all three methods for a given value:
    results = converter.compare_methods(3.14159)
 
    for method, (frac, error, time) in results.items():
-       print(f"{method:20} : {frac:10} | Error: {error:.2e} | Time: {time*1e6:.2f}μs")
+       print(f"{method:20} : {str(frac):10} | Error: {error:.2e} | Time: {time*1e6:.2f}μs")
 
-   # Output:
-   # farey                : 355/113    | Error: 2.67e-07 | Time: 15.23μs
-   # continued_fraction   : 355/113    | Error: 2.67e-07 | Time: 18.45μs
-   # stern_brocot         : 355/113    | Error: 2.67e-07 | Time: 16.78μs
+   # Output (times vary):
+   # farey                : 9563/3044  | Error: 1.31e-08 | Time: ...μs
+   # continued_fraction   : 9563/3044  | Error: 1.31e-08 | Time: ...μs
+   # stern_brocot         : 9563/3044  | Error: 1.31e-08 | Time: ...μs
 
 Practical Applications
 ----------------------
@@ -256,8 +256,17 @@ Convert model coefficients for GLPK's exact rational mode:
 
 .. code-block:: python
 
+   from dataclasses import dataclass
+
    from lumix import LXModel, LXVariable, LXLinearExpression
    from lumix.utils import LXRationalConverter
+
+
+   @dataclass
+   class Product:
+       id: int
+       profit: float
+
 
    # Build model with float coefficients
    products = [
@@ -267,7 +276,8 @@ Convert model coefficients for GLPK's exact rational mode:
    ]
 
    model = LXModel("production")
-   production = LXVariable[Product, float]("x").from_data(products)
+   production = (LXVariable[Product, float]("x").continuous()
+                 .indexed_by(lambda p: p.id).from_data(products))
    model.add_variable(production)
 
    # Extract coefficients
@@ -322,8 +332,8 @@ Ensure exact arithmetic for sensitive calculations:
 
    # Sum with exact arithmetic (no rounding errors)
    exact_sum = sum(fractions, start=Fraction(0))
-   print(f"Exact sum: {exact_sum}")  # Fraction(3, 2) = 1.5
-   print(f"Float sum: {sum(values)}")  # Might have rounding error
+   print(f"Exact sum: {exact_sum}")  # 3/2
+   print(f"Float sum: {sum(values)}")  # 1.5 here; float sums can carry rounding error
 
 Advanced Techniques
 -------------------
@@ -437,10 +447,11 @@ Best Practices
 
    .. code-block:: python
 
+      value, acceptable_threshold = 2.71828, 1e-6
       frac, error = converter.to_rational(value, return_error=True)
 
       if error > acceptable_threshold:
-          # Increase max_denominator or handle error
+          converter = LXRationalConverter(max_denominator=100000)   # more precision
 
 4. **Use Farey Method**
 
@@ -512,6 +523,7 @@ If errors are too large, increase max_denominator:
 .. code-block:: python
 
    # Check error
+   value, threshold = 2.71828, 1e-6
    frac, error = converter.to_rational(value, return_error=True)
 
    if error > threshold:

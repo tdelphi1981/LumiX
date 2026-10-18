@@ -61,6 +61,11 @@ The :class:`~lumix.analysis.whatif.LXWhatIfResult` contains:
    reports ``nan`` for that point; an infeasible run used to count as a change to an
    objective of 0. Check ``result.new_solution.is_feasible()`` first.
 
+.. versionchanged:: 0.3.2
+   ``delta_percentage`` is ``(new - baseline) / |baseline| * 100``: positive when the
+   objective rises, whatever the baseline's sign, and ``nan`` for a zero baseline
+   (it was 0.0). Scenario reports and charts use the same definition.
+
 Bottlenecks
 ~~~~~~~~~~~
 

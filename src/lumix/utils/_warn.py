@@ -7,9 +7,12 @@ _PREFIX = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + os.sep  
 
 
 def _internal(frame) -> bool:
-    name = frame.f_code.co_filename
-    # "<string>": the __init__ that @dataclass generates for LumiX classes
-    return name.startswith(_PREFIX) or name == "<string>"
+    # By module name, so the __init__ that @dataclass generates for a LumiX class
+    # (file "<string>", module lumix.*) is internal while user code run with
+    # ``python -c`` (file "<string>", module __main__) is not.
+    module = frame.f_globals.get("__name__", "")
+    return module == "lumix" or module.startswith("lumix.") or \
+        frame.f_code.co_filename.startswith(_PREFIX)
 
 
 def warn_user(message: str, category: type = UserWarning) -> None:

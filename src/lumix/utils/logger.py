@@ -364,10 +364,24 @@ def enable_logging(level: "int | str" = "INFO", *, stream: Any = None,
 
     Returns:
         The handler, so it can be removed with
-        ``logging.getLogger("lumix").removeHandler(handler)``.
+        ``logging.getLogger("lumix").removeHandler(handler)``, or with
+        :func:`disable_logging`.
+
+    While this handler is attached, ``lumix`` records do not propagate to the root
+    logger, so an application that also configured the root logger does not print
+    them twice. :func:`disable_logging` removes the handler and restores propagation.
+
+    Raises:
+        ValueError: For an unknown level name, before anything changes.
 
     .. versionadded:: 0.3.0
+
+    .. versionchanged:: 0.3.2
+       An invalid level raises before anything changes; records no longer propagate.
     """
+    resolved = level if isinstance(level, int) else logging.getLevelName(str(level).upper())
+    if not isinstance(resolved, int):
+        raise ValueError(f"Unknown logging level {level!r}")
     root = logging.getLogger("lumix")
     for old in [h for h in root.handlers if getattr(h, "_lumix_console", False)]:
         root.removeHandler(old)
@@ -375,8 +389,21 @@ def enable_logging(level: "int | str" = "INFO", *, stream: Any = None,
     handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
     handler._lumix_console = True  # type: ignore[attr-defined]
     root.addHandler(handler)
-    root.setLevel(level if isinstance(level, int) else level.upper())
+    root.setLevel(resolved)
+    root.propagate = False
     return handler
 
 
-__all__ = ["LXModelLogger", "enable_logging"]
+def disable_logging() -> None:
+    """Remove the handler :func:`enable_logging` added and let ``lumix`` records
+    propagate again.
+
+    .. versionadded:: 0.3.2
+    """
+    root = logging.getLogger("lumix")
+    for old in [h for h in root.handlers if getattr(h, "_lumix_console", False)]:
+        root.removeHandler(old)
+    root.propagate = True
+
+
+__all__ = ["LXModelLogger", "disable_logging", "enable_logging"]

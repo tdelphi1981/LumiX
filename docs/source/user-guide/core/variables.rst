@@ -61,11 +61,15 @@ Yes/no decision variables (0 or 1):
 
    is_open = (
        LXVariable[Facility, int]("is_open")
-       .binary()  # Automatically sets bounds to [0, 1]
+       .binary()  # bounds [0, 1]
        .from_data(facilities)
    )
 
 **Use for**: Selection, activation, yes/no decisions
+
+.. versionchanged:: 0.3.2
+   ``binary()`` keeps bounds set before it; the model intersects them with [0, 1]
+   (``.bounds(0, 0).binary()`` fixes the variable to 0). It used to reset them.
 
 Indexing
 --------

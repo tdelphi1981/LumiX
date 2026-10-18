@@ -146,10 +146,10 @@ def test_w7_include_markers_exist_and_select_code():
     assert problems == []
 
 
-def test_version_is_0_3_1():
+def test_version_is_0_3_2():
     import lumix
 
-    assert lumix.__version__ == "0.3.1"
+    assert lumix.__version__ == "0.3.2"
 
 
 def test_w7_changelog_has_a_0_3_0_section():

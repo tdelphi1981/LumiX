@@ -6,10 +6,12 @@ results, including comparison charts and sensitivity curves.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Tuple, TypeVar
 
 from typing_extensions import Self
 
+from ..analysis._change import pct_change
 from ._base import LXBaseVisualizer, LXVisualizationConfig
 from ._compat import go, make_subplots
 
@@ -368,7 +370,9 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
             heights.append(delta)
             labels.append(f"{delta:+,.4g}")
         colors = self._get_colors()
-        bar_colors = [colors[0]] + [colors[4] if h >= 0 else colors[3] for h in heights[1:]]
+        sign = 1.0 if _maximizes(self.analyzer) else -1.0       # improvement is positive
+        bar_colors = [colors[0]] + [colors[4] if sign * h >= 0 else colors[3]
+                                    for h in heights[1:]]
         fig = go.Figure(go.Bar(
             x=names, y=heights, base=bases, text=labels, textposition="outside",
             marker_color=bar_colors, name="Scenario Impact",
@@ -411,12 +415,11 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         objectives = [f"{sol.objective_value:,.2f}" for _, sol in items]
         changes: List[str] = []
 
-        for _, sol in items:
-            if baseline_val:
-                pct = ((sol.objective_value - baseline_val) / baseline_val) * 100
-                changes.append(f"{pct:+.1f}%")
-            else:
-                changes.append("-")
+        baseline_ok = baseline_obj is not None and baseline_obj.is_feasible()
+        for name, sol in items:
+            pct = (pct_change(sol.objective_value, baseline_val)
+                   if baseline_ok and name != "baseline" and sol.is_feasible() else math.nan)
+            changes.append("-" if math.isnan(pct) else f"{pct:+.1f}%")
 
         fig.add_trace(
             go.Table(
@@ -451,7 +454,7 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
         for name, sol in self.analyzer.results.items():
             if name == "baseline" or not sol.is_feasible():
                 continue
-            pct = ((sol.objective_value - baseline_val) / abs(baseline_val)) * 100
+            pct = pct_change(sol.objective_value, baseline_val)
             changes.append(pct)
             names.append(name)
 

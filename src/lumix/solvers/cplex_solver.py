@@ -106,7 +106,6 @@ class LXCPLEXSolver(LXSolverInterface):
                 # CPLEX minimizes c'x + 1/2 x'Qx: Q_ii = 2c for c*x_i^2, Q_ij = c for c*x_i*x_j.
                 cm.objective.set_quadratic_coefficients(
                     [(i, j, 2 * c if i == j else c) for (i, j), c in canon.objective_quadratic.items()])
-                cm.parameters.optimalitytarget.set(3)   # global optimum, also when nonconvex
             cm.objective.set_sense(cm.objective.sense.maximize
                                    if canon.sense == LXObjectiveSense.MAXIMIZE
                                    else cm.objective.sense.minimize)
@@ -195,7 +194,19 @@ class LXCPLEXSolver(LXSolverInterface):
         # Solve
         start_time = time.time()
         try:
-            cplex_model.solve()
+            try:
+                cplex_model.solve()
+            except CplexError as e:
+                if "5002" not in str(e):          # 5002: objective is not convex
+                    raise
+                # A nonconvex quadratic objective: solve for the global optimum. A convex
+                # one keeps the default target, which gives duals (0.3.2).
+                if enable_sensitivity:
+                    self.logger.logger.warning(
+                        "CPLEX: the quadratic objective is not convex; solved for the global "
+                        "optimum (optimalitytarget 3), which gives no duals")
+                cplex_model.parameters.optimalitytarget.set(3)
+                cplex_model.solve()
             st = cplex_model.solution.status
             code = cplex_model.solution.get_status()
             if code in (st.infeasible_or_unbounded, st.MIP_infeasible_or_unbounded, st.unbounded):

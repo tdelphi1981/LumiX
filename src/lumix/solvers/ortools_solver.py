@@ -153,6 +153,13 @@ class LXORToolsSolver(LXSolverInterface):
             # feasible point is therefore unbounded.
             if self._has_feasible_point(solver, params):
                 status = pywraplp.Solver.UNBOUNDED
+        if status == pywraplp.Solver.OPTIMAL and self._is_mip and self._at_scip_infinity(solver):
+            # SCIP can report an unbounded MIP as "optimal" with values near its
+            # infinity (1e20), e.g. objective -1.97e19 (W7 rescan lp-11).
+            self.logger.logger.warning(
+                "SCIP reported an optimum with values near its infinity (1e20); the model "
+                "is unbounded")
+            status = pywraplp.Solver.UNBOUNDED
         solve_time = time.time() - start_time
         self._stopped_by_time_limit = (status == pywraplp.Solver.NOT_SOLVED
                                        and time_limit is not None)
@@ -161,6 +168,13 @@ class LXORToolsSolver(LXSolverInterface):
         solution = self._parse_solution(model, solver, status, solve_time, enable_sensitivity)
 
         return solution
+
+    #: Values this close to SCIP's infinity (1e20) are artifacts of an unbounded model.
+    SCIP_ARTIFACT = 1e18
+
+    def _at_scip_infinity(self, solver: pywraplp.Solver) -> bool:
+        return (abs(solver.Objective().Value()) >= 10 * self.SCIP_ARTIFACT
+                or any(abs(v.solution_value()) >= self.SCIP_ARTIFACT for v in solver.variables()))
 
     @staticmethod
     def _has_feasible_point(solver: pywraplp.Solver, params: pywraplp.MPSolverParameters) -> bool:
