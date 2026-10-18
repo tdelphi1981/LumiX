@@ -261,6 +261,11 @@ class LXIndicatorTerm:
     sense: Literal["<=", ">=", "=="] = "<="
     rhs: float = 0.0
 
+    def __post_init__(self) -> None:
+        if self.sense not in ("<=", ">=", "=="):
+            raise ValueError(f"LXIndicatorTerm: sense must be '<=', '>=' or '==', "
+                             f"not {self.sense!r}")
+
 
 @dataclass
 class LXPiecewiseLinearTerm:

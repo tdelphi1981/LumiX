@@ -567,7 +567,8 @@ class LXCanonicalBuilder:
         """The objective products of ``expr`` as product items (one per pair of
         positions, coefficients summed, each its own term) for the linearizer."""
         # Every pair is a term of its own, so each gets its own auxiliary family.
-        return [LXCanonicalNonlinear("product", (i, j), c, {}, n, (i, j))
+        return [LXCanonicalNonlinear("product", (i, j), c, {}, n,
+                                     (self.variables[i].key, self.variables[j].key))
                 for n, ((i, j), c) in enumerate(self._quadratic(expr).items())]
 
     @staticmethod

@@ -73,6 +73,10 @@ def piecewise_points(
         x_min, x_max = points[0], points[-1]
     else:
         num_segments = config.pwl_num_segments if num_segments is None else num_segments
+        if not isinstance(num_segments, int) or isinstance(num_segments, bool) \
+                or num_segments < 1:
+            raise ValueError(f"num_segments must be an integer >= 1 for {name}, "
+                             f"got {num_segments!r}")
         adaptive = config.adaptive_breakpoints if adaptive is None else adaptive
         x_min = lower if x_min is None else x_min
         x_max = upper if x_max is None else x_max
@@ -93,6 +97,10 @@ def piecewise_points(
         raise ValueError(
             f"Failed to evaluate function at breakpoints: {e}. "
             f"Ensure function is defined over domain [{x_min}, {x_max}].") from e
+    bad = [(bp, v) for bp, v in zip(points, values) if not math.isfinite(v)]
+    if bad:
+        raise ValueError(f"The function of {name} at breakpoint {bad[0][0]} is not finite "
+                         f"({bad[0][1]}); restrict the domain to where it is finite")
     return points, values
 
 

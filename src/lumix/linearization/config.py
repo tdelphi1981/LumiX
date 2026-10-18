@@ -83,6 +83,10 @@ class LXLinearizerConfig:
     binary_expansion_bits: int = 10  # For integers up to 2^10 = 1024
 
     def __post_init__(self) -> None:
+        if not isinstance(self.pwl_num_segments, int) or isinstance(self.pwl_num_segments, bool) \
+                or self.pwl_num_segments < 1:
+            raise ValueError(f"pwl_num_segments must be an integer >= 1, "
+                             f"got {self.pwl_num_segments!r}")
         for name, default in _UNUSED.items():
             if getattr(self, name) != default:
                 warn_user(
