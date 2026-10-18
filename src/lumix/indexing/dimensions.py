@@ -148,11 +148,10 @@ class LXIndexDimension(Generic[TModel]):
                 instances = self.get_instances()
                 result._data = list(instances)
             except Exception as e:
-                import warnings
-                warnings.warn(
+                from ..utils._warn import warn_user
+                warn_user(
                     f"Failed to materialize dimension data for {self.model_type.__name__}: {e}. "
                     f"Dimension will be empty in the copy.",
-                    UserWarning
                 )
                 result._data = []
             result._session = None

@@ -149,6 +149,7 @@ from .utils import (
     LXORMModel,
     LXRationalConverter,
     LXTypedQuery,
+    disable_logging,
     enable_logging,
 )
 
@@ -248,6 +249,7 @@ __all__ = [
     "LXTypedQuery",
     "LXRationalConverter",
     "LXModelLogger",
+    "disable_logging",
     "enable_logging",
     # Goal Programming
     "LXGoal",

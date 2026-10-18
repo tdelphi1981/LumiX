@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, List, Optional, Sequence, TypeVar, Union
 
@@ -13,6 +14,7 @@ from ..core.variables import LXVariable
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
 from ..core.enums import LXObjectiveSense
+from ._change import pct_change
 from ._factory import ModelSource
 from ._rhs import set_rhs, shift_rhs
 from ._sense import solved_sense
@@ -462,12 +464,9 @@ class LXScenarioAnalyzer(Generic[TModel]):
                     "baseline" in self.results and not self.results["baseline"].is_feasible()):
                 diff_str = "-"
             elif "baseline" in self.results and name != "baseline":
-                baseline_obj = self.results["baseline"].objective_value
-                if baseline_obj != 0:
-                    diff_pct = ((solution.objective_value - baseline_obj) / baseline_obj) * 100
-                    diff_str = f"{diff_pct:+.2f}%"
-                else:
-                    diff_str = "N/A"
+                diff_pct = pct_change(solution.objective_value,
+                                      self.results["baseline"].objective_value)
+                diff_str = "N/A" if math.isnan(diff_pct) else f"{diff_pct:+.2f}%"
             else:
                 diff_str = "-"
 

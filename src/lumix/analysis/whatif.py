@@ -13,6 +13,7 @@ from ..core.enums import LXConstraintSense, LXObjectiveSense
 from ..core.model import LXModel
 from ..solution.solution import LXSolution
 from ..solvers.base import LXOptimizer
+from ._change import pct_change
 from ._factory import ModelSource
 from ._rhs import set_rhs, shift_rhs
 from ._sense import solved_sense
@@ -657,10 +658,8 @@ class LXWhatIfAnalyzer(Generic[TModel]):
         if not (baseline.is_feasible() and new_solution.is_feasible()):
             # no change to report without two solutions (an infeasible run reports 0)
             delta_obj = delta_pct = math.nan
-        elif baseline.objective_value != 0:
-            delta_pct = (delta_obj / baseline.objective_value) * 100
         else:
-            delta_pct = 0.0
+            delta_pct = pct_change(new_solution.objective_value, baseline.objective_value)
 
         return LXWhatIfResult(
             description=description,

@@ -288,15 +288,14 @@ class LXSensitivityAnalyzer(Generic[TModel]):
 
     def get_binding_constraints(
         self,
-        threshold: float = 1e-6,
+        threshold: Optional[float] = None,
     ) -> Dict[str, LXConstraintSensitivity]:
         """
-        Get all binding (tight) constraints.
-
-        A constraint is binding if its shadow price is non-zero.
+        Get all binding (tight) constraints: rows whose slack is zero at the solution.
 
         Args:
-            threshold: Threshold for considering shadow price as non-zero
+            threshold: If given, keep only binding rows whose ``|shadow price|`` is above
+                it (rows without a shadow price are dropped then).
 
         Returns:
             Dictionary of binding constraints
@@ -307,12 +306,15 @@ class LXSensitivityAnalyzer(Generic[TModel]):
                 binding = analyzer.get_binding_constraints()
                 for name, sens in binding.items():
                     print(f"{name} is binding with shadow price {sens.shadow_price}")
+
+        .. versionchanged:: 0.3.2
+           Binding means zero slack (it was "non-zero shadow price"); ``threshold``
+           defaults to ``None``.
         """
-        all_constraints = self.analyze_all_constraints()
         return {
-            name: sens
-            for name, sens in all_constraints.items()
-            if sens.shadow_price is not None and abs(sens.shadow_price) > threshold
+            name: sens for name, sens in self.analyze_all_constraints().items()
+            if sens.is_binding and (threshold is None or (
+                sens.shadow_price is not None and abs(sens.shadow_price) > threshold))
         }
 
     def get_non_basic_variables(
