@@ -188,8 +188,9 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
         fig.add_trace(
             go.Indicator(
                 mode="number",
-                value=self.solution.objective_value,
-                title={"text": "Objective Value"},
+                value=self.solution.objective_value if self.solution.is_feasible() else None,
+                title={"text": "Objective Value" if self.solution.is_feasible()
+                       else "Objective Value: No solution"},
                 number={"valueformat": ",.4g"},
             ),
             row=1,
@@ -233,8 +234,9 @@ class LXDashboard(LXBaseVisualizer[TModel], Generic[TModel]):
         fig.add_trace(
             go.Indicator(
                 mode="number+delta",
-                value=self.solution.objective_value,
-                title={"text": f"Objective ({self.solution.status})"},
+                value=self.solution.objective_value if self.solution.is_feasible() else None,
+                title={"text": f"Objective ({self.solution.status})" if self.solution.is_feasible()
+                       else f"No solution ({self.solution.status})"},
                 number={"valueformat": ",.4g"},
             ),
             row=row,

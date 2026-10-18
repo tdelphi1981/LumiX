@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Generic, List, Optional, Sequence, 
 
 from typing_extensions import Self
 
+from ..core.enums import LXConstraintSense
 from ._base import LXBaseVisualizer, LXVisualizationConfig
 from ._compat import go, make_subplots
 
@@ -165,8 +166,11 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         # Add value distribution histogram
         self._add_value_distribution(fig, row=2, col=2)
 
-        title = f"Solution: {self.solution.status}"
-        title += f" (Objective: {self.solution.objective_value:,.2f})"
+        if self.solution.is_feasible():
+            title = (f"Solution: {self.solution.status} "
+                     f"(Objective: {self.solution.objective_value:,.2f})")
+        else:
+            title = f"Solution: no solution ({self.solution.status})"
 
         fig.update_layout(
             title=dict(text=title, x=0.5, xanchor="center"),
@@ -274,10 +278,10 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
 
         rows = []
         for name, act in row_activity(self.model, self.solution).items():
-            if act.rhs != 0:
+            if act.sense == LXConstraintSense.LE and act.rhs > 0:
                 util = 100.0 * act.lhs / act.rhs
             else:
-                util = 100.0 if act.binding else 0.0
+                util = None          # % of the right-hand side means nothing here
             rows.append({"name": name, "act": act, "util": util,
                          "shadow": self.solution.shadow_prices.get(name)})
 
@@ -306,7 +310,7 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
             ))
         fig.update_layout(
             title="Constraint Utilization",
-            xaxis_title="Utilization (% of right-hand side)",
+            xaxis_title="Utilization (% of a positive <= right-hand side)",
             yaxis_title="Constraint",
             barmode="overlay",
         )
@@ -389,9 +393,9 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
         fig.add_trace(
             go.Indicator(
                 mode="number",
-                value=self.solution.objective_value,
+                value=self.solution.objective_value if self.solution.is_feasible() else None,
                 title={
-                    "text": f"<b>Objective Value</b><br><span style='font-size:14px;color:{status_color}'>{status}</span>",
+                    "text": f"<b>Objective Value{'' if self.solution.is_feasible() else ': No solution'}</b><br><span style='font-size:14px;color:{status_color}'>{status}</span>",
                     "font": {"size": 16},
                 },
                 number={
@@ -450,14 +454,16 @@ class LXSolutionVisualizer(LXBaseVisualizer[TModel], Generic[TModel]):
             # Add annotation centered in the subplot area
             fig.add_annotation(
                 text="<i>Enable sensitivity analysis<br>for constraint data</i>",
-                xref=f"x{3 if row == 2 and col == 1 else ''}",
-                yref=f"y{3 if row == 2 and col == 1 else ''}",
+                xref="x domain",
+                yref="y domain",
                 x=0.5,
                 y=0.5,
                 xanchor="center",
                 yanchor="middle",
                 showarrow=False,
                 font=dict(size=11, color="#7f8c8d"),
+                row=row,
+                col=col,
             )
 
     def _add_value_distribution(self, fig: Any, row: int, col: int) -> None:

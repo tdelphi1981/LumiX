@@ -370,7 +370,9 @@ class LXScenarioCompare(LXBaseVisualizer[TModel], Generic[TModel]):
             heights.append(delta)
             labels.append(f"{delta:+,.4g}")
         colors = self._get_colors()
-        bar_colors = [colors[0]] + [colors[4] if h >= 0 else colors[3] for h in heights[1:]]
+        sign = 1.0 if _maximizes(self.analyzer) else -1.0       # improvement is positive
+        bar_colors = [colors[0]] + [colors[4] if sign * h >= 0 else colors[3]
+                                    for h in heights[1:]]
         fig = go.Figure(go.Bar(
             x=names, y=heights, base=bases, text=labels, textposition="outside",
             marker_color=bar_colors, name="Scenario Impact",

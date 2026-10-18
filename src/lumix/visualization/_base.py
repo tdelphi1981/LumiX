@@ -14,7 +14,7 @@ from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
 from typing_extensions import Self
 
 from ._compat import require_viz_dependencies, go
-from .themes import LUMIX_COLORS, get_template
+from .themes import LUMIX_COLORS, get_color_sequence, get_template
 
 TModel = TypeVar("TModel")
 
@@ -31,9 +31,15 @@ class LXVisualizationConfig:
         height: Default figure height in pixels.
         title_font_size: Font size for titles.
         show_legend: Whether to show legend by default.
-        interactive: Enable interactive features (hover, zoom).
-        template: Plotly template name.
-        color_sequence: Custom color sequence (overrides theme colors).
+        interactive: Enable interactive features (hover, zoom); False renders static
+            charts (no hover/zoom).
+        template: Plotly template name (default: the theme's).
+        color_sequence: Custom color sequence (default: the theme's colors).
+
+    .. versionchanged:: 0.3.2
+       ``template`` and ``color_sequence`` given by the user are kept; when left out
+       they follow ``theme`` (``template`` was always overwritten, and the theme's
+       colors were never used).
 
     Examples::
 
@@ -50,14 +56,17 @@ class LXVisualizationConfig:
     title_font_size: int = 16
     show_legend: bool = True
     interactive: bool = True
-    template: str = "plotly_white"
+    template: Optional[str] = None
     color_sequence: Optional[List[str]] = None
+    _auto_template: bool = field(default=False, init=False, repr=False)
+    _auto_colors: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        """Initialize color sequence if not provided."""
+        """Fill the template and colours from ``theme`` unless they were given."""
+        if self.template is None:
+            self.template, self._auto_template = get_template(self.theme), True
         if self.color_sequence is None:
-            self.color_sequence = LUMIX_COLORS.copy()
-        self.template = get_template(self.theme)
+            self.color_sequence, self._auto_colors = get_color_sequence(self.theme), True
 
 
 class LXBaseVisualizer(ABC, Generic[TModel]):
@@ -119,7 +128,10 @@ class LXBaseVisualizer(ABC, Generic[TModel]):
         """
         if theme is not None:
             self.config.theme = theme
-            self.config.template = get_template(theme)
+            if self.config._auto_template:
+                self.config.template = get_template(theme)
+            if self.config._auto_colors:
+                self.config.color_sequence = get_color_sequence(theme)
         if width is not None:
             self.config.width = width
         if height is not None:
@@ -127,6 +139,10 @@ class LXBaseVisualizer(ABC, Generic[TModel]):
         for key, value in kwargs.items():
             if hasattr(self.config, key):
                 setattr(self.config, key, value)
+                if key == "template":
+                    self.config._auto_template = False
+                elif key == "color_sequence":
+                    self.config._auto_colors = False
         return self
 
     @abstractmethod
@@ -150,7 +166,7 @@ class LXBaseVisualizer(ABC, Generic[TModel]):
             viz.show()  # Opens interactive chart
         """
         fig = self.plot()
-        fig.show()
+        fig.show(config={"staticPlot": not self.config.interactive})
 
     def to_html(
         self,
@@ -183,6 +199,7 @@ class LXBaseVisualizer(ABC, Generic[TModel]):
         html_content = fig.to_html(
             full_html=full_html,
             include_plotlyjs=include_plotlyjs,
+            config={"staticPlot": not self.config.interactive},
         )
 
         if path is not None:
@@ -225,10 +242,11 @@ class LXBaseVisualizer(ABC, Generic[TModel]):
         fig.update_layout(
             template=self.config.template,
             width=self.config.width,
-            height=self.config.height,
             title_font_size=self.config.title_font_size,
             showlegend=self.config.show_legend,
         )
+        if fig.layout.height is None:      # keep a height the chart set for its layout
+            fig.update_layout(height=self.config.height)
         return fig
 
     def _get_colors(self) -> List[str]:
