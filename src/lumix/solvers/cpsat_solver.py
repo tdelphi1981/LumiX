@@ -105,6 +105,7 @@ class LXCPSATSolver(LXSolverInterface):
         self._has_objective = False
         self._approximate = False
         self._approximation_error = 0.0
+        self._open_divisor = 1        # 2 while probing for unboundedness (0.3.2)
         self._relax_grid = 0          # equalities on scaled continuous variables as bands
         self._grid_relaxed = False
 
@@ -153,7 +154,8 @@ class LXCPSATSolver(LXSolverInterface):
         self._handles, self._open = [], {}
         for pos, v in enumerate(canon.variables):
             scale = self._scales[pos]
-            open_bound = max(1, min(self.OPEN_BOUND, self.ROW_BUDGET // weight[pos]))
+            open_bound = max(1, min(self.OPEN_BOUND, self.ROW_BUDGET // weight[pos])
+                             // self._open_divisor)
             lo = self._int_bound(v.lower * scale, math.ceil, pos, open_bound)
             hi = self._int_bound(v.upper * scale, math.floor, pos, open_bound)
             if lo > hi:
@@ -252,6 +254,12 @@ class LXCPSATSolver(LXSolverInterface):
         if max(map(abs, [rhs_int, *ints.values()])) <= self.INT_LIMIT:
             return ints, rhs_int, scale
         if not self._approximate:
+            if scale == 1:
+                biggest = max(map(abs, [rhs_int, *ints.values()]))
+                raise ValueError(
+                    f"{what[0].upper()}{what[1:]} has the value {biggest:.6g}, beyond CP-SAT's "
+                    f"64-bit integer range (|value| <= {self.INT_LIMIT}); scale the model "
+                    "or use a linear solver ('ortools', 'gurobi', 'cplex', 'glpk')")
             raise ValueError(
                 f"CP-SAT needs a common denominator of {scale} for {what}, which puts its "
                 "integer coefficients beyond the 64-bit range; pass approximate_coefficients=True "
@@ -278,6 +286,7 @@ class LXCPSATSolver(LXSolverInterface):
         gap_tolerance: Optional[float] = None,
         enable_sensitivity: bool = False,
         approximate_coefficients: bool = False,
+        scaling_factor: Optional[int] = None,
         **solver_params: Any,
     ) -> LXSolution:
         """
@@ -286,11 +295,16 @@ class LXCPSATSolver(LXSolverInterface):
         Args:
             model: LumiX model to solve
             time_limit: Time limit in seconds (None = no limit)
-            gap_tolerance: Relative optimality gap tolerance (None = 0.0001)
+            gap_tolerance: Relative optimality gap (None = CP-SAT's default: relative 0,
+                absolute 1e-4)
             enable_sensitivity: Accepted for API symmetry; CP-SAT has no sensitivity data
             approximate_coefficients: Accept coefficients that ``max_denom`` cannot
                 represent within a relative error of 1e-9, using the nearest fraction
                 (a warning reports the largest error). Default: raise ``ValueError``.
+            scaling_factor: Grid of continuous variables (1/scaling_factor) for this
+                solve; default: the constructor's (1000).
+
+                .. versionadded:: 0.3.2
             **solver_params: Additional CP-SAT parameters
                 Examples:
                 - num_search_workers: Number of parallel workers (default: auto)
@@ -348,6 +362,9 @@ class LXCPSATSolver(LXSolverInterface):
                     f"Failed to set CP-SAT parameter '{param_name}': {e}"
                 )
 
+        previous_scale = self._scaling_factor
+        if scaling_factor is not None:
+            self._scaling_factor = int(scaling_factor)
         try:
             cpsat_model = self.build_model(model)
             start_time = time.time()
@@ -365,14 +382,39 @@ class LXCPSATSolver(LXSolverInterface):
                 self._grid_relaxed = True
             solve_time = time.time() - start_time
             self._stopped_by_time_limit = status == cp_model.UNKNOWN and time_limit is not None
+            solution = self._parse_solution(model, solver, status, solve_time)
+            if self._unbounded_past_open_bound(model, solver, status, time_limit):
+                solution.status = "unbounded"
         finally:
             self._approximate = False
             self._relax_grid = 0
-
-        # Parse and return solution
-        solution = self._parse_solution(model, solver, status, solve_time)
-
+            self._scaling_factor = previous_scale
         return solution
+
+    def _unbounded_past_open_bound(self, model: LXModel, solver: Any, status: int,
+                                   time_limit: Optional[float]) -> bool:
+        """An open variable on the ±open-bound cap of an optimal solve: solve again with
+        half the cap. An objective that moves with the cap has no finite optimum."""
+        if status != cp_model.OPTIMAL or not self._has_objective or not any(
+                abs(solver.Value(self._handles[p])) >= b for p, b in self._open.items()):
+            return False
+        full = solver.ObjectiveValue()
+        probe = cp_model.CpSolver()
+        if time_limit is not None:
+            probe.parameters.max_time_in_seconds = time_limit
+        self._open_divisor = 2
+        try:
+            if probe.Solve(self.build_model(model)) != cp_model.OPTIMAL:
+                return False
+            moved = abs(probe.ObjectiveValue() - full) > 1e-9 * max(1.0, abs(full))
+        finally:
+            self._open_divisor = 1
+            self.build_model(model)          # leave the full model as the built one
+        if moved:
+            self.logger.logger.warning(
+                "CP-SAT: the objective improves with the open-bound cap; the model is "
+                "unbounded")
+        return moved
 
     def get_solver_model(self) -> cp_model.CpModel:
         """
@@ -479,7 +521,8 @@ class LXCPSATSolver(LXSolverInterface):
                 self.logger.logger.warning(
                     f"CP-SAT: no solution satisfies the equalities on continuous variables "
                     f"exactly on the 1/{self._scaling_factor} grid; they hold within {worst:.3g} "
-                    "(increase scaling_factor for a finer grid, or use a linear solver)")
+                    "(pass a larger scaling_factor to solve() or use_solver('cpsat', scaling_factor=...), "
+                    "or use a linear solver)")
         # CP-SAT doesn't provide sensitivity analysis
         # TODO: Could compute reduced costs for feasibility/bound analysis
         shadow_prices: Dict[str, float] = {}

@@ -343,7 +343,9 @@ def test_cpsat_open_bound_reached_is_not_reported_optimal(caplog):
     m.maximize(LXLinearExpression().add_term(x, 1.0))
     with caplog.at_level(logging.WARNING):
         s = LXOptimizer().use_solver("cpsat").solve(m)
-    assert s.status == "feasible"
+    # 0.3.2: the probe with half the cap moves the objective, so this unbounded model
+    # is reported unbounded (it was "feasible" before).
+    assert s.status == "unbounded"
     assert "open bound" in caplog.text
 
 
